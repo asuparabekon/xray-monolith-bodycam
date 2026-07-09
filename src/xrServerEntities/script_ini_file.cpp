@@ -248,7 +248,12 @@ void CScriptIniFile::set_readonly(bool b)
 
 void CScriptIniFile::close()
 {
-	inherited::Destroy(this);
+	if (!inherited::m_flags.test(eReadOnly) && inherited::m_flags.test(eSaveAtEnd))
+	{
+		if (!inherited::save_as())
+			Log("!Can't save inifile:", inherited::fname());
+		inherited::save_at_end(FALSE);
+	}
 }
 
 u32 CScriptIniFile::section_count()

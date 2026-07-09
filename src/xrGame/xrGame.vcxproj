@@ -563,6 +563,11 @@
     <ClInclude Include="action_script_base_inline.h" />
     <ClInclude Include="ActivatingCharCollisionDelay.h" />
     <ClInclude Include="Actor.h" />
+    <ClInclude Include="bodycam_camera.h" />
+    <ClInclude Include="bodycam_math.h" />
+    <ClInclude Include="bodycam_movement_response.h" />
+    <ClInclude Include="bodycam_settings.h" />
+    <ClInclude Include="bodycam_simulation.h" />
     <ClInclude Include="ActorAnimation.h" />
     <ClInclude Include="ActorBackpack.h" />
     <ClInclude Include="ActorCondition.h" />
@@ -2269,6 +2274,17 @@
     <ClCompile Include="ActorAnimation.cpp" />
     <ClCompile Include="ActorBackpack.cpp" />
     <ClCompile Include="ActorCameras.cpp" />
+    <ClCompile Include="bodycam_camera.cpp" />
+    <ClCompile Include="bodycam_console.cpp" />
+    <ClCompile Include="bodycam_math.cpp" />
+    <ClCompile Include="bodycam_movement_response.cpp" />
+    <ClCompile Include="bodycam_settings.cpp" />
+    <ClCompile Include="bodycam_simulation.cpp">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="bodycam_script.cpp">
+      <PrecompiledHeaderFile>pch_script.h</PrecompiledHeaderFile>
+    </ClCompile>
     <ClCompile Include="ActorCondition.cpp">
       <PrecompiledHeaderFile>pch_script.h</PrecompiledHeaderFile>
       <PrecompiledHeaderOutputFile>$(IntDir)$(ProjectName)_script.pch</PrecompiledHeaderOutputFile>

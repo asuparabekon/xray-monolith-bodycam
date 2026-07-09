@@ -533,7 +533,7 @@ BOOL r_blood_decals_on_objects = FALSE;
 int opt_static = 2;
 int opt_dynamic = 2;
 
-int ps_pfx_volumetric_mode = 0;
+int ps_pfx_volumetric_mode = 1;
 int ps_r__portal_traverse_stats = 0;
 
 float r_rain_exp = 1.f;

@@ -78,16 +78,8 @@ bool r_line(CScriptIniFile* self, LPCSTR S, int L, ::luabind::internal_string&N,
 #pragma warning(disable:4238)
 CScriptIniFile* create_ini_file(LPCSTR ini_string)
 {
-	return (
-		(CScriptIniFile*)
-		xr_new<CInifile>(
-			&IReader(
-				(void*)ini_string,
-				xr_strlen(ini_string)
-			),
-			FS.get_path("$game_config$")->m_Path
-		)
-	);
+	IReader reader((void*)ini_string, xr_strlen(ini_string));
+	return luabind_new<CScriptIniFile>(&reader, FS.get_path("$game_config$")->m_Path);
 }
 #pragma warning(pop)
 

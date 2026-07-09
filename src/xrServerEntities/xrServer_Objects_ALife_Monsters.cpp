@@ -329,9 +329,16 @@ shared_str CSE_ALifeTraderAbstract::specific_character()
 	if (m_SpecificCharacter.size())
 		return m_SpecificCharacter;
 
+	const shared_str profile = character_profile();
+	if (!profile.size() || !CCharacterInfo::GetById(profile, true))
+	{
+		Msg("! CSE_ALifeTraderAbstract::specific_character: invalid character_profile [%s], keeping stored rank/reputation",
+			profile.size() ? profile.c_str() : "");
+		return m_SpecificCharacter;
+	}
 
 	CCharacterInfo char_info;
-	char_info.Load(character_profile());
+	char_info.Load(profile);
 
 
 	//профиль задан индексом
@@ -420,6 +427,12 @@ shared_str CSE_ALifeTraderAbstract::specific_character()
 void CSE_ALifeTraderAbstract::set_specific_character(shared_str new_spec_char)
 {
 	R_ASSERT(new_spec_char.size());
+	if (!CSpecificCharacter::GetById(new_spec_char, true))
+	{
+		Msg("! CSE_ALifeTraderAbstract::set_specific_character: invalid specific_character [%s] for object [%s] id [%u]",
+			new_spec_char.c_str(), base()->name_replace(), base()->ID);
+		return;
+	}
 
 #ifdef XRGAME_EXPORTS
 	//убрать предыдущий номер из реестра
@@ -571,7 +584,8 @@ CHARACTER_RANK_VALUE CSE_ALifeTraderAbstract::Rank()
 
 void CSE_ALifeTraderAbstract::SetRank(CHARACTER_RANK_VALUE val)
 {
-	specific_character();
+	if (character_profile().size())
+		specific_character();
 	m_rank = val;
 }
 

@@ -16,6 +16,8 @@
 #include "actoreffector.h"
 #include "static_cast_checked.hpp"
 #include "player_hud.h"
+#include "bodycam_movement_response.h"
+#include "bodycam_settings.h"
 
 #ifdef DEBUG
 #include "phdebug.h"
@@ -27,11 +29,46 @@ static const float s_fJumpTime = 0.3f;
 static const float s_fJumpGroundTime = 0.1f; // для снятия флажка Jump если на земле
 const float s_fFallTime = 0.2f;
 
+namespace
+{
+constexpr u8 kBodycamBrakeStepCount = 2;
+constexpr float kBodycamFirstBrakeStepDelay = 0.10f;
+constexpr float kBodycamBrakeStepSpacing = 0.20f;
+constexpr float kBodycamBrakeStepPower = 0.85f;
+}
+
 IC static void generate_orthonormal_basis1(const Fvector& dir, Fvector& updir, Fvector& right)
 {
 	right.crossproduct(dir, updir); //. <->
 	right.normalize();
 	updir.crossproduct(right, dir);
+}
+
+void CActor::BodycamScheduleBrakeSteps()
+{
+	m_bodycam_brake_steps_pending = kBodycamBrakeStepCount;
+	m_bodycam_brake_step_timer = kBodycamFirstBrakeStepDelay;
+}
+
+void CActor::BodycamUpdateBrakeSteps(float dt)
+{
+	if (!m_bodycam_brake_steps_pending)
+		return;
+
+	if (!Local() || !g_Alive() || !is_on_ground() || (mstate_real & mcSprint))
+	{
+		m_bodycam_brake_steps_pending = 0;
+		m_bodycam_brake_step_timer = 0.f;
+		return;
+	}
+
+	m_bodycam_brake_step_timer -= dt;
+	if (m_bodycam_brake_step_timer > 0.f)
+		return;
+
+	CStepManager::play_forced_step(kBodycamBrakeStepPower, this == Level().CurrentViewEntity());
+	--m_bodycam_brake_steps_pending;
+	m_bodycam_brake_step_timer = kBodycamBrakeStepSpacing;
 }
 
 
@@ -314,6 +351,37 @@ void CActor::g_cl_CheckControls(u32 mstate_wf, Fvector& vControlAccel, float& Ju
 			} //scale>EPS
 		} //(mstate_real&mcAnyMove)
 	} //peOnGround || peAtWall
+
+	if (Local() && g_Alive())
+	{
+		Bodycam::MovementResponseInput response_input;
+		response_input.dt = dt;
+		response_input.move_flags = mstate_real;
+		response_input.ads = IsZoomAimingMode();
+		response_input.target_accel.set(vControlAccel);
+
+		const Bodycam::MovementResponseOutput response = Bodycam::UpdateMovementResponse(Bodycam::GetConfig().movement, m_bodycam_movement_response, response_input);
+		vControlAccel.set(response.accel);
+		cam_eff_factor = vControlAccel.magnitude();
+		m_bodycam.SetMovementDebug(response.target_speed, response.actual_speed, response.speed_fraction);
+		const bool sprint_anim_was_ready = m_bodycam_sprint_anim_ready;
+		const Bodycam::RuntimeConfig& bodycam_config = Bodycam::GetConfig();
+		const bool sprint_anim_gate = bodycam_config.movement.enable && !IsZoomAimingMode() && !!(mstate_real & mcSprint);
+		m_bodycam_sprint_anim_ready = !sprint_anim_gate || response.speed_fraction >= Bodycam::ClampSprintBridgeHandoffSpeed(bodycam_config.sprint.bridge_handoff_speed);
+		if (sprint_anim_gate && !sprint_anim_was_ready && m_bodycam_sprint_anim_ready && g_player_hud)
+			g_player_hud->OnMovementChanged(mcSprint);
+		if ((mstate_old & mcSprint) && !(mstate_real & mcSprint) && response.actual_speed > 0.25f)
+			BodycamScheduleBrakeSteps();
+		BodycamUpdateBrakeSteps(dt);
+	}
+	else
+	{
+		Bodycam::ResetMovementResponse(m_bodycam_movement_response);
+		m_bodycam.SetMovementDebug(0.f, 0.f, 0.f);
+		m_bodycam_sprint_anim_ready = true;
+		m_bodycam_brake_steps_pending = 0;
+		m_bodycam_brake_step_timer = 0.f;
+	}
 
 	if (IsGameTypeSingle() && cam_eff_factor > EPS)
 	{

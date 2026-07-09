@@ -125,6 +125,8 @@ class ENGINE_API CCameraManager
 {
 protected:
 	SCamEffectorInfo m_cam_info;
+	SCamEffectorInfo m_base_cam_info;
+	bool m_base_cam_info_valid;
 
 	BENCH_SEC_SCRAMBLEMEMBER1
 
@@ -171,11 +173,19 @@ public:
 	IC Fvector Right() const { return m_cam_info.r; }
 	IC float Fov() const { return m_cam_info.fFov; }
 	IC float Aspect() const { return m_cam_info.fAspect; }
+	IC Fvector BasePosition() const { return m_base_cam_info_valid ? m_base_cam_info.p : m_cam_info.p; }
+	IC Fvector BaseDirection() const { return m_base_cam_info_valid ? m_base_cam_info.d : m_cam_info.d; }
+	IC Fvector BaseUp() const { return m_base_cam_info_valid ? m_base_cam_info.n : m_cam_info.n; }
+	IC Fvector BaseRight() const { return m_base_cam_info_valid ? m_base_cam_info.r : m_cam_info.r; }
+	IC float BaseFov() const { return m_base_cam_info_valid ? m_base_cam_info.fFov : m_cam_info.fFov; }
+	IC float BaseAspect() const { return m_base_cam_info_valid ? m_base_cam_info.fAspect : m_cam_info.fAspect; }
 
 	IC void camera_Matrix(Fmatrix& M) { M.set(m_cam_info.r, m_cam_info.n, m_cam_info.d, m_cam_info.p); }
 	void Update(const Fvector& P, const Fvector& D, const Fvector& N, float fFOV_Dest, float fASPECT_Dest,
 	            float fFAR_Dest, u32 flags);
 	void UpdateFromCamera(const CCameraBase* C);
+	void ApplyDeviceOverride(const Fvector& P, const Fvector& D, const Fvector& N, float fFOV, float fASPECT, float fFAR,
+	                         float _viewport_near);
 
 	void ApplyDevice(float _viewport_near);
 	static void ResetPP();

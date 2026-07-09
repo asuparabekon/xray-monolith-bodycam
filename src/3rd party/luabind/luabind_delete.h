@@ -9,10 +9,24 @@
 #pragma once
 
 #include <type_traits>
+#include <typeinfo>
 
 
 namespace luabind 
 {
+	using delete_hook_type = bool(*)(void* pointer, const char* type_name, bool is_ui_window);
+
+	inline delete_hook_type& delete_hook()
+	{
+		static delete_hook_type hook = nullptr;
+		return hook;
+	}
+
+	inline void set_delete_hook(delete_hook_type hook)
+	{
+		delete_hook() = hook;
+	}
+
 	template <typename T>
 	inline void delete_helper2		(T *&pointer, void *top_pointer)
 	{
@@ -42,6 +56,12 @@ namespace luabind
 	{
 		if (pointer)
 		{
+			if (delete_hook() && delete_hook()(pointer, typeid(T).name(), false))
+			{
+				pointer = nullptr;
+				return;
+			}
+
 			delete_helper<T, std::is_polymorphic_v<T>>::apply(pointer);
 		}
 	};

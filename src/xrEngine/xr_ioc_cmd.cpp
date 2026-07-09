@@ -12,7 +12,6 @@
 #include "CustomHUD.h"
 
 #include "../Include/xrRender/RenderDeviceRender.h"
-
 #include "xr_object.h"
 #include "MonitorList.h"
 

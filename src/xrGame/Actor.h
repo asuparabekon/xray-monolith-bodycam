@@ -20,6 +20,8 @@
 #include "script_export_space.h"
 
 #include "player_hud_legs.h"
+#include "bodycam_camera.h"
+#include "bodycam_movement_response.h"
 
 #ifdef STATIONARYMGUN_NEW
 #include "WeaponStatMgun.h"
@@ -355,6 +357,10 @@ public:
 	}
 
 	IC CCameraBase* cam_Active() { return cameras[cam_active]; }
+	void cam_BodycamDumpState();
+	void cam_BodycamAddImpulse(LPCSTR kind, float power);
+	bool cam_BodycamGetHudOffset(Fvector& pos, Fvector& rot) const;
+	bool cam_BodycamSprintAnimReady() const;
 	IC CCameraBase* cam_FirstEye() { return cameras[eacFirstEye]; }
 	//Swartz: actor shadow
 	IC EActorCameras active_cam() { return cam_active; } //KD: need to know which cam active outside actor methods
@@ -370,6 +376,9 @@ protected:
 	//virtual	void			cam_Set					(EActorCameras style);
 	void cam_Update(float dt, float fFOV);
 	void cam_Lookout(const Fmatrix& xform, float camera_height);
+	void cam_BodycamVisualReset(const CCameraBase* C);
+	bool cam_BodycamVisualApply(const CCameraBase* C, float dt, float viewport_near);
+	void cam_BodycamAddFireImpulse(float power);
 	void camUpdateLadder(float dt);
 	void cam_SetLadder();
 	void cam_UnsetLadder();
@@ -386,6 +395,7 @@ protected:
 	float current_ik_cam_shift;
 	Fvector vPrevCamDir;
 	float fCurAVelocity;
+	Bodycam::CBodycam m_bodycam;
 	CEffectorBobbing* pCamBobbing;
 
 
@@ -494,6 +504,12 @@ public:
 
 	// demonized: lookout modifier
 	float m_fLookoutFactor = 1;
+	Bodycam::MovementResponseState m_bodycam_movement_response;
+	bool m_bodycam_sprint_anim_ready = true;
+	u8 m_bodycam_brake_steps_pending = 0;
+	float m_bodycam_brake_step_timer = 0.f;
+	void BodycamScheduleBrakeSteps();
+	void BodycamUpdateBrakeSteps(float dt);
 
 public:
 	Fvector GetMovementSpeed() { return NET_SavedAccel; };

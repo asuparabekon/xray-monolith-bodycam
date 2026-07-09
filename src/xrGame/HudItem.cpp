@@ -841,7 +841,7 @@ bool CHudItem::TryPlayAnimIdle()
 
 			CEntity::SEntityState st;
 			pActor->g_State(st);
-			if (st.bSprint)
+			if (st.bSprint && pActor->cam_BodycamSprintAnimReady())
 			{
 				PlayAnimIdleSprint();
 				return true;

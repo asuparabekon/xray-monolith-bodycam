@@ -43,6 +43,7 @@ public:
 	void on_animation_start(MotionID motion_id, CBlend* blend);
 	// call on updateCL
 	void update(bool b_hud_view);
+	void play_forced_step(float power, bool b_hud_view);
 
 	// process event
 	virtual void event_on_step()

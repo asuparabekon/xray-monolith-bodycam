@@ -289,6 +289,7 @@ void CActor::on_weapon_shot_start(CWeapon* weapon)
 	effector->SetRndSeed(GetShotRndSeed());
 	effector->SetActor(this);
 	effector->Shot(weapon);
+	cam_BodycamAddFireImpulse(1.f);
 }
 
 void CActor::on_weapon_shot_update()

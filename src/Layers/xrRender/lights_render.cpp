@@ -255,9 +255,7 @@ void CRender::render_lights(light_Package& LP)
 							Target->set_viewport_size(HW.pContext, w / RImplementation.o.volsize, h / RImplementation.o.volsize);
 #endif
 
-						if (ps_pfx_volumetric_mode == 1)
-							Target->accum_volumetric_lv(L);
-						else
+						if (ps_pfx_volumetric_mode != 1 || !Target->accum_volumetric_lv(L))
 							Target->accum_volumetric(L);
 
 #ifdef USE_DX11

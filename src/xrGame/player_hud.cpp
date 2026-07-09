@@ -1074,6 +1074,7 @@ const Fvector player_hud::attach_pos(u8 part) const
 }
 
 #include "Inventory.h"
+#include "bodycam_camera.h"
 extern float g_freelook_z_offset;
 extern float psHUD_FOV;
 
@@ -1194,6 +1195,15 @@ void player_hud::update(const Fmatrix& cam_trans)
 			trans_b.inertion(trans_2, script_anim_offset_factor);
 			trans_2 = trans_b;
 		}
+	}
+
+	Fvector bodycam_hud_pos, bodycam_hud_rot;
+	if (Actor()->cam_BodycamGetHudOffset(bodycam_hud_pos, bodycam_hud_rot) && script_anim_part != 2)
+	{
+		m1pos.add(bodycam_hud_pos);
+		m2pos.add(bodycam_hud_pos);
+		m1rot.add(bodycam_hud_rot);
+		m2rot.add(bodycam_hud_rot);
 	}
 
 	m1rot.mul(PI / 180.f);

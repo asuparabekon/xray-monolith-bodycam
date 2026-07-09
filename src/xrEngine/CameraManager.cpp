@@ -150,6 +150,7 @@ CCameraManager::CCameraManager(bool bApplyOnUpdate)
 #endif
 
 	m_bAutoApply = bApplyOnUpdate;
+	m_base_cam_info_valid = false;
 
 	pp_identity.blur = 0;
 	pp_identity.gray = 0;
@@ -343,6 +344,23 @@ void CCameraManager::UpdateFromCamera(const CCameraBase* C)
 	       g_pGamePersistent->Environment().CurrentEnv->far_plane, C->m_Flags.flags);
 }
 
+void CCameraManager::ApplyDeviceOverride(const Fvector& P, const Fvector& D, const Fvector& N, float fFOV, float fASPECT,
+                                         float fFAR, float _viewport_near)
+{
+	m_cam_info.p.set(P);
+	m_cam_info.d.set(D);
+	m_cam_info.n.set(N);
+	m_cam_info.d.normalize();
+	m_cam_info.n.normalize();
+	m_cam_info.r.crossproduct(m_cam_info.n, m_cam_info.d);
+	m_cam_info.n.crossproduct(m_cam_info.d, m_cam_info.r);
+	m_cam_info.fFov = fFOV;
+	m_cam_info.fAspect = fASPECT;
+	m_cam_info.fFar = fFAR;
+	m_cam_info.dont_apply = false;
+	ApplyDevice(_viewport_near);
+}
+
 void CCameraManager::Update(const Fvector& P, const Fvector& D, const Fvector& N, float fFOV_Dest, float fASPECT_Dest,
                             float fFAR_Dest, u32 flags)
 {
@@ -353,6 +371,9 @@ void CCameraManager::Update(const Fvector& P, const Fvector& D, const Fvector& N
         dbg_upd_frame = Device.dwFrame;
     }
 #endif // DEBUG
+	if (m_base_cam_info_valid)
+		m_cam_info = m_base_cam_info;
+
 	// camera
 	if (flags & CCameraBase::flPositionRigid)
 		m_cam_info.p.set(P);
@@ -387,6 +408,9 @@ void CCameraManager::Update(const Fvector& P, const Fvector& D, const Fvector& N
 	UpdateCamEffectors();
 
 	UpdatePPEffectors();
+
+	m_base_cam_info = m_cam_info;
+	m_base_cam_info_valid = true;
 
 	if (false == m_cam_info.dont_apply && m_bAutoApply)
 		ApplyDevice(VIEWPORT_NEAR);

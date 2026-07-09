@@ -1,11 +1,25 @@
-[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/themrdemonized/xray-monolith)
+# X-Ray Monolith Bodycam MT
 
-# STALKER-Anomaly-modded-exes
+This fork is a Bodycam-focused build of the S.T.A.L.K.E.R. Anomaly / GAMMA modded executable.
 
-Here is list of exe files for Anomaly 1.5.3 that contains all engine patches by community required for some advanced mods to work.
+## Bodycam MT Version
 
-# Versions
-The Modded Exes come with standard and MT versions (currently in test phase designated as MT-TEST).
+This version keeps the upstream MT test build as the base and adds an engine-level Bodycam module with:
+
+* camera decoupling with separate hip-fire and ADS response
+* viewmodel spring and ADS sight anchoring
+* movement inertia for acceleration, deceleration, turning, and stopping
+* dynamic viewmodel lowering for walk states
+* procedural sprint transition before the weapon sprint animation takes over
+* sprint start/stop camera, FOV, and impulse feedback
+* delayed sprint brake footsteps
+* firing, ADS transition, landing, and mouse-flick impulses
+* Peak Volumetrics shader support integrated into the DX11 renderer path
+* console variables, Modded Exes settings integration, and Lua access for Bodycam settings/state
+
+## Upstream MT Version
+
+The Modded Exes come with standard and MT versions. This fork is based on the MT test branch.
 
 MT is a version with numerous performance improvements to the engine adapted from [IX-Ray](https://github.com/ixray-team/ixray-1.6-stcop) and [OpenXRay](https://github.com/OpenXRay/xray-16).
 

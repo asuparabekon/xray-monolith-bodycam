@@ -267,6 +267,10 @@ public:
 	IC bool IsAutoDelete() { return m_bAutoDelete; }
 	IC void SetAutoDelete(bool auto_delete) { m_bAutoDelete = auto_delete; }
 
+	static void RegisterLuaDeleteGuard();
+	static bool LuaDeleteGuard(void* pointer, const char* lua_class_name, bool is_ui_window);
+	static bool IsLiveLuaWindow(CUIWindow* window);
+
 	// Name of the window
 	const shared_str WindowName() const { return m_windowName; }
 	void SetWindowName(LPCSTR wn) { m_windowName = wn; }

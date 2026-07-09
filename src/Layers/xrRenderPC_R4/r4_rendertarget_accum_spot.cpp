@@ -274,11 +274,66 @@ void CRenderTarget::accum_spot(light* L)
 	u_DBT_disable();
 }
 
-void CRenderTarget::accum_volumetric_lv(light* L)
+bool CRenderTarget::accum_volumetric_lv(light* L)
 {
-	//LV: Point lights will be fixed later... I hope
+	static bool logged_attempt = false;
+	static bool logged_success = false;
+	static bool logged_skip = false;
+
+	auto skip_peak = [&](LPCSTR reason) -> bool {
+		if (!logged_skip)
+		{
+			logged_skip = true;
+			Msg("[PeakVolumetrics] fallback reason=%s light=%p type=%d range=%.3f cone=%.3f vol=%.3f dist=%.3f smap={x:%d y:%d size:%d} rt=%p shader=%p elem=%p",
+			    reason,
+			    L,
+			    L ? int(L->flags.type) : -1,
+			    L ? L->range : 0.0f,
+			    L ? L->cone : 0.0f,
+			    L ? L->m_volumetric_intensity : 0.0f,
+			    L ? L->m_volumetric_distance : 0.0f,
+			    L ? int(L->X.S.posX) : -1,
+			    L ? int(L->X.S.posY) : -1,
+			    L ? int(L->X.S.size) : -1,
+			    rt_ssfx_volumetric ? rt_ssfx_volumetric->pRT : nullptr,
+			    s_combine._get(),
+			    s_combine ? s_combine->E[5]._get() : nullptr);
+		}
+		return false;
+	};
+
+	if (!logged_attempt)
+	{
+		logged_attempt = true;
+		Msg("[PeakVolumetrics] first attempt volsize=%u ssfx_vol=%u device=%ux%u smap=%u",
+		    RImplementation.o.volsize,
+		    RImplementation.o.ssfx_volumetric,
+		    Device.dwWidth,
+		    Device.dwHeight,
+		    RImplementation.o.smapsize);
+	}
+
+	// Peak's shader is a spotlight shadow-map raymarch. Point/omni lights still use the SSS path.
 	if (L == nullptr)
-		return;
+		return skip_peak("null_light");
+
+	if (L->flags.type != IRender_Light::SPOT)
+		return skip_peak("unsupported_light_type");
+
+	if (Device.dwWidth == 0 || Device.dwHeight == 0 || RImplementation.o.smapsize == 0)
+		return skip_peak("invalid_render_dimensions");
+
+	if (L->range <= 0.0f || L->cone <= 0.0f || L->m_volumetric_distance <= 0.0f)
+		return skip_peak("invalid_light_params");
+
+	if (L->X.S.size <= 2 || L->X.S.posX < 0 || L->X.S.posY < 0 || L->X.S.posX + L->X.S.size > int(RImplementation.o.smapsize) || L->X.S.posY + L->X.S.size > int(RImplementation.o.smapsize))
+		return skip_peak("invalid_shadow_region");
+
+	if (!s_combine || !s_combine->E[5])
+		return skip_peak("missing_peak_shader_element");
+
+	if (RImplementation.o.ssfx_volumetric && (!rt_ssfx_volumetric || !rt_ssfx_volumetric->pRT))
+		return skip_peak("missing_volumetric_target");
 
 	// [ SSS ] Fade through distance volumetric lights.
 	if (ps_ssfx_volumetric.x > 0)
@@ -289,7 +344,7 @@ void CRenderTarget::accum_volumetric_lv(light* L)
 	}
 
 	if (!L->flags.bVolumetric)
-		return;
+		return true;
 
 	if (!RImplementation.o.ssfx_volumetric)
 	{
@@ -363,6 +418,9 @@ void CRenderTarget::accum_volumetric_lv(light* L)
 
 	//Attenuation
 	float att_R = L->m_volumetric_distance * L->range * .95f;
+	if (att_R <= 0.0f)
+		return skip_peak("invalid_attenuation");
+
 	float att_factor = 1.f / (att_R * att_R);
 
 	//Set the shader
@@ -380,6 +438,22 @@ void CRenderTarget::accum_volumetric_lv(light* L)
 
 	//Render, no IB/VB - geometry in VS
 	draw_volume(L);
+
+	if (!logged_success)
+	{
+		logged_success = true;
+		Msg("[PeakVolumetrics] first successful render light=%p range=%.3f cone=%.3f vol=%.3f dist=%.3f smap={x:%d y:%d size:%d}",
+		    L,
+		    L->range,
+		    L->cone,
+		    L->m_volumetric_intensity,
+		    L->m_volumetric_distance,
+		    int(L->X.S.posX),
+		    int(L->X.S.posY),
+		    int(L->X.S.size));
+	}
+
+	return true;
 }
 
 void CRenderTarget::accum_volumetric(light* L)

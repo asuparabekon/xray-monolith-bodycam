@@ -7,12 +7,46 @@
 #include "../Include/xrRender/UIRender.h"
 #include "../UIGameCustom.h"
 #include "../ui/UIDialogWnd.h"
+#include <luabind/luabind_delete.h>
 //#include "UIHelper.h"
 //#include "UIHint.h"
 //#include "../ScriptXMLInit.h"
 
 
 poolSS<_12b, 128> ui_allocator;
+
+static xrCriticalSection g_lua_ui_live_cs;
+static xr_unordered_set<CUIWindow*> g_lua_ui_live_windows;
+
+void CUIWindow::RegisterLuaDeleteGuard()
+{
+	luabind::set_delete_hook(&CUIWindow::LuaDeleteGuard);
+}
+
+bool CUIWindow::IsLiveLuaWindow(CUIWindow* window)
+{
+	if (!window)
+		return false;
+
+	xrCriticalSectionGuard guard(g_lua_ui_live_cs);
+	return g_lua_ui_live_windows.find(window) != g_lua_ui_live_windows.end();
+}
+
+bool CUIWindow::LuaDeleteGuard(void* pointer, const char* lua_class_name, bool is_ui_window)
+{
+	if (!pointer || !is_ui_window)
+		return false;
+
+	CUIWindow* window = static_cast<CUIWindow*>(pointer);
+	if (IsLiveLuaWindow(window))
+	{
+		xr_delete(window);
+		return true;
+	}
+
+	Msg("! luabind: skipped stale UI delete for [%s] at [%p]", lua_class_name ? lua_class_name : "<unknown>", pointer);
+	return true;
+}
 
 // #define LOG_ALL_WNDS
 #ifdef LOG_ALL_WNDS
@@ -120,6 +154,11 @@ CUIWindow::CUIWindow()
 	  //m_sHint(""),
 	  m_bCustomDraw(false)
 {
+	{
+		xrCriticalSectionGuard guard(g_lua_ui_live_cs);
+		g_lua_ui_live_windows.insert(this);
+	}
+
 	Show(true);
 	Enable(true);
 #ifdef LOG_ALL_WNDS
@@ -133,6 +172,11 @@ CUIWindow::CUIWindow()
 
 CUIWindow::~CUIWindow()
 {
+	{
+		xrCriticalSectionGuard guard(g_lua_ui_live_cs);
+		g_lua_ui_live_windows.erase(this);
+	}
+
 	VERIFY(!(GetParent()&&IsAutoDelete()));
 
 	//if (m_pHint)
