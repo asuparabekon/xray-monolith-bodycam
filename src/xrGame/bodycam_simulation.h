@@ -40,7 +40,7 @@ struct SimulationFeatureSettings
 	bool camera_enable = true;
 	bool vm_enable = true;
 	bool lower_enable = true;
-	bool impulse_debug = true;
+	bool impulse_debug = false;
 	bool lower_disable_in_combat = true;
 	float layer_vm_weight = 1.f;
 	float layer_lower_weight = 1.f;
