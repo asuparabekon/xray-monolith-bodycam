@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="windows-1251"?>
+<string_table>
+    <string id="ui_mm_menu_bodycam"><text>Bodycam</text></string>
+    <string id="ui_mm_bodycam_modded_exes"><text>Bodycam</text></string>
+    <string id="ui_mm_modded_exes_gameplay_bodycam"><text>Bodycam</text></string>
+    <string id="ui_mm_modded_exes_gameplay_bodycam_bodycam"><text>Bodycam</text></string>
+    <string id="ui_mcm_menu_bodycam"><text>Bodycam</text></string>
+    <string id="ui_mm_modded_exes_gameplay_bodycam_camera_decoupling_enable"><text>Camera Decoupling (bodycam_camera_decoupling_enable)</text></string>
+    <string id="ui_mm_modded_exes_gameplay_bodycam_vm_spring_enable"><text>Viewmodel Spring (bodycam_vm_spring_enable)</text></string>
+    <string id="ui_mm_modded_exes_gameplay_bodycam_vm_lowering_enable"><text>Viewmodel Lowering (bodycam_vm_lowering_enable)</text></string>
+    <string id="ui_mm_modded_exes_gameplay_bodycam_movement_inertia_enable"><text>Movement Inertia (bodycam_movement_inertia_enable)</text></string>
+    <string id="ui_mm_modded_exes_gameplay_bodycam_movement_inertia_disable_ads"><text>Disable Movement Inertia While ADS (bodycam_movement_inertia_disable_ads)</text></string>
+    <string id="ui_mm_modded_exes_gameplay_bodycam_hip_camera_deadzone_yaw"><text>Hip Camera Deadzone Yaw (bodycam_hip_camera_deadzone_yaw)</text></string>
+    <string id="ui_mm_modded_exes_gameplay_bodycam_hip_camera_deadzone_pitch"><text>Hip Camera Deadzone Pitch (bodycam_hip_camera_deadzone_pitch)</text></string>
+    <string id="ui_mm_modded_exes_gameplay_bodycam_hip_camera_follow_speed"><text>Hip Camera Follow Speed (bodycam_hip_camera_follow_speed)</text></string>
+    <string id="ui_mm_modded_exes_gameplay_bodycam_hip_camera_max_yaw_offset"><text>Hip Camera Max Yaw Offset (bodycam_hip_camera_max_yaw_offset)</text></string>
+    <string id="ui_mm_modded_exes_gameplay_bodycam_hip_camera_max_pitch_offset"><text>Hip Camera Max Pitch Offset (bodycam_hip_camera_max_pitch_offset)</text></string>
+    <string id="ui_mm_modded_exes_gameplay_bodycam_hip_camera_roll_scale"><text>Hip Camera Roll Scale (bodycam_hip_camera_roll_scale)</text></string>
+    <string id="ui_mm_modded_exes_gameplay_bodycam_vm_mouse_position_scale"><text>Viewmodel Mouse Position Scale (bodycam_vm_mouse_position_scale)</text></string>
+    <string id="ui_mm_modded_exes_gameplay_bodycam_vm_mouse_rotation_scale"><text>Viewmodel Mouse Rotation Scale (bodycam_vm_mouse_rotation_scale)</text></string>
+    <string id="ui_mm_modded_exes_gameplay_bodycam_vm_spring_speed"><text>Viewmodel Spring Speed (bodycam_vm_spring_speed)</text></string>
+    <string id="ui_mm_modded_exes_gameplay_bodycam_movement_acceleration_time"><text>Movement Acceleration Time (bodycam_movement_acceleration_time)</text></string>
+    <string id="ui_mm_modded_exes_gameplay_bodycam_movement_deceleration_time"><text>Movement Deceleration Time (bodycam_movement_deceleration_time)</text></string>
+    <string id="ui_mm_modded_exes_gameplay_bodycam_movement_turn_response"><text>Movement Turn Response (bodycam_movement_turn_response)</text></string>
+    <string id="ui_mm_modded_exes_gameplay_bodycam_movement_stop_response"><text>Movement Stop Response (bodycam_movement_stop_response)</text></string>
+    <string id="ui_mm_modded_exes_gameplay_bodycam_movement_sprint_speed_scale"><text>Movement Sprint Speed Scale (bodycam_movement_sprint_speed_scale)</text></string>
+    <string id="ui_mm_modded_exes_gameplay_bodycam_vm_lowering_pitch"><text>Viewmodel Lowering Pitch (bodycam_vm_lowering_pitch)</text></string>
+    <string id="ui_mm_modded_exes_gameplay_bodycam_vm_lowering_yaw"><text>Viewmodel Lowering Yaw (bodycam_vm_lowering_yaw)</text></string>
+    <string id="ui_mm_modded_exes_gameplay_bodycam_vm_lowering_roll"><text>Viewmodel Lowering Roll (bodycam_vm_lowering_roll)</text></string>
+    <string id="ui_mm_modded_exes_gameplay_bodycam_vm_lowering_x"><text>Viewmodel Lowering X Position (bodycam_vm_lowering_x)</text></string>
+    <string id="ui_mm_modded_exes_gameplay_bodycam_vm_lowering_y"><text>Viewmodel Lowering Y Position (bodycam_vm_lowering_y)</text></string>
+    <string id="ui_mm_modded_exes_gameplay_bodycam_vm_lowering_z"><text>Viewmodel Lowering Z Position (bodycam_vm_lowering_z)</text></string>
+    <string id="ui_mm_modded_exes_gameplay_bodycam_vm_lowering_slow_walk_influence"><text>Viewmodel Lowering Slow Walk Influence (bodycam_vm_lowering_slow_walk_influence)</text></string>
+    <string id="ui_mm_modded_exes_gameplay_bodycam_vm_lowering_walk_influence"><text>Viewmodel Lowering Walk Influence (bodycam_vm_lowering_walk_influence)</text></string>
+    <string id="ui_mm_modded_exes_gameplay_bodycam_vm_lowering_movement_influence"><text>Viewmodel Lowering Movement Influence (bodycam_vm_lowering_movement_influence)</text></string>
+    <string id="ui_mm_modded_exes_gameplay_bodycam_vm_lowering_enter_speed"><text>Viewmodel Lowering Enter Speed (bodycam_vm_lowering_enter_speed)</text></string>
+    <string id="ui_mm_modded_exes_gameplay_bodycam_vm_lowering_return_speed"><text>Viewmodel Lowering Return Speed (bodycam_vm_lowering_return_speed)</text></string>
+    <string id="ui_mm_modded_exes_gameplay_bodycam_hip_fire_weapon_impulse"><text>Hip Fire Weapon Impulse (bodycam_hip_fire_weapon_impulse)</text></string>
+    <string id="ui_mm_modded_exes_gameplay_bodycam_ads_fire_weapon_impulse"><text>ADS Fire Weapon Impulse (bodycam_ads_fire_weapon_impulse)</text></string>
+    <string id="ui_mm_modded_exes_gameplay_bodycam_sprint_transition_vm_blend_scale"><text>Sprint Transition Viewmodel Blend Scale (bodycam_sprint_transition_vm_blend_scale)</text></string>
+    <string id="ui_mm_modded_exes_gameplay_bodycam_sprint_transition_blend_smoothing"><text>Sprint Transition Blend Smoothing (bodycam_sprint_transition_blend_smoothing)</text></string>
+    <string id="ui_mm_modded_exes_gameplay_bodycam_sprint_transition_start_stop_impulse_scale"><text>Sprint Transition Start/Stop Impulse Scale (bodycam_sprint_transition_start_stop_impulse_scale)</text></string>
+</string_table>
