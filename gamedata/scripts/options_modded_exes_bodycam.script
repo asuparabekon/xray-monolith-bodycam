@@ -1,0 +1,106 @@
+--- Bodycam options tree for Codex modded EXE builds.
+
+options_builder.import_into(this)
+
+local bodycam_path = "gameplay/bodycam"
+local bodycam_opt_prefix = "modded_exes/" .. bodycam_path .. "/"
+
+local function get_num(key, def)
+    if bodycam and bodycam.get_float then
+        return bodycam.get_float(key, def or 0)
+    end
+    return def or 0
+end
+
+local function get_bool(key, def)
+    if bodycam and bodycam.get_bool then
+        return bodycam.get_bool(key, def and true or false)
+    end
+    return def and true or false
+end
+
+local function set_num(key, id)
+    local value = ui_options.opt_temp[bodycam_opt_prefix .. id]
+    if value == nil or not (bodycam and bodycam.set_float) then
+        return
+    end
+    bodycam.set_float(key, tonumber(value) or 0)
+end
+
+local function set_bool(key, id)
+    local value = ui_options.opt_temp[bodycam_opt_prefix .. id]
+    if value == nil or not (bodycam and bodycam.set_bool) then
+        return
+    end
+    bodycam.set_bool(key, value and true or false)
+end
+
+local function bodycam_num(args)
+    args.curr = { get_num, args.key, args.def }
+    args.functor = { set_num, args.key, args.id }
+    args.prec = args.prec or 1
+    args.cmd = false
+    return track(args)
+end
+
+local function bodycam_bool(args)
+    args.curr = { get_bool, args.key, args.def }
+    args.functor = { set_bool, args.key, args.id }
+    args.cmd = false
+    return check(args)
+end
+
+local function label(id)
+    return "ui_mm_modded_exes_gameplay_bodycam_" .. id
+end
+
+PAGE = page {
+    { id = "bodycam" },
+
+    line {},
+    bodycam_bool { id = "camera_decoupling_enable", text = label("camera_decoupling_enable"), def = true, key = "camera_decoupling_enable" },
+    bodycam_bool { id = "vm_spring_enable", text = label("vm_spring_enable"), def = true, key = "vm_spring_enable" },
+    bodycam_bool { id = "vm_lowering_enable", text = label("vm_lowering_enable"), def = true, key = "vm_lowering_enable" },
+    bodycam_bool { id = "movement_inertia_enable", text = label("movement_inertia_enable"), def = true, key = "movement_inertia_enable" },
+    bodycam_bool { id = "movement_inertia_disable_ads", text = label("movement_inertia_disable_ads"), def = true, key = "movement_inertia_disable_ads" },
+
+    line {},
+    bodycam_num { id = "hip_camera_deadzone_yaw", text = label("hip_camera_deadzone_yaw"), def = 1.5, min = 0.0, max = 30.0, step = 0.1, key = "hip_camera_deadzone_yaw" },
+    bodycam_num { id = "hip_camera_deadzone_pitch", text = label("hip_camera_deadzone_pitch"), def = 1.0, min = 0.0, max = 30.0, step = 0.1, key = "hip_camera_deadzone_pitch" },
+    bodycam_num { id = "hip_camera_follow_speed", text = label("hip_camera_follow_speed"), def = 7.0, min = 0.1, max = 30.0, step = 0.1, key = "hip_camera_follow_speed" },
+    bodycam_num { id = "hip_camera_max_yaw_offset", text = label("hip_camera_max_yaw_offset"), def = 19.0, min = 0.0, max = 90.0, step = 0.1, key = "hip_camera_max_yaw_offset" },
+    bodycam_num { id = "hip_camera_max_pitch_offset", text = label("hip_camera_max_pitch_offset"), def = 19.0, min = 0.0, max = 90.0, step = 0.1, key = "hip_camera_max_pitch_offset" },
+    bodycam_num { id = "hip_camera_roll_scale", text = label("hip_camera_roll_scale"), def = 2.5, min = 0.0, max = 20.0, step = 0.1, key = "hip_camera_roll_scale" },
+
+    line {},
+    bodycam_num { id = "vm_mouse_position_scale", text = label("vm_mouse_position_scale"), def = 0.018, min = 0.0, max = 0.25, step = 0.1, key = "vm_mouse_position_scale" },
+    bodycam_num { id = "vm_mouse_rotation_scale", text = label("vm_mouse_rotation_scale"), def = 2.5, min = 0.0, max = 30.0, step = 0.1, key = "vm_mouse_rotation_scale" },
+    bodycam_num { id = "vm_spring_speed", text = label("vm_spring_speed"), def = 9.0, min = 0.1, max = 30.0, step = 0.1, key = "vm_spring_speed" },
+
+    line {},
+    bodycam_num { id = "movement_acceleration_time", text = label("movement_acceleration_time"), def = 0.28, min = 0.0, max = 2.0, step = 0.1, key = "movement_acceleration_time" },
+    bodycam_num { id = "movement_deceleration_time", text = label("movement_deceleration_time"), def = 0.38, min = 0.0, max = 2.0, step = 0.1, key = "movement_deceleration_time" },
+    bodycam_num { id = "movement_turn_response", text = label("movement_turn_response"), def = 0.55, min = 0.0, max = 1.0, step = 0.1, key = "movement_turn_response" },
+    bodycam_num { id = "movement_stop_response", text = label("movement_stop_response"), def = 0.45, min = 0.0, max = 2.0, step = 0.1, key = "movement_stop_response" },
+    bodycam_num { id = "movement_sprint_speed_scale", text = label("movement_sprint_speed_scale"), def = 1.0, min = 0.1, max = 3.0, step = 0.1, key = "movement_sprint_speed_scale" },
+
+    line {},
+    bodycam_num { id = "vm_lowering_pitch", text = label("vm_lowering_pitch"), def = 0.0, min = -45.0, max = 45.0, step = 0.1, key = "vm_lowering_pitch" },
+    bodycam_num { id = "vm_lowering_yaw", text = label("vm_lowering_yaw"), def = 0.0, min = -45.0, max = 45.0, step = 0.1, key = "vm_lowering_yaw" },
+    bodycam_num { id = "vm_lowering_roll", text = label("vm_lowering_roll"), def = 0.0, min = -45.0, max = 45.0, step = 0.1, key = "vm_lowering_roll" },
+    bodycam_num { id = "vm_lowering_x", text = label("vm_lowering_x"), def = 0.0, min = -1.0, max = 1.0, step = 0.01, prec = 2, key = "vm_lowering_x" },
+    bodycam_num { id = "vm_lowering_y", text = label("vm_lowering_y"), def = -0.10, min = -1.0, max = 1.0, step = 0.01, prec = 2, key = "vm_lowering_y" },
+    bodycam_num { id = "vm_lowering_z", text = label("vm_lowering_z"), def = 0.10, min = -1.0, max = 1.0, step = 0.01, prec = 2, key = "vm_lowering_z" },
+    bodycam_num { id = "vm_lowering_slow_walk_influence", text = label("vm_lowering_slow_walk_influence"), def = 0.5, min = 0.0, max = 1.0, step = 0.1, key = "vm_lowering_slow_walk_influence" },
+    bodycam_num { id = "vm_lowering_walk_influence", text = label("vm_lowering_walk_influence"), def = 1.0, min = 0.0, max = 1.0, step = 0.1, key = "vm_lowering_walk_influence" },
+    bodycam_num { id = "vm_lowering_movement_influence", text = label("vm_lowering_movement_influence"), def = 1.0, min = 0.0, max = 1.0, step = 0.1, key = "vm_lowering_movement_influence" },
+    bodycam_num { id = "vm_lowering_enter_speed", text = label("vm_lowering_enter_speed"), def = 0.4, min = 0.0, max = 1.0, step = 0.1, key = "vm_lowering_enter_speed" },
+    bodycam_num { id = "vm_lowering_return_speed", text = label("vm_lowering_return_speed"), def = 0.4, min = 0.0, max = 1.0, step = 0.1, key = "vm_lowering_return_speed" },
+
+    line {},
+    bodycam_num { id = "hip_fire_weapon_impulse", text = label("hip_fire_weapon_impulse"), def = 5.0, min = 0.0, max = 5.0, step = 0.1, key = "hip_fire_weapon_impulse" },
+    bodycam_num { id = "ads_fire_weapon_impulse", text = label("ads_fire_weapon_impulse"), def = 1.35, min = 0.0, max = 5.0, step = 0.1, key = "ads_fire_weapon_impulse" },
+    bodycam_num { id = "sprint_transition_vm_blend_scale", text = label("sprint_transition_vm_blend_scale"), def = 1.5, min = 0.0, max = 2.0, step = 0.1, key = "sprint_transition_vm_blend_scale" },
+    bodycam_num { id = "sprint_transition_blend_smoothing", text = label("sprint_transition_blend_smoothing"), def = 1.0, min = 0.0, max = 1.0, step = 0.1, key = "sprint_transition_blend_smoothing" },
+    bodycam_num { id = "sprint_transition_start_stop_impulse_scale", text = label("sprint_transition_start_stop_impulse_scale"), def = 2.0, min = 0.0, max = 2.0, step = 0.1, key = "sprint_transition_start_stop_impulse_scale" },
+}

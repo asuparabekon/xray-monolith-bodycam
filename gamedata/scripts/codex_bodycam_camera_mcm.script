@@ -1,0 +1,4 @@
+-- Codex Bodycam Camera Prototype
+--
+-- Standalone MCM page retired. The live engine-backed settings are exposed
+-- under Settings > Modded Exes > Gameplay > Bodycam by options_modded_exes_bodycam.script.

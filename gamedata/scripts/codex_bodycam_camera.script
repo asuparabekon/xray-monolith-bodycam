@@ -1,0 +1,10 @@
+-- Codex Bodycam Camera Prototype
+--
+-- Runtime disabled: the bodycam implementation now lives in the engine build.
+-- Keeping this script as a no-op avoids old per-frame Lua HUD animation calls.
+
+function on_game_start()
+end
+
+function on_game_stop()
+end
