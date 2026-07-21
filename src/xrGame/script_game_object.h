@@ -838,6 +838,7 @@ public:
 	bool sniper_fire_mode() const;
 
 	void set_aim_params(float max_angle, float min_angle, float min_speed, float predict_time);
+	void set_fire_queue_scale(float size_k, float interval_k);
 	void set_vision_speed(float value);
 	bool can_kill_enemy();
 	bool can_kill_member();

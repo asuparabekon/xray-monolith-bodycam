@@ -184,10 +184,11 @@ public:
 	void Update(const Fvector& P, const Fvector& D, const Fvector& N, float fFOV_Dest, float fASPECT_Dest,
 	            float fFAR_Dest, u32 flags);
 	void UpdateFromCamera(const CCameraBase* C);
-	void ApplyDeviceOverride(const Fvector& P, const Fvector& D, const Fvector& N, float fFOV, float fASPECT, float fFAR,
-	                         float _viewport_near);
+	void ApplyDeviceOverride(const Fvector& P, const Fvector& D, const Fvector& N, float fFOV, float fASPECT,
+		float fFAR, float viewport_near);
 
 	void ApplyDevice(float _viewport_near);
+	void ApplyPP();
 	static void ResetPP();
 
 	CCameraManager(bool bApplyOnUpdate);

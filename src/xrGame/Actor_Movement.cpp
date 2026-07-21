@@ -37,13 +37,6 @@ constexpr float kBodycamBrakeStepSpacing = 0.20f;
 constexpr float kBodycamBrakeStepPower = 0.85f;
 }
 
-IC static void generate_orthonormal_basis1(const Fvector& dir, Fvector& updir, Fvector& right)
-{
-	right.crossproduct(dir, updir); //. <->
-	right.normalize();
-	updir.crossproduct(right, dir);
-}
-
 void CActor::BodycamScheduleBrakeSteps()
 {
 	m_bodycam_brake_steps_pending = kBodycamBrakeStepCount;
@@ -69,6 +62,13 @@ void CActor::BodycamUpdateBrakeSteps(float dt)
 	CStepManager::play_forced_step(kBodycamBrakeStepPower, this == Level().CurrentViewEntity());
 	--m_bodycam_brake_steps_pending;
 	m_bodycam_brake_step_timer = kBodycamBrakeStepSpacing;
+}
+
+IC static void generate_orthonormal_basis1(const Fvector& dir, Fvector& updir, Fvector& right)
+{
+	right.crossproduct(dir, updir); //. <->
+	right.normalize();
+	updir.crossproduct(right, dir);
 }
 
 
@@ -360,14 +360,19 @@ void CActor::g_cl_CheckControls(u32 mstate_wf, Fvector& vControlAccel, float& Ju
 		response_input.ads = IsZoomAimingMode();
 		response_input.target_accel.set(vControlAccel);
 
-		const Bodycam::MovementResponseOutput response = Bodycam::UpdateMovementResponse(Bodycam::GetConfig().movement, m_bodycam_movement_response, response_input);
+		const Bodycam::MovementResponseOutput response =
+			Bodycam::UpdateMovementResponse(Bodycam::GetConfig().movement, m_bodycam_movement_response, response_input);
 		vControlAccel.set(response.accel);
 		cam_eff_factor = vControlAccel.magnitude();
 		m_bodycam.SetMovementDebug(response.target_speed, response.actual_speed, response.speed_fraction);
+
 		const bool sprint_anim_was_ready = m_bodycam_sprint_anim_ready;
-		const Bodycam::RuntimeConfig& bodycam_config = Bodycam::GetConfig();
-		const bool sprint_anim_gate = bodycam_config.movement.enable && !IsZoomAimingMode() && !!(mstate_real & mcSprint);
-		m_bodycam_sprint_anim_ready = !sprint_anim_gate || response.speed_fraction >= Bodycam::ClampSprintBridgeHandoffSpeed(bodycam_config.sprint.bridge_handoff_speed);
+		const Bodycam::RuntimeConfig& config = Bodycam::GetConfig();
+		const bool sprint_anim_gate =
+			config.movement.enable && !IsZoomAimingMode() && !!(mstate_real & mcSprint);
+		m_bodycam_sprint_anim_ready = !sprint_anim_gate ||
+			response.speed_fraction >= Bodycam::ClampSprintBridgeHandoffSpeed(config.sprint.bridge_handoff_speed);
+
 		if (sprint_anim_gate && !sprint_anim_was_ready && m_bodycam_sprint_anim_ready && g_player_hud)
 			g_player_hud->OnMovementChanged(mcSprint);
 		if ((mstate_old & mcSprint) && !(mstate_real & mcSprint) && response.actual_speed > 0.25f)

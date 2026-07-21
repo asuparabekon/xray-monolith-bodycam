@@ -2,7 +2,6 @@
 #	include "stdafx.h"
 #endif
 #include "bodycam_simulation.h"
-
 #include <algorithm>
 #include <cmath>
 #include <cstring>
@@ -111,6 +110,76 @@ void SmoothVector(SVec3& current, const SVec3& target, float response, float dt)
 	current.x = SmoothFloat(current.x, target.x, response, dt);
 	current.y = SmoothFloat(current.y, target.y, response, dt);
 	current.z = SmoothFloat(current.z, target.z, response, dt);
+}
+
+float FollowAimAxis(float& current, float target, float response, float dt)
+{
+	const float previous = current;
+	const float factor = Clamp(1.f - std::exp(-std::max(response, 0.01f) * Clamp(dt, 0.f, 0.033f)), 0.f, 1.f);
+	current = AngleNormalizeSigned(current + AngleDifferenceSigned(target, current) * factor);
+	return AngleDifferenceSigned(current, previous);
+}
+
+void UpdateViewmodelMouseResponse(const SimulationSettings& settings, SimulationState& state,
+	const SimulationInput& input, bool enabled, float safe_dt)
+{
+	if (!enabled)
+	{
+		state.viewmodel.mouse_speed.Set(0.f, 0.f, 0.f);
+		state.viewmodel.prev_mouse_speed.Set(0.f, 0.f, 0.f);
+		state.viewmodel.mouse_accel.Set(0.f, 0.f, 0.f);
+		state.viewmodel.mouse_aim_initialized = false;
+		return;
+	}
+
+	const float aim_yaw = input.visual_aim_available ? input.visual_aim_yaw : input.target_yaw;
+	const float aim_pitch = input.visual_aim_available ? input.visual_aim_pitch : input.target_pitch;
+	if (!state.viewmodel.mouse_aim_initialized)
+	{
+		state.viewmodel.mouse_aim_yaw = aim_yaw;
+		state.viewmodel.mouse_aim_pitch = aim_pitch;
+		state.viewmodel.mouse_speed.Set(0.f, 0.f, 0.f);
+		state.viewmodel.prev_mouse_speed.Set(0.f, 0.f, 0.f);
+		state.viewmodel.mouse_accel.Set(0.f, 0.f, 0.f);
+		state.viewmodel.mouse_aim_initialized = true;
+		return;
+	}
+
+	const float yaw_step = FollowAimAxis(state.viewmodel.mouse_aim_yaw, aim_yaw,
+		settings.viewmodel.mouse_filter, input.dt);
+	const float pitch_step = FollowAimAxis(state.viewmodel.mouse_aim_pitch, aim_pitch,
+		settings.viewmodel.mouse_filter, input.dt);
+	state.viewmodel.mouse_speed.Set(yaw_step / safe_dt, pitch_step / safe_dt, 0.f);
+
+	state.viewmodel.mouse_accel = state.viewmodel.mouse_speed;
+	state.viewmodel.mouse_accel.Sub(state.viewmodel.prev_mouse_speed);
+	state.viewmodel.mouse_accel.Mul(1.f / safe_dt);
+	if (Abs(state.viewmodel.mouse_accel.x) < DegToRad(80.f))
+		state.viewmodel.mouse_accel.x = 0.f;
+	if (Abs(state.viewmodel.mouse_accel.y) < DegToRad(80.f))
+		state.viewmodel.mouse_accel.y = 0.f;
+	state.viewmodel.prev_mouse_speed = state.viewmodel.mouse_speed;
+}
+
+void UpdateArmPoseSpring(SVec3& current, SVec3& velocity, const SVec3& target, float response, float dt)
+{
+	const float clamped_dt = Clamp(dt, 0.f, 0.033f);
+	const float frequency = Clamp(response * 0.12f, 1.0f, 6.0f);
+	const float omega = 2.f * kPi * frequency;
+	const float spring = omega * omega;
+	const float damper = 2.f * omega;
+	const int steps = std::max(1, static_cast<int>(std::ceil(clamped_dt * 120.f)));
+	const float step_dt = clamped_dt / static_cast<float>(steps);
+
+	for (int step = 0; step < steps; ++step)
+	{
+		velocity.x += ((target.x - current.x) * spring - velocity.x * damper) * step_dt;
+		velocity.y += ((target.y - current.y) * spring - velocity.y * damper) * step_dt;
+		velocity.z += ((target.z - current.z) * spring - velocity.z * damper) * step_dt;
+		current.x += velocity.x * step_dt;
+		current.y += velocity.y * step_dt;
+		current.z += velocity.z * step_dt;
+	}
 }
 
 bool ClampVector(SVec3& value, float limit)
@@ -354,6 +423,11 @@ void ResetSprint(SimulationState& state)
 	state.sprint.prev_amount = 0.f;
 }
 
+void ResetArm(SimulationArmState& arm)
+{
+	arm = SimulationArmState();
+}
+
 float SmoothTime(float current, float target, float seconds, float dt)
 {
 	const float response = 3.f / std::max(seconds, 0.01f);
@@ -362,7 +436,7 @@ float SmoothTime(float current, float target, float seconds, float dt)
 
 void UpdateSprintLayer(const SimulationSettings& settings, SimulationState& state, const SimulationInput& input)
 {
-	if (!input.firearm_equipped)
+	if (!settings.features.sprint_bridge_enable || !input.firearm_equipped)
 	{
 		ResetSprint(state);
 		ClearSprintImpulseQueue(state);
@@ -410,7 +484,189 @@ float SprintStrength(const SimulationSettings& settings)
 {
 	return Clamp(settings.sprint.strength, 0.f, 2.f);
 }
+
+bool ArmStateActive(const SimulationArmState& arm)
+{
+	return arm.weight > 0.001f || arm.motion_weight > 0.001f ||
+		arm.clavicle.Magnitude() + arm.upperarm.Magnitude() + arm.forearm.Magnitude() + arm.twist.Magnitude() + arm.hand.Magnitude() +
+		arm.left_clavicle.Magnitude() + arm.left_upperarm.Magnitude() + arm.left_forearm.Magnitude() +
+		arm.left_twist.Magnitude() + arm.left_hand.Magnitude() > DegToRad(0.001f);
+}
+
+void AddArmStateToOutput(const SimulationArmState& arm, SimulationOutput& output)
+{
+	output.arm_active = output.arm_active || ArmStateActive(arm);
+	output.arm_clavicle.Add(arm.clavicle);
+	output.arm_upperarm.Add(arm.upperarm);
+	output.arm_forearm.Add(arm.forearm);
+	output.arm_twist.Add(arm.twist);
+	output.arm_hand.Add(arm.hand);
+	output.arm_left_clavicle.Add(arm.left_clavicle);
+	output.arm_left_upperarm.Add(arm.left_upperarm);
+	output.arm_left_forearm.Add(arm.left_forearm);
+	output.arm_left_twist.Add(arm.left_twist);
+	output.arm_left_hand.Add(arm.left_hand);
+}
+
+void UpdateBodycamArmLayer(const SimulationSettings& settings, SimulationState& state, const SimulationInput& input, SimulationOutput& output)
+{
+	const float layer_weight = Clamp(settings.features.layer_arm_weight, 0.f, 1.f);
+	const SimulationArmSettings& style = settings.bodycam_arm;
+	const float raw_strength = Clamp(style.strength, 0.f, 8.f);
+	const bool arm_allowed = settings.features.bodycam_arm_enable && input.firearm_equipped && layer_weight > kEpsilon && raw_strength > kEpsilon;
+	const float target_weight = arm_allowed ? 1.f : 0.f;
+	state.arm.weight = SmoothTime(state.arm.weight, target_weight, target_weight > state.arm.weight ? 0.18f : 0.28f, input.dt);
+
+	const float strength = raw_strength * layer_weight;
+	if (!arm_allowed && state.arm.weight <= 0.001f)
+		state.arm.controller.Set(0.f, 0.f, 0.f);
+
+	const float ads_mult = Lerp(1.f, Clamp(style.ads_scale, 0.f, 1.f), Clamp(input.ads_blend, 0.f, 1.f));
+	const float yaw_throw = CalculateMouseThrow(state.viewmodel.mouse_speed.x, DegToRad(420.f), 1.f);
+	const float pitch_throw = CalculateMouseThrow(state.viewmodel.mouse_speed.y, DegToRad(320.f), 1.f);
+	SVec3 raw_controller;
+	raw_controller.Set(arm_allowed ? pitch_throw : 0.f, arm_allowed ? yaw_throw : 0.f, arm_allowed ? -yaw_throw : 0.f);
+	state.arm.prev_controller = state.arm.controller;
+	SmoothVector(state.arm.controller, raw_controller, 8.f, input.dt);
+
+	const float lag_lift = state.arm.controller.x;
+	const float lag_side = state.arm.controller.y;
+	const float lag_roll = state.arm.controller.z;
+	SVec3 controller_delta = state.arm.controller;
+	controller_delta.Sub(state.arm.prev_controller);
+	SVec3 settle_target;
+	settle_target.Set(-controller_delta.x * 1.6f, -controller_delta.y * 1.8f, -controller_delta.z * 1.6f);
+	settle_target.Mul(arm_allowed ? 1.f : 0.f);
+	SmoothVector(state.arm.settle, settle_target, arm_allowed ? 10.f : 5.f, input.dt);
+	const float separation = Clamp(Abs(yaw_throw - lag_side) + Abs(-yaw_throw - lag_roll), 0.f, 1.f);
+	const float brace_amount = Clamp(std::max(Abs(lag_side), Abs(lag_roll)) + separation * 0.35f, 0.f, 1.f);
+	const float target_motion_weight = arm_allowed ? Clamp(std::max(Abs(yaw_throw), Abs(pitch_throw)), 0.f, 1.f) : 0.f;
+	state.arm.motion_weight = SmoothTime(state.arm.motion_weight, target_motion_weight, target_motion_weight > state.arm.motion_weight ? 0.20f : 0.62f, input.dt);
+	const float final_weight = state.arm.weight * SmoothStep(state.arm.motion_weight);
+	SVec3 base;
+	base.Set(DegToRad((lag_lift + state.arm.settle.x * 0.45f) * style.mouse_pitch),
+		0.f,
+		DegToRad((lag_roll + state.arm.settle.z * 0.55f) * style.mouse_roll));
+	base.Mul(strength * ads_mult);
+
+	SVec3 right_base = base;
+	SVec3 left_base = base;
+	const float organic_side = lag_side + state.arm.settle.y * 0.55f;
+	const float organic_roll = lag_roll + state.arm.settle.z * 0.45f;
+	const float tuck = organic_side * brace_amount * strength * ads_mult;
+	const float brace = (brace_amount + Abs(state.arm.settle.y) * 0.18f + Abs(state.arm.settle.z) * 0.12f) * strength * ads_mult;
+	const float secondary_roll = style.secondary_roll;
+	right_base.Add(DegToRad(0.65f * brace), DegToRad(-style.mouse_yaw * tuck), DegToRad(0.35f * secondary_roll * organic_roll));
+	left_base.Add(DegToRad(0.78f * brace), DegToRad(style.mouse_yaw * tuck), DegToRad(0.35f * secondary_roll * organic_roll));
+
+	SVec3 clavicle = right_base;
+	SVec3 upperarm = right_base;
+	SVec3 forearm = right_base;
+	SVec3 twist = right_base;
+	SVec3 hand = right_base;
+	SVec3 left_clavicle = left_base;
+	SVec3 left_upperarm = left_base;
+	SVec3 left_forearm = left_base;
+	SVec3 left_twist = left_base;
+	SVec3 left_hand = left_base;
+	clavicle.Mul(0.10f);
+	upperarm.Mul(Clamp(style.upperarm_scale, 0.f, 1.f) * 0.88f);
+	forearm.Mul(Clamp(style.forearm_scale, 0.f, 1.5f) * 0.62f);
+	twist.Mul(Clamp(style.twist_scale, 0.f, 2.f) * 0.20f);
+	hand.Mul(Clamp(style.hand_scale, 0.f, 1.f));
+	left_clavicle.Mul(0.10f);
+	left_upperarm.Mul(Clamp(style.upperarm_scale, 0.f, 1.f) * 0.88f);
+	left_forearm.Mul(Clamp(style.forearm_scale, 0.f, 1.5f) * 0.62f);
+	left_twist.Mul(Clamp(style.twist_scale, 0.f, 2.f) * 0.20f);
+	left_hand.Mul(Clamp(style.hand_scale, 0.f, 1.f));
+
+	clavicle.Mul(final_weight);
+	upperarm.Mul(final_weight);
+	forearm.Mul(final_weight);
+	twist.Mul(final_weight);
+	hand.Mul(final_weight);
+	left_clavicle.Mul(final_weight);
+	left_upperarm.Mul(final_weight);
+	left_forearm.Mul(final_weight);
+	left_twist.Mul(final_weight);
+	left_hand.Mul(final_weight);
+
+	const float response = std::max(style.response, 0.1f);
+	UpdateArmPoseSpring(state.arm.clavicle, state.arm.clavicle_vel, clavicle, response * 0.70f, input.dt);
+	UpdateArmPoseSpring(state.arm.upperarm, state.arm.upperarm_vel, upperarm, response * 0.90f, input.dt);
+	UpdateArmPoseSpring(state.arm.forearm, state.arm.forearm_vel, forearm, response * 1.15f, input.dt);
+	UpdateArmPoseSpring(state.arm.twist, state.arm.twist_vel, twist, response * 1.25f, input.dt);
+	UpdateArmPoseSpring(state.arm.hand, state.arm.hand_vel, hand, response * 1.35f, input.dt);
+	UpdateArmPoseSpring(state.arm.left_clavicle, state.arm.left_clavicle_vel, left_clavicle, response * 0.70f, input.dt);
+	UpdateArmPoseSpring(state.arm.left_upperarm, state.arm.left_upperarm_vel, left_upperarm, response * 0.90f, input.dt);
+	UpdateArmPoseSpring(state.arm.left_forearm, state.arm.left_forearm_vel, left_forearm, response * 1.15f, input.dt);
+	UpdateArmPoseSpring(state.arm.left_twist, state.arm.left_twist_vel, left_twist, response * 1.25f, input.dt);
+	UpdateArmPoseSpring(state.arm.left_hand, state.arm.left_hand_vel, left_hand, response * 1.35f, input.dt);
+
+	AddArmStateToOutput(state.arm, output);
+}
+
+void UpdateStalker2ArmLayer(const SimulationSettings& settings, SimulationState& state, const SimulationInput& input, SimulationOutput& output)
+{
+	SimulationStalker2ArmState& style_state = state.stalker2_arm;
+	const SimulationStalker2ArmSettings& style = settings.stalker2_arm;
+	const float layer_weight = Clamp(settings.features.layer_arm_weight, 0.f, 1.f);
+	const float strength = Clamp(style.strength, 0.f, 4.f) * layer_weight;
+	const bool arm_allowed = settings.features.stalker2_arm_enable && input.firearm_equipped &&
+		layer_weight > kEpsilon && strength > kEpsilon;
+
+	const float target_weight = arm_allowed ? 1.f : 0.f;
+	style_state.weight = SmoothTime(style_state.weight, target_weight,
+		target_weight > style_state.weight ? 0.16f : 0.30f, input.dt);
+
+	const float ads_scale = Lerp(1.f, Clamp(style.ads_scale, 0.f, 1.f), Clamp(input.ads_blend, 0.f, 1.f));
+	const bool movement_allowed = arm_allowed && !!(input.move_flags & smfAnyMove) &&
+		!(input.move_flags & (smfSprint | smfCrouch | smfFall | smfJump));
+	const float move_amount = movement_allowed ? Clamp(state.viewmodel.move_intent.Magnitude(), 0.f, 1.f) : 0.f;
+	const float movement_target = CalculateStalker2MovementAmount(move_amount,
+		input.actor_speed_fraction, input.accelerated, style.slow_walk_scale);
+	style_state.movement_weight = SmoothTime(style_state.movement_weight, movement_target,
+		movement_target > style_state.movement_weight ? 0.12f : 0.24f, input.dt);
+	const float yaw_throw = arm_allowed ? CalculateMouseThrow(state.viewmodel.mouse_speed.x,
+		DegToRad(420.f), style.mouse_sensitivity) : 0.f;
+	const float pitch_throw = arm_allowed ? CalculateMouseThrow(state.viewmodel.mouse_speed.y,
+		DegToRad(320.f), style.mouse_sensitivity) : 0.f;
+
+	const float final_weight = style_state.weight * strength * ads_scale * Clamp(style.wrist_scale, 0.f, 1.f);
+	const float mouse_strength = Clamp(style.mouse_strength, 0.f, 4.f);
+	const float mouse_weight = mouse_strength * final_weight;
+	const SVec3 wrist_rot_target = ClampStalker2MouseRotation(
+		CalculateStalker2MouseControllerRotation(yaw_throw, style.mouse_yaw, style.mouse_roll, mouse_weight),
+		style.mouse_max_yaw, style.mouse_max_pitch, style.mouse_max_roll);
+
+	UpdateArmPoseSpring(style_state.wrist_rot, style_state.wrist_rot_vel,
+		wrist_rot_target, std::max(style.response, 0.1f), input.dt);
+	SVec3 arm_follow_target = wrist_rot_target;
+	arm_follow_target.Mul(Clamp(style.arm_follow_scale, 0.f, 1.f));
+	arm_follow_target.Add(CalculateStalker2VerticalArmFollow(pitch_throw,
+		style.mouse_pitch, mouse_weight));
+	arm_follow_target = ClampStalker2MouseRotation(arm_follow_target,
+		style.mouse_max_yaw, style.mouse_max_pitch, style.mouse_max_roll);
+	UpdateArmPoseSpring(style_state.arm_follow_rot, style_state.arm_follow_rot_vel,
+		arm_follow_target, std::max(style.arm_follow_response, 0.1f), input.dt);
+
+	output.stalker2_arm_active = style_state.weight > 0.001f ||
+		style_state.wrist_rot.Magnitude() > 0.001f || style_state.arm_follow_rot.Magnitude() > 0.001f;
+	output.stalker2_wrist_rot = style_state.wrist_rot;
+	output.stalker2_wrist_rot.Mul(DegToRad(1.f));
+	output.stalker2_arm_follow_rot = style_state.arm_follow_rot;
+	output.stalker2_arm_follow_rot.Mul(DegToRad(1.f));
+	output.stalker2_movement_weight = style_state.movement_weight * style_state.weight *
+		Clamp(style.movement_strength, 0.f, 4.f) * ads_scale;
+	output.stalker2_movement_response = std::max(style.movement_response, 0.1f);
+}
 } // namespace
+
+AdsState ResolveAdsState(bool weapon_zoomed, float weapon_blend)
+{
+	const float blend = Clamp(weapon_blend, 0.f, 1.f);
+	return { weapon_zoomed, blend };
+}
 
 void SVec3::Set(float nx, float ny, float nz)
 {
@@ -459,6 +715,70 @@ void SVec3::NormalizeSafe()
 		Mul(1.f / magnitude);
 }
 
+float ArmCorrectionAngle(float dot, float cross_magnitude)
+{
+	dot = Clamp(dot, -1.f, 1.f);
+	cross_magnitude = std::max(cross_magnitude, 0.f);
+	return std::atan2(cross_magnitude, dot);
+}
+
+SVec3 SolveArmMidpoint(const SVec3& start, const SVec3& end, const SVec3& current_mid, const SVec3& desired_mid)
+{
+	SVec3 line = end;
+	line.Sub(start);
+	const float length = line.Magnitude();
+	if (length < kEpsilon)
+		return current_mid;
+	line.Mul(1.f / length);
+
+	SVec3 first_segment = current_mid;
+	first_segment.Sub(start);
+	SVec3 second_segment = end;
+	second_segment.Sub(current_mid);
+	const float first_length = first_segment.Magnitude();
+	const float second_length = second_segment.Magnitude();
+	if (first_length < kEpsilon || second_length < kEpsilon)
+		return current_mid;
+
+	const float along = Clamp((first_length * first_length - second_length * second_length + length * length) / (2.f * length), 0.f, length);
+	const float radius_sq = std::max(first_length * first_length - along * along, 0.f);
+	const float radius = std::sqrt(radius_sq);
+	if (radius < kEpsilon)
+		return current_mid;
+
+	SVec3 center = line;
+	center.Mul(along);
+	center.Add(start);
+	SVec3 radial = current_mid;
+	radial.Sub(center);
+	const float radial_length = radial.Magnitude();
+	if (radial_length < kEpsilon)
+		return current_mid;
+	radial.Mul(1.f / radial_length);
+
+	SVec3 tangent;
+	tangent.Set(line.y * radial.z - line.z * radial.y,
+		line.z * radial.x - line.x * radial.z,
+		line.x * radial.y - line.y * radial.x);
+	const float tangent_length = tangent.Magnitude();
+	if (tangent_length < kEpsilon)
+		return current_mid;
+	tangent.Mul(1.f / tangent_length);
+
+	SVec3 desired_offset = desired_mid;
+	desired_offset.Sub(current_mid);
+	const float tangent_distance = desired_offset.x * tangent.x + desired_offset.y * tangent.y + desired_offset.z * tangent.z;
+	const float angle = std::atan2(tangent_distance, radius);
+
+	SVec3 result = radial;
+	result.Mul(radius * std::cos(angle));
+	SVec3 tangent_part = tangent;
+	tangent_part.Mul(radius * std::sin(angle));
+	result.Add(tangent_part);
+	result.Add(center);
+	return result;
+}
+
 float DegToRad(float value)
 {
 	return value * kPi / 180.f;
@@ -480,8 +800,6 @@ void ResetSimulation(SimulationState& state, float yaw, float pitch, std::uint32
 	state.camera.yaw = yaw;
 	state.camera.pitch = pitch;
 	state.camera.roll = 0.f;
-	state.camera.prev_target_yaw = yaw;
-	state.camera.prev_target_pitch = pitch;
 	state.camera.pos.Set(0.f, 0.f, 0.f);
 	state.camera.impulse_pos.Set(0.f, 0.f, 0.f);
 	state.camera.impulse_roll = 0.f;
@@ -492,12 +810,17 @@ void ResetSimulation(SimulationState& state, float yaw, float pitch, std::uint32
 	state.viewmodel.mouse_speed.Set(0.f, 0.f, 0.f);
 	state.viewmodel.prev_mouse_speed.Set(0.f, 0.f, 0.f);
 	state.viewmodel.mouse_accel.Set(0.f, 0.f, 0.f);
+	state.viewmodel.mouse_aim_yaw = yaw;
+	state.viewmodel.mouse_aim_pitch = pitch;
+	state.viewmodel.mouse_aim_initialized = true;
 	state.viewmodel.move_intent.Set(0.f, 0.f, 0.f);
 	state.viewmodel.impulse_pos.Set(0.f, 0.f, 0.f);
 	state.viewmodel.impulse_rot.Set(0.f, 0.f, 0.f);
 	ClearSprintImpulseQueue(state);
 	ResetSprint(state);
 	ResetLowering(state);
+	ResetArm(state.arm);
+	state.stalker2_arm = SimulationStalker2ArmState();
 	state.ads_blend = ads_blend;
 	state.prev_move_flags = move_flags;
 	state.prev_ads = ads_blend > 0.f;
@@ -513,33 +836,15 @@ void UpdateSimulation(const SimulationSettings& settings, SimulationState& state
 	{
 		state.camera.yaw = input.target_yaw;
 		state.camera.pitch = input.target_pitch;
-		state.camera.prev_target_yaw = input.target_yaw;
-		state.camera.prev_target_pitch = input.target_pitch;
 		state.camera.initialized = true;
 	}
 
 	const bool vm_spring_enabled = settings.features.vm_enable && settings.features.layer_vm_weight > kEpsilon;
 	const bool lower_enabled = settings.features.lower_enable && settings.features.layer_lower_weight > kEpsilon;
-	const bool vm_enabled = vm_spring_enabled || lower_enabled;
-	const float yaw_speed = AngleDifferenceSigned(input.target_yaw, state.camera.prev_target_yaw) / safe_dt;
-	const float pitch_speed = AngleDifferenceSigned(input.target_pitch, state.camera.prev_target_pitch) / safe_dt;
-	state.camera.prev_target_yaw = input.target_yaw;
-	state.camera.prev_target_pitch = input.target_pitch;
-
-	if (vm_enabled)
-	{
-		SVec3 raw_mouse_speed;
-		raw_mouse_speed.Set(yaw_speed, pitch_speed, 0.f);
-		SmoothVector(state.viewmodel.mouse_speed, raw_mouse_speed, settings.viewmodel.mouse_filter, input.dt);
-		state.viewmodel.mouse_accel = state.viewmodel.mouse_speed;
-		state.viewmodel.mouse_accel.Sub(state.viewmodel.prev_mouse_speed);
-		state.viewmodel.mouse_accel.Mul(1.f / safe_dt);
-		if (Abs(state.viewmodel.mouse_accel.x) < DegToRad(80.f))
-			state.viewmodel.mouse_accel.x = 0.f;
-		if (Abs(state.viewmodel.mouse_accel.y) < DegToRad(80.f))
-			state.viewmodel.mouse_accel.y = 0.f;
-		state.viewmodel.prev_mouse_speed = state.viewmodel.mouse_speed;
-	}
+	const bool vm_effects_enabled = vm_spring_enabled || lower_enabled;
+	const bool mouse_input_enabled = vm_effects_enabled ||
+		((settings.features.bodycam_arm_enable || settings.features.stalker2_arm_enable) && settings.features.layer_arm_weight > kEpsilon);
+	UpdateViewmodelMouseResponse(settings, state, input, mouse_input_enabled, safe_dt);
 
 	SVec3 move_target;
 	if (input.move_flags & smfRight)
@@ -558,8 +863,12 @@ void UpdateSimulation(const SimulationSettings& settings, SimulationState& state
 		move_target.Mul(1.35f);
 	SmoothVector(state.viewmodel.move_intent, move_target, settings.viewmodel.move_filter, input.dt);
 	UpdateSprintLayer(settings, state, input);
+	const bool sprint_bridge_active = settings.features.sprint_bridge_enable && input.firearm_equipped && !input.ads &&
+		settings.features.layer_vm_weight > kEpsilon && SprintStrength(settings) > kEpsilon &&
+		(state.sprint.viewmodel_amount > kEpsilon || !!(input.move_flags & smfSprint));
+	const bool hud_transform_enabled = vm_effects_enabled || sprint_bridge_active;
 
-	if (vm_enabled)
+	if (vm_effects_enabled)
 	{
 		const bool airborne = !!(input.move_flags & (smfFall | smfJump));
 		const bool landing = !!(input.move_flags & smfLanding);
@@ -626,7 +935,6 @@ void UpdateSimulation(const SimulationSettings& settings, SimulationState& state
 	float camera_pos = settings.camera.hip.pos;
 	float inner_gain = settings.camera.hip.inner_gain;
 	float ads_mouse_mult = 1.f;
-	float ads_move_mult = 1.f;
 	float ads_impulse_mult = 1.f;
 	if (state.ads_blend > kEpsilon)
 	{
@@ -643,7 +951,6 @@ void UpdateSimulation(const SimulationSettings& settings, SimulationState& state
 		camera_roll = DegToRad(Lerp(settings.camera.hip.roll, settings.camera.ads.roll, ads_blend));
 		camera_pos = Lerp(settings.camera.hip.pos, settings.camera.ads.pos, ads_blend);
 		ads_mouse_mult = Lerp(1.f, settings.viewmodel.ads_mouse_mult, ads_blend);
-		ads_move_mult = Lerp(1.f, settings.viewmodel.ads_move_mult, ads_blend);
 		ads_impulse_mult = Lerp(1.f, settings.viewmodel.ads_impulse_mult, ads_blend);
 	}
 
@@ -666,8 +973,8 @@ void UpdateSimulation(const SimulationSettings& settings, SimulationState& state
 	const float yaw_norm = max_yaw > kEpsilon ? Clamp(clamped_yaw_error / max_yaw, -1.f, 1.f) : 0.f;
 	const float pitch_norm = max_pitch > kEpsilon ? Clamp(clamped_pitch_error / max_pitch, -1.f, 1.f) : 0.f;
 
-	const float move_x = lower_enabled ? 0.f : state.viewmodel.move_intent.x;
-	const float move_z = lower_enabled ? 0.f : state.viewmodel.move_intent.z;
+	const float move_x = state.viewmodel.move_intent.x;
+	const float move_z = state.viewmodel.move_intent.z;
 	const float move_scale = input.ads ? 0.35f : 1.f;
 	const float sprint_visual_amount = state.sprint.amount * SprintStrength(settings);
 	const float sprint_amount = input.ads ? 0.f : sprint_visual_amount;
@@ -677,7 +984,7 @@ void UpdateSimulation(const SimulationSettings& settings, SimulationState& state
 	const float sprint_wave = std::sin(state.sprint.phase);
 	const float sprint_step = std::sin(state.sprint.phase * 2.f);
 	const float sprint_side = Abs(move_x) > 0.05f ? move_x : (state.viewmodel.mouse_speed.x >= 0.f ? 1.f : -1.f);
-	const float target_roll = -yaw_norm * camera_roll - move_x * DegToRad(settings.camera.move_roll) * move_scale +
+	const float target_roll = -yaw_norm * camera_roll +
 		DegToRad(settings.sprint.camera_roll) * sprint_amount * (0.35f * sprint_wave - 0.55f * move_x) -
 		DegToRad(settings.sprint.camera_roll) * 0.25f * sprint_settle * sprint_side;
 	state.camera.roll = SpringAngle(state.camera.roll, target_roll, spring_freq * 0.75f, spring_damping, input.dt);
@@ -694,24 +1001,19 @@ void UpdateSimulation(const SimulationSettings& settings, SimulationState& state
 	SpringVector(state.camera.pos, camera_pos_target, spring_freq * 0.8f, spring_damping, input.dt);
 	ClampVector(state.camera.pos, Abs(camera_pos) + Abs(settings.camera.move_pos) + Abs(settings.sprint.camera_pos) * std::max(1.f, SprintStrength(settings)));
 
-	if (vm_enabled)
+	if (hud_transform_enabled)
 	{
-		const float yaw_throw = Clamp(state.viewmodel.mouse_speed.x / DegToRad(420.f), -1.f, 1.f);
-		const float pitch_throw = Clamp(state.viewmodel.mouse_speed.y / DegToRad(320.f), -1.f, 1.f);
-		SVec3 vm_mouse_pos, vm_mouse_rot, vm_move_pos, vm_move_rot, vm_impulse_pos, vm_impulse_rot;
+		const float yaw_throw = CalculateMouseThrow(state.viewmodel.mouse_speed.x, DegToRad(420.f), 1.f);
+		const float pitch_throw = CalculateMouseThrow(state.viewmodel.mouse_speed.y, DegToRad(320.f), 1.f);
+		SVec3 vm_mouse_pos, vm_mouse_rot, vm_impulse_pos, vm_impulse_rot;
 		if (vm_spring_enabled)
 		{
-			vm_mouse_pos.Set(-yaw_throw * settings.viewmodel.mouse_pos - yaw_norm * settings.viewmodel.max_pos * 0.35f,
-				pitch_throw * settings.viewmodel.mouse_pos * 0.45f + pitch_norm * settings.viewmodel.max_pos * 0.25f,
+			vm_mouse_pos.Set(-yaw_throw * settings.viewmodel.mouse_pos,
+				pitch_throw * settings.viewmodel.mouse_pos * 0.45f,
 				0.f);
-			vm_mouse_rot.Set(pitch_throw * settings.viewmodel.mouse_rot + pitch_norm * settings.viewmodel.max_rot * 0.35f,
-				-yaw_throw * settings.viewmodel.mouse_rot * 0.55f,
-				-yaw_throw * settings.viewmodel.mouse_rot - yaw_norm * settings.viewmodel.max_rot * 0.45f);
-			if (!lower_enabled)
-			{
-				vm_move_pos.Set(-move_x * settings.viewmodel.move_pos * move_scale, 0.f, -move_z * settings.viewmodel.move_pos * 0.75f * move_scale);
-				vm_move_rot.Set(move_z * settings.viewmodel.move_rot * 0.35f * move_scale, -move_x * settings.viewmodel.move_rot * 0.35f * move_scale, -move_x * settings.viewmodel.move_rot * move_scale);
-			}
+			vm_mouse_rot.Set(pitch_throw * settings.viewmodel.mouse_rot,
+				-yaw_throw * settings.viewmodel.mouse_rot * 0.62f,
+				-yaw_throw * settings.viewmodel.mouse_rot * 2.70f);
 		}
 		if (input.ads && vm_spring_enabled)
 		{
@@ -725,14 +1027,12 @@ void UpdateSimulation(const SimulationSettings& settings, SimulationState& state
 		vm_impulse_rot = state.viewmodel.impulse_rot;
 		vm_mouse_pos.Mul(ads_mouse_mult);
 		vm_mouse_rot.Mul(ads_mouse_mult);
-		vm_move_pos.Mul(ads_move_mult);
-		vm_move_rot.Mul(ads_move_mult);
 		vm_impulse_pos.Mul(ads_impulse_mult);
 		vm_impulse_rot.Mul(ads_impulse_mult);
 
 		SVec3 vm_sprint_pos;
 		SVec3 vm_sprint_rot;
-		if (!input.ads && vm_spring_enabled)
+		if (sprint_bridge_active)
 		{
 			const float run_wave = sprint_wave * sprint_viewmodel_amount;
 			const float run_step = sprint_step * sprint_viewmodel_amount;
@@ -745,12 +1045,10 @@ void UpdateSimulation(const SimulationSettings& settings, SimulationState& state
 		}
 
 		SVec3 vm_pos_target = vm_mouse_pos;
-		vm_pos_target.Add(vm_move_pos);
 		vm_pos_target.Add(vm_impulse_pos);
 		SVec3 vm_rot_target = vm_mouse_rot;
-		vm_rot_target.Add(vm_move_rot);
 		vm_rot_target.Add(vm_impulse_rot);
-		const float vm_limit_mult = input.ads ? std::max(0.20f, std::max(ads_mouse_mult, std::max(ads_move_mult, ads_impulse_mult))) : 1.f;
+		const float vm_limit_mult = input.ads ? std::max(0.20f, std::max(ads_mouse_mult, ads_impulse_mult)) : 1.f;
 		const float impulse_pos_allowance = Clamp(vm_impulse_pos.Magnitude() * 0.75f, 0.f, std::max(settings.impulse.impulse_pos_cap, 0.f) * 0.45f);
 		const float impulse_rot_allowance = Clamp(vm_impulse_rot.Magnitude() * 0.65f, 0.f, std::max(settings.impulse.impulse_rot_cap, 0.f) * 0.50f);
 		const float vm_pos_limit = Abs(settings.viewmodel.max_pos) * vm_limit_mult + impulse_pos_allowance;
@@ -784,12 +1082,11 @@ void UpdateSimulation(const SimulationSettings& settings, SimulationState& state
 	{
 		state.viewmodel.pos.Set(0.f, 0.f, 0.f);
 		state.viewmodel.rot.Set(0.f, 0.f, 0.f);
-		state.viewmodel.mouse_speed.Set(0.f, 0.f, 0.f);
-		state.viewmodel.prev_mouse_speed.Set(0.f, 0.f, 0.f);
-		state.viewmodel.mouse_accel.Set(0.f, 0.f, 0.f);
 		state.viewmodel.impulse_pos.Set(0.f, 0.f, 0.f);
 		state.viewmodel.impulse_rot.Set(0.f, 0.f, 0.f);
 	}
+	UpdateBodycamArmLayer(settings, state, input, output);
+	UpdateStalker2ArmLayer(settings, state, input, output);
 
 	output.yaw = state.camera.yaw;
 	output.pitch = state.camera.pitch + sprint_pitch;
@@ -800,9 +1097,121 @@ void UpdateSimulation(const SimulationSettings& settings, SimulationState& state
 	output.lower_amount = state.lowering.amount;
 }
 
+AuthoredMotionGains CalculateAuthoredMotionGains(const AuthoredMotionMetrics& metrics)
+{
+	auto deficit = [](float authored, float target)
+	{
+		return target > kEpsilon ? Clamp(1.f - authored / target, 0.f, 1.f) : 0.f;
+	};
+
+	const float lead_rotation_deficit = deficit(metrics.lead_rotation, DegToRad(2.f));
+	const float lead_translation_deficit = deficit(metrics.lead_translation, 0.012f);
+	AuthoredMotionGains gains;
+	gains.wrist = deficit(metrics.wrist_rotation, DegToRad(4.f));
+	gains.controller = std::max(std::min(lead_rotation_deficit, lead_translation_deficit), gains.wrist * 0.75f);
+	gains.arm = 0.5f * (deficit(metrics.forearm_rotation, DegToRad(3.f)) +
+		deficit(metrics.upperarm_rotation, DegToRad(2.f)));
+	return gains;
+}
+
+SVec3 CalculateAuthoredWalkRotation(float phase, float weight, const AuthoredMotionGains& gains)
+{
+	phase -= std::floor(phase);
+	weight = Clamp(weight, 0.f, 4.f);
+	const float cycle = phase * 2.f * kPi;
+	const float lateral = std::sin(cycle) + 0.16f * std::sin(3.f * cycle + 0.35f);
+	const float step = std::sin(2.f * cycle - 0.35f) + 0.12f * std::sin(4.f * cycle + 0.20f);
+	const float controller_gain = std::max(gains.controller, gains.wrist * 0.75f);
+	SVec3 rotation;
+	rotation.Set(
+		DegToRad(1.25f * step * controller_gain * weight),
+		DegToRad(0.55f * lateral * controller_gain * weight),
+		DegToRad(-2.40f * lateral * controller_gain * weight));
+	return rotation;
+}
+
+SVec3 CalculateAuthoredWalkTranslation(float phase, float weight, const AuthoredMotionGains& gains)
+{
+	phase -= std::floor(phase);
+	weight = Clamp(weight, 0.f, 4.f);
+	const float cycle = phase * 2.f * kPi;
+	const float lateral = std::sin(cycle) + 0.16f * std::sin(3.f * cycle + 0.35f);
+	const float step = std::sin(2.f * cycle - 0.35f) + 0.12f * std::sin(4.f * cycle + 0.20f);
+	const float controller_gain = std::max(gains.controller, gains.wrist * 0.75f);
+	SVec3 translation;
+	translation.Set(
+		0.0040f * lateral * controller_gain * weight,
+		0.0025f * step * controller_gain * weight,
+		-0.0012f * step * controller_gain * weight);
+	return translation;
+}
+
+float CalculateAuthoredArmFollow(float arm_gain)
+{
+	return Clamp(0.30f - 0.18f * Clamp(arm_gain, 0.f, 1.f), 0.12f, 0.30f);
+}
+
+SVec3 CalculateStalker2MouseControllerRotation(float yaw_throw, float yaw_scale, float roll_scale, float weight)
+{
+	SVec3 rotation;
+	rotation.Set(
+		yaw_throw * yaw_scale * 0.35f * weight,
+		0.f,
+		-yaw_throw * roll_scale * weight);
+	return rotation;
+}
+
+SVec3 CalculateStalker2VerticalArmFollow(float pitch_throw, float pitch_scale, float weight)
+{
+	SVec3 rotation;
+	rotation.Set(0.f, pitch_throw * pitch_scale * weight, 0.f);
+	return rotation;
+}
+
+float CalculateMouseThrow(float angular_speed, float full_scale_speed, float sensitivity)
+{
+	if (full_scale_speed <= kEpsilon)
+		return 0.f;
+	const float normalized = angular_speed / full_scale_speed * Clamp(sensitivity, 0.1f, 4.f);
+	return SoftLimitMouseResponse(normalized, 1.f);
+}
+
+float SoftLimitMouseResponse(float value, float limit)
+{
+	limit = std::max(limit, 0.f);
+	if (limit <= 0.f)
+		return 0.f;
+
+	const float normalized = value / limit;
+	const float magnitude = std::fabs(normalized);
+	const float denominator = std::pow(1.f + std::pow(magnitude, 8.f), 1.f / 8.f);
+	return value / denominator;
+}
+
+SVec3 ClampStalker2MouseRotation(const SVec3& rotation, float max_yaw, float max_pitch, float max_roll)
+{
+	SVec3 result;
+	result.Set(
+		Clamp(rotation.x, -std::max(max_yaw, 0.f), std::max(max_yaw, 0.f)),
+		Clamp(rotation.y, -std::max(max_pitch, 0.f), std::max(max_pitch, 0.f)),
+		Clamp(rotation.z, -std::max(max_roll, 0.f), std::max(max_roll, 0.f)));
+	return result;
+}
+
+float CalculateStalker2MovementAmount(float move_intent, float speed_fraction, bool accelerated, float slow_walk_scale)
+{
+	const float gait_scale = accelerated ? 1.f : Clamp(slow_walk_scale, 0.f, 1.f);
+	return Clamp(move_intent, 0.f, 1.f) * Clamp(speed_fraction, 0.f, 1.f) * gait_scale;
+}
+
 void AddFireImpulse(const SimulationSettings& settings, SimulationState& state, float power, bool ads)
 {
-	if (!settings.features.camera_enable || !settings.features.vm_enable)
+	if (settings.features.lower_enable)
+	{
+		state.lowering.fire_recovery = std::max(state.lowering.fire_recovery, std::max(settings.lowering.fire_timeout, 0.f));
+		state.lowering.combat_timer = std::max(state.lowering.combat_timer, std::max(settings.lowering.combat_timeout, 0.f));
+	}
+	if (!settings.features.vm_enable)
 		return;
 
 	const float fire_impulse = ads ? settings.impulse.ads_fire_impulse : settings.impulse.fire_impulse;
@@ -813,11 +1222,6 @@ void AddFireImpulse(const SimulationSettings& settings, SimulationState& state, 
 	const float side = state.viewmodel.mouse_speed.x >= 0.f ? -1.f : 1.f;
 	state.viewmodel.impulse_pos.Add(0.f, -0.0015f * p, -0.0040f * p);
 	state.viewmodel.impulse_rot.Add(-0.32f * p, 0.f, 0.10f * side * p);
-	if (settings.features.lower_enable)
-	{
-		state.lowering.fire_recovery = std::max(state.lowering.fire_recovery, std::max(settings.lowering.fire_timeout, 0.f));
-		state.lowering.combat_timer = std::max(state.lowering.combat_timer, std::max(settings.lowering.combat_timeout, 0.f));
-	}
 	ClampVector(state.viewmodel.impulse_pos, std::max(settings.impulse.impulse_pos_cap, 0.f));
 	ClampVector(state.viewmodel.impulse_rot, std::max(settings.impulse.impulse_rot_cap, 0.f));
 }
@@ -856,7 +1260,7 @@ bool AddNamedImpulse(const SimulationSettings& settings, SimulationState& state,
 	else
 		return false;
 
-	if (!settings.features.camera_enable || !settings.features.vm_enable)
+	if (!settings.features.vm_enable)
 		return true;
 
 	const float p = Clamp(power, 0.f, 3.f);

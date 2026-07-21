@@ -50,6 +50,7 @@ CUIMapWnd::CUIMapWnd()
 	m_scroll_mode = false;
 	m_nav_timing = Device.dwTimeGlobal;
 	hint_wnd = NULL;
+	m_UIScratchBox = NULL;
 	g_map_wnd = this;
 }
 
@@ -199,6 +200,13 @@ void CUIMapWnd::Init(LPCSTR xml_name, LPCSTR start_from)
 	AttachChild(m_UIPropertiesBox);
 	m_UIPropertiesBox->Hide();
 	m_UIPropertiesBox->SetWindowName("property_box");
+
+	m_UIScratchBox = xr_new<CUIPropertiesBox>();
+	m_UIScratchBox->SetAutoDelete(true);
+	m_UIScratchBox->InitPropertiesBox(Fvector2().set(0, 0), Fvector2().set(300, 300));
+	AttachChild(m_UIScratchBox);
+	m_UIScratchBox->Hide();
+	m_UIScratchBox->SetWindowName("property_box_scratch");
 }
 
 void CUIMapWnd::Show(bool status)
@@ -555,6 +563,16 @@ void CUIMapWnd::SendMessage(CUIWindow* pWnd, s16 msg, void* pData)
 		{
 			if (o.item == clicked)
 			{
+				// Mods rebuild their dispatch state (stored target id, label->action maps)
+				// inside pda.property_box_add_properties; after a merged multi-spot build it
+				// reflects the last spot enumerated. Replay it for the clicked item's owner
+				// so click handlers see the state a single-spot right-click would have left.
+				if (o.id != u16(65535))
+				{
+					m_UIScratchBox->RemoveAll();
+					AddSpotProperties(m_UIScratchBox, o.id, o.level, o.hint.c_str());
+					m_UIScratchBox->RemoveAll();
+				}
 				::luabind::functor<void> setctx;
 				if (ai().script_engine().functor("pda.set_map_spot_context", setctx))
 					setctx(o.id, o.level.c_str());
@@ -598,7 +616,7 @@ Fvector2 CUIMapWnd::GetGlobalMapCoordsForMouse()
 static void clean_hint_title(LPCSTR hint, string256& out)
 {
 	out[0] = 0;
-	if (!hint)
+	if (!hint || 0 == xr_strcmp(hint, "no hint")) // map_spots XML default for hintless spots
 		return;
 
 	xr_string s = hint;
@@ -656,18 +674,14 @@ void CUIMapWnd::GatherSpotsUnderCursor(CMapSpot* clicked, xr_vector<CMapSpot*>& 
 		out.push_back(clicked);
 }
 
-void CUIMapWnd::AddSpotProperties(CMapSpot* sp)
+void CUIMapWnd::AddSpotProperties(CUIPropertiesBox* box, u16 id, const shared_str& level, LPCSTR hint)
 {
-	if (!sp || !sp->MapLocation())
-		return;
 	::luabind::functor<void> funct;
 	if (ai().script_engine().functor("pda.property_box_add_properties", funct))
-		funct(m_UIPropertiesBox, sp->MapLocation()->ObjectID(),
-		      (LPCSTR)sp->MapLocation()->GetLevelName().c_str(),
-		      (LPCSTR)sp->MapLocation()->GetHint());
+		funct(box, id, (LPCSTR)level.c_str(), hint);
 }
 
-void CUIMapWnd::TagSubmenuOwners(CUIPropertiesBox* box, CUIListBoxItem* owner_item, u16 id, const shared_str& level)
+void CUIMapWnd::TagSubmenuOwners(CUIPropertiesBox* box, CUIListBoxItem* owner_item, u16 id, const shared_str& level, const shared_str& hint)
 {
 	auto& subs = box->GetItemSubmenus();
 	auto it = subs.find(owner_item);
@@ -677,8 +691,8 @@ void CUIMapWnd::TagSubmenuOwners(CUIPropertiesBox* box, CUIListBoxItem* owner_it
 	for (u32 i = 0, n = sub->GetItemsCount(); i < n; ++i)
 	{
 		CUIListBoxItem* leaf = sub->GetItemByIDX(i);
-		m_property_owners.push_back({leaf, id, level});
-		TagSubmenuOwners(sub, leaf, id, level);
+		m_property_owners.push_back({leaf, id, level, hint});
+		TagSubmenuOwners(sub, leaf, id, level, hint);
 	}
 }
 
@@ -708,7 +722,7 @@ void CUIMapWnd::ActivatePropertiesBox(const xr_vector<CMapSpot*>& spots)
 		clean_hint_title(hint, title);
 		u32 before = m_UIPropertiesBox->GetItemsCount();
 		CUIListBoxItem* header = m_UIPropertiesBox->AddHeader(title[0] ? title : level.c_str());
-		AddSpotProperties(sp);
+		AddSpotProperties(m_UIPropertiesBox, id, level, hint);
 		u32 after = m_UIPropertiesBox->GetItemsCount();
 
 		if (after == before + 1)
@@ -719,21 +733,23 @@ void CUIMapWnd::ActivatePropertiesBox(const xr_vector<CMapSpot*>& spots)
 		for (u32 i = before + 1; i < after; ++i)
 		{
 			CUIListBoxItem* root_item = m_UIPropertiesBox->GetItemByIDX(i);
-			m_property_owners.push_back({root_item, id, level});
-			TagSubmenuOwners(m_UIPropertiesBox, root_item, id, level);
+			m_property_owners.push_back({root_item, id, level, hint});
+			TagSubmenuOwners(m_UIPropertiesBox, root_item, id, level, hint);
 		}
 	}
 
 	{
+		CMapSpot* top = spots.empty() ? NULL : spots.front();
 		shared_str pos_level;
+		shared_str pos_hint = (top && top->MapLocation()) ? top->MapLocation()->GetHint() : NULL;
 		u32 before = m_UIPropertiesBox->GetItemsCount();
-		u16 pos_id = AddRightClickMapProperties(spots.empty() ? NULL : spots.front(), pos_level);
+		u16 pos_id = AddRightClickMapProperties(top, pos_level);
 		u32 after = m_UIPropertiesBox->GetItemsCount();
 		for (u32 i = before; i < after; ++i)
 		{
 			CUIListBoxItem* root_item = m_UIPropertiesBox->GetItemByIDX(i);
-			m_property_owners.push_back({root_item, pos_id, pos_level});
-			TagSubmenuOwners(m_UIPropertiesBox, root_item, pos_id, pos_level);
+			m_property_owners.push_back({root_item, pos_id, pos_level, pos_hint});
+			TagSubmenuOwners(m_UIPropertiesBox, root_item, pos_id, pos_level, pos_hint);
 		}
 	}
 

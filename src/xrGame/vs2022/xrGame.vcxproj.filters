@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 <Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup>
     <Filter Include="AI">
@@ -5421,7 +5421,25 @@
     <ClInclude Include="..\bodycam_camera.h">
       <Filter>Core\Client\Objects\actor\base</Filter>
     </ClInclude>
+    <ClInclude Include="..\bodycam_hud_arms.h">
+      <Filter>Core\Client\Objects\actor\base</Filter>
+    </ClInclude>
+    <ClInclude Include="..\bodycam_math.h">
+      <Filter>Core\Client\Objects\actor\base</Filter>
+    </ClInclude>
+    <ClInclude Include="..\bodycam_mouse_input.h">
+      <Filter>Core\Client\Objects\actor\base</Filter>
+    </ClInclude>
     <ClInclude Include="..\bodycam_movement_response.h">
+      <Filter>Core\Client\Objects\actor\base</Filter>
+    </ClInclude>
+    <ClInclude Include="..\bodycam_pip_adapter.h">
+      <Filter>Core\Client\Objects\actor\base</Filter>
+    </ClInclude>
+    <ClInclude Include="..\bodycam_settings.h">
+      <Filter>Core\Client\Objects\actor\base</Filter>
+    </ClInclude>
+    <ClInclude Include="..\bodycam_simulation.h">
       <Filter>Core\Client\Objects\actor\base</Filter>
     </ClInclude>
     <ClInclude Include="..\actor_anim_defs.h">
@@ -6062,6 +6080,9 @@
     </ClInclude>
     <ClInclude Include="..\CarLights.h">
       <Filter>Core\Client\Objects\vehicles\Car</Filter>
+    </ClInclude>
+    <ClInclude Include="..\CarDrone.h">
+      <Filter>Core\Client\Objects\vehicles\Car\CarDrone</Filter>
     </ClInclude>
     <ClInclude Include="..\CarWeapon.h">
       <Filter>Core\Client\Objects\vehicles\Car\CarWeapon</Filter>
@@ -9071,7 +9092,34 @@
     <ClCompile Include="..\bodycam_camera.cpp">
       <Filter>Core\Client\Objects\actor\base</Filter>
     </ClCompile>
+    <ClCompile Include="..\bodycam_hud_arms.cpp">
+      <Filter>Core\Client\Objects\actor\base</Filter>
+    </ClCompile>
+    <ClCompile Include="..\bodycam_console.cpp">
+      <Filter>Core\Client\Objects\actor\base</Filter>
+    </ClCompile>
+    <ClCompile Include="..\bodycam_math.cpp">
+      <Filter>Core\Client\Objects\actor\base</Filter>
+    </ClCompile>
+    <ClCompile Include="..\bodycam_mouse_input.cpp">
+      <Filter>Core\Client\Objects\actor\base</Filter>
+    </ClCompile>
     <ClCompile Include="..\bodycam_movement_response.cpp">
+      <Filter>Core\Client\Objects\actor\base</Filter>
+    </ClCompile>
+    <ClCompile Include="..\bodycam_pip_state.cpp">
+      <Filter>Core\Client\Objects\actor\base</Filter>
+    </ClCompile>
+    <ClCompile Include="..\bodycam_pip_adapter.cpp">
+      <Filter>Core\Client\Objects\actor\base</Filter>
+    </ClCompile>
+    <ClCompile Include="..\bodycam_pip_xray.cpp">
+      <Filter>Core\Client\Objects\actor\base</Filter>
+    </ClCompile>
+    <ClCompile Include="..\bodycam_settings.cpp">
+      <Filter>Core\Client\Objects\actor\base</Filter>
+    </ClCompile>
+    <ClCompile Include="..\bodycam_simulation.cpp">
       <Filter>Core\Client\Objects\actor\base</Filter>
     </ClCompile>
     <ClCompile Include="..\bodycam_script.cpp">
@@ -9718,6 +9766,9 @@
     </ClCompile>
     <ClCompile Include="..\DBG_Car.cpp">
       <Filter>Core\Client\Objects\vehicles\Car</Filter>
+    </ClCompile>
+    <ClCompile Include="..\CarDrone.cpp">
+      <Filter>Core\Client\Objects\vehicles\Car\CarDrone</Filter>
     </ClCompile>
     <ClCompile Include="..\CarWeapon.cpp">
       <Filter>Core\Client\Objects\vehicles\Car\CarWeapon</Filter>

@@ -829,6 +829,13 @@ private:
 	float m_aim_max_angle;
 	float m_aim_predict_time;
 
+	// Per-NPC fire-queue scaling, applied in CStalkerActionCombatBase::select_queue_params to the
+	// burst size and inter-burst interval the combat planner rolls (scaled size clamps to >= 1).
+	// Negative = unset: the getters return 1.0 and the planner fires exact vanilla queues. Script
+	// set_item queues, the death mag dump and player weapons are deliberately not touched.
+	float m_fire_queue_size_k;
+	float m_fire_queue_interval_k;
+
 public:
 	IC void sniper_update_rate(bool value);
 	IC bool sniper_update_rate() const;
@@ -840,6 +847,10 @@ public:
 	IC float aim_min_angle() const;
 	IC float aim_max_angle() const;
 	IC float aim_predict_time() const;
+
+	IC void  set_fire_queue_scale(float size_k, float interval_k);
+	IC float fire_queue_size_k() const;
+	IC float fire_queue_interval_k() const;
 
 private:
 	shared_str m_aim_bone_id;

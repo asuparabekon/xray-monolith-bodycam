@@ -4,19 +4,18 @@
 
 namespace Bodycam
 {
-struct DebugSnapshot;
-
-extern DebugSnapshot g_bodycam_debug_snapshot;
-
 struct RuntimeFeatureSettings
 {
 	BOOL camera_enable = TRUE;
-	BOOL vm_enable = TRUE;
+	BOOL vm_enable = FALSE;
 	BOOL lower_enable = TRUE;
+	BOOL bodycam_arm_enable = FALSE;
+	BOOL stalker2_arm_enable = TRUE;
 	BOOL impulse_debug = FALSE;
 	BOOL lower_disable_in_combat = TRUE;
 	float layer_vm_weight = 1.f;
 	float layer_lower_weight = 1.f;
+	float layer_arm_weight = 1.f;
 };
 
 struct MovementResponseSettings
@@ -39,6 +38,8 @@ struct RuntimeConfig
 	SimulationImpulseSettings impulse;
 	SimulationSprintSettings sprint;
 	SimulationLoweringSettings lowering;
+	SimulationArmSettings bodycam_arm;
+	SimulationStalker2ArmSettings stalker2_arm;
 };
 
 struct FloatBinding
@@ -62,7 +63,8 @@ const FloatBinding* GetFloatBindings(u32& count);
 const BoolBinding* GetBoolBindings(u32& count);
 void DumpConfigBindings();
 bool CameraEnabled();
-bool HudSpringEnabled();
+bool HudEffectsEnabled();
+bool AnyEffectEnabled();
 void ApplyPreset(int preset);
 bool GetFloat(LPCSTR name, float& value);
 bool SetFloat(LPCSTR name, float value);

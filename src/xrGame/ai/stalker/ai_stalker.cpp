@@ -84,6 +84,8 @@ CAI_Stalker::CAI_Stalker() :
 	m_aim_min_angle(-1.f),
 	m_aim_max_angle(-1.f),
 	m_aim_predict_time(-1.f),
+	m_fire_queue_size_k(-1.f),
+	m_fire_queue_interval_k(-1.f),
 	m_take_items_enabled(true),
 	m_death_sound_enabled(true)
 {

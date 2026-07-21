@@ -1,0 +1,41 @@
+// PIP_COMPAT_PATCH models_reflex_reticle 20260715 thinhook
+/*
+	=====================================================================
+	Addon      : Parallax Reflex Sights
+	Link       : https://www.moddb.com/mods/stalker-anomaly/addons/parallax-reflex-sights
+	Authors    : LVutner, party_50
+	Date       : 06.02.2024
+	Last Edit  : 26.01.2025
+	=====================================================================
+*/
+
+#include "common.h"
+#include "mark_adjust.h"
+
+uniform float4 shader_scope_params;
+uniform float4 s3ds_param_3;
+
+struct vf
+{
+	float4 hpos : SV_Position;
+    float2 tc0 : TEXCOORD0;
+    float3 P : TEXCOORD1;
+	float3 T : TEXCOORD3;
+	float3 B : TEXCOORD4;
+	float3 N : TEXCOORD5;
+};
+
+float4 main(vf I): SV_Target
+{
+	float3x3 TBN = float3x3(I.T + 0.0039, I.B + 0.0039, I.N);
+    float3 V_tangent = normalize(float3(dot(-I.P, TBN[0]), dot(-I.P, TBN[1]), dot(-I.P, TBN[2])));
+    float2 parallax_tc = I.tc0 - V_tangent.xy * 20.0 * (shader_scope_params.w < -1.5 && s3ds_param_3.x >= 1.5 ? 0.0 : 1.0);
+	
+	parallax_tc = (parallax_tc + (4.0 - 1) / 2) / 4.0;
+	
+	#ifdef MARK_ADJUST
+	parallax_tc = mark_adjust(parallax_tc);
+	#endif
+
+    return s_base.Sample(smp_rtlinear, parallax_tc);
+}

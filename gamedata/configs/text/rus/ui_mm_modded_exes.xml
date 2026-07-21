@@ -1148,6 +1148,9 @@
 	<string id="ui_mm_modded_exes_gameplay_monsters_pseudogiant_can_damage_objects_on_stomp">
 		<text>Псевдогигант повреждает объекты при топоте (pseudogiant_can_damage_objects_on_stomp)</text>
 	</string>
+	<string id="ui_mm_modded_exes_gameplay_monsters_pseudogiant_dodge_stomp_while_falling">
+		<text>Уклонение от хлопка псевдогиганта в падении (pseudogiant_dodge_stomp_while_falling)</text>
+	</string>
 	<string id="ui_mm_modded_exes_gameplay_monsters_telekinetic_objects_include_corpses">
 		<text>Полтеры и бюреры кидают трупы (telekinetic_objects_include_corpses)</text>
 	</string>

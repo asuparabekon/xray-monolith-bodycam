@@ -1,0 +1,396 @@
+--- Runtime controls for true PiP rendering and physical scope response.
+
+local show_window = false
+local console
+
+local curve_commands = {
+    exit = { "r__svp_exit_curve_1_4", "r__svp_exit_curve_6_20" },
+    tunnel = { "r__svp_tunnel_curve_1_4", "r__svp_tunnel_curve_6_20" },
+    dim = { "r__svp_dim_curve_1_4", "r__svp_dim_curve_6_20" },
+}
+
+local curve_sections = {
+    {
+        id = "exit",
+        label = "Exit-pupil sensitivity",
+        description = "Scales image loss caused by eye-to-scope misalignment. The authored exit pupil and eye relief remain the physical baseline.",
+        scale = "r__svp_exit_scale",
+        offset = "r__svp_exit_offset",
+    },
+    {
+        id = "tunnel",
+        label = "Tunneling",
+        description = "Scales the persistent inner tube shadow without replacing each scope's authored profile.",
+        scale = "r__svp_tunnel_scale",
+        offset = "r__svp_tunnel_offset",
+    },
+    {
+        id = "dim",
+        label = "Scope dimming",
+        description = "Scales optical brightness loss from exit-pupil and ambient-light calculations.",
+        scale = "r__svp_dim_scale",
+        offset = "r__svp_dim_offset",
+    },
+}
+
+local advanced_groups = {
+    {
+        name = "Rendering",
+        settings = {
+            { "r__svpscope", "PiP Mode" },
+            { "r__svp_render_scale", "Render Scale" },
+            { "r__svp_supersample", "Supersampling" },
+            { "r__svp_dlss", "DLSS Upscaling" },
+            { "r__svp_adaptive_res", "Adaptive Resolution" },
+            { "r__svp_lod", "LOD Reduction" },
+            { "r__svp_cull_ssa", "Small-object Culling" },
+        },
+    },
+    {
+        name = "Physical Optics",
+        settings = {
+            { "r__svp_aperture", "Physical Scope Simulation" },
+            { "r__svp_local_exposure", "Local Scope Exposure" },
+            { "r__svp_exposure_bias", "Exposure Bias" },
+            { "r__svp_twilight", "Twilight Dimming" },
+            { "r__svp_parallax", "Reticle Parallax" },
+            { "r__svp_near_blur", "Near-field Blur" },
+            { "r__svp_focus_m", "Focus Distance" },
+            { "r__svp_photo_model", "Photometric Pupil Model" },
+            { "r__svp_eyebox", "Eyebox Constraint" },
+            { "r__svp_authored_optics", "Authored Optics" },
+            { "r__svp_field_curve", "Field Curvature" },
+            { "r__svp_veiling_glare", "Veiling Glare" },
+            { "r__svp_coating", "Lens Coating" },
+            { "r__svp_mirage", "Heat Mirage" },
+        },
+    },
+    {
+        name = "Current Scope Profile",
+        settings = {
+            { "s3ds_objective_mm", "Objective Diameter" },
+            { "s3ds_tunneling_parallax", "Tube Parallax" },
+            { "s3ds_tunneling_min", "Minimum-zoom Tunneling" },
+            { "s3ds_tunneling_max", "Maximum-zoom Tunneling" },
+            { "s3ds_eye_tracking_speed", "Eye Tracking Speed" },
+            { "s3ds_eye_tracking_accel_mm_s2", "Eye Tracking Acceleration" },
+            { "s3ds_eye_tracking_limit_mm", "Eye Tracking Travel" },
+            { "s3ds_eye_relief_low_mm", "Low-zoom Eye Relief" },
+            { "s3ds_eye_relief_high_mm", "High-zoom Eye Relief" },
+            { "s3ds_exit_pupil_low_mm", "Low-zoom Exit Pupil" },
+            { "s3ds_exit_pupil_high_mm", "High-zoom Exit Pupil" },
+            { "s3ds_pupil_field_low", "Low-zoom Pupil Field" },
+            { "s3ds_pupil_field_high", "High-zoom Pupil Field" },
+            { "s3ds_transmission", "Light Transmission" },
+            { "s3ds_twilight_strength", "Twilight Strength" },
+        },
+    },
+    {
+        name = "Image and Reticle",
+        settings = {
+            { "r__svp_chroma", "Chromatic Aberration" },
+            { "r__svp_reticle_washout", "Reticle Washout" },
+            { "r__svp_acog_fiber", "ACOG Fiber Illumination" },
+            { "r__svp_autoflip_reticle", "Automatic Reticle Flip" },
+            { "r__svp_sharpen", "Scope Sharpening" },
+            { "r__svp_sharpen_falloff", "Sharpening Falloff" },
+            { "r__svp_sharpen_inner", "Sharp Inner Radius" },
+            { "r__svp_rain_optic", "Objective Rain" },
+        },
+    },
+    {
+        name = "Diagnostics",
+        settings = {
+            { "r__scope_debug", "Scope Geometry Overlay" },
+            { "r__svp_diag", "PiP Diagnostics" },
+            { "r__svp_aperture_debug", "Aperture Debug View" },
+        },
+    },
+}
+
+local descriptions = {
+    r__svp_aperture = "Master switch for local physical optics effects.",
+    r__svpscope = "PiP renderer mode. Zero disables PiP.",
+    g_zoom_smooth = "Magnification transition speed. Zero changes zoom immediately.",
+    g_zoom_analog = "Analog zoom granularity. Zero keeps authored zoom steps.",
+    r__svp_render_scale = "Scope render resolution; higher values cost more GPU time.",
+    r__svp_supersample = "Additional scope supersampling.",
+    r__svp_dlss = "Use DLSS in the PiP pass when supported.",
+    r__svp_adaptive_res = "Size the PiP target from visible lens coverage.",
+    r__svp_lod = "Reduce distant geometry detail in the scope pass.",
+    r__svp_cull_ssa = "Cull small scope-pass objects.",
+    r__svp_local_exposure = "Adapt scope exposure separately from the main view.",
+    r__svp_exposure_bias = "Scope exposure bias in stops.",
+    r__svp_twilight = "Low-light brightness loss from a small exit pupil.",
+    r__svp_parallax = "Reticle displacement caused by eye misalignment.",
+    r__svp_near_blur = "Defocus objects closer than the focus distance.",
+    r__svp_focus_m = "Parallax-free focus distance in meters.",
+    r__svp_photo_model = "Use the physical eye-pupil brightness model.",
+    r__svp_eyebox = "Strength of the physical eyebox constraint.",
+    r__svp_authored_optics = "Use per-scope objective and aperture data.",
+    r__svp_field_curve = "Outer-image softness from field curvature.",
+    r__svp_veiling_glare = "Contrast loss from off-axis light scatter.",
+    r__svp_coating = "Lens coating transmission and tint.",
+    r__svp_mirage = "Sunlight- and magnification-driven heat distortion.",
+    s3ds_objective_mm = "Active scope clear aperture in millimeters.",
+    s3ds_tunneling_parallax = "Tube-shadow movement from eye displacement.",
+    s3ds_tunneling_min = "Tunneling at minimum magnification.",
+    s3ds_tunneling_max = "Tunneling at maximum magnification.",
+    s3ds_eye_tracking_speed = "Virtual-eye correction speed.",
+    s3ds_eye_tracking_accel_mm_s2 = "Virtual-eye acceleration limit in mm/s2.",
+    s3ds_eye_tracking_limit_mm = "Maximum virtual-eye travel in millimeters.",
+    s3ds_eye_relief_low_mm = "Manufacturer eye relief at minimum magnification, in millimeters.",
+    s3ds_eye_relief_high_mm = "Manufacturer eye relief at maximum magnification, in millimeters.",
+    s3ds_exit_pupil_low_mm = "Published or derived exit pupil at minimum magnification, in millimeters.",
+    s3ds_exit_pupil_high_mm = "Published or derived exit pupil at maximum magnification, in millimeters.",
+    s3ds_pupil_field_low = "Field-dependent pupil displacement derived from low-zoom FOV geometry.",
+    s3ds_pupil_field_high = "Field-dependent pupil displacement derived from high-zoom FOV geometry.",
+    s3ds_transmission = "Published fraction of light transmitted through the optic.",
+    s3ds_twilight_strength = "Per-scope low-light dimming strength.",
+    r__svp_exit_scale = "Global exit-pupil response multiplier.",
+    r__svp_exit_offset = "Global exit-pupil response offset.",
+    r__svp_tunnel_scale = "Global tunneling multiplier.",
+    r__svp_tunnel_offset = "Global tunneling offset.",
+    r__svp_dim_scale = "Global optical dimming multiplier.",
+    r__svp_dim_offset = "Global optical dimming offset.",
+    r__svp_chroma = "Authored chromatic aberration on scope glass.",
+    r__svp_reticle_washout = "Illuminated-reticle washout on bright backgrounds.",
+    r__svp_acog_fiber = "Drive supported fiber reticles from sunlight.",
+    r__svp_autoflip_reticle = "Correct reticle orientation for inverted lens UVs.",
+    r__svp_sharpen = "Scope-image sharpening strength.",
+    r__svp_sharpen_falloff = "Sharpening reduction near the lens edge.",
+    r__svp_sharpen_inner = "Radius of the fully sharpened center.",
+    r__svp_rain_optic = "Rain rendered on the scope objective.",
+    r__scope_debug = "Scope geometry and alignment overlay.",
+    r__svp_diag = "Throttled PiP allocation and performance logging.",
+    r__svp_aperture_debug = "Aperture and exit-pupil debug view.",
+}
+local bool_commands = {
+    r__svp_aperture = true,
+    r__svp_dlss = true,
+    r__svp_local_exposure = true,
+    r__svp_photo_model = true,
+    r__svp_authored_optics = true,
+    r__svp_chroma = true,
+    r__svp_acog_fiber = true,
+    r__svp_autoflip_reticle = true,
+}
+
+local integer_commands = {
+    r__svpscope = true,
+    r__scope_debug = true,
+    r__svp_diag = true,
+    r__svp_aperture_debug = true,
+}
+
+local function get_console()
+    console = console or _G.get_console()
+    return console
+end
+
+local function get_bounds(name)
+    local ok, bounds = pcall(function() return get_console():get_variable_bounds(name) end)
+    if not ok or not bounds or bounds.min == nil or bounds.max == nil then
+        return nil
+    end
+    return bounds
+end
+
+local function command_present(name)
+    return get_bounds(name) ~= nil
+end
+
+local function get_float(name, fallback)
+    local ok, value = pcall(function() return get_console():get_float(name) end)
+    return ok and value or fallback
+end
+
+local function get_bool(name, fallback)
+    local ok, value = pcall(function() return get_console():get_bool(name) end)
+    return ok and value or fallback
+end
+
+local function set_number(name, value, integer)
+    if integer then
+        get_console():execute(string.format("%s %d", name, math.floor(value + 0.5)))
+    else
+        get_console():execute(string.format("%s %.6f", name, value))
+    end
+end
+
+local function read_vector4(name)
+    local ok, text = pcall(function() return get_console():get_string(name) end)
+    if not ok or not text then
+        return vector4():set(1, 1, 1, 1)
+    end
+    local values = {}
+    for value in string.gmatch(text, "[-+]?%d*%.?%d+") do
+        values[#values + 1] = tonumber(value)
+    end
+    return vector4():set(values[1] or 1, values[2] or 1, values[3] or 1, values[4] or 1)
+end
+
+local function write_vector4(name, value)
+    get_console():execute(string.format("%s (%.5f,%.5f,%.5f,%.5f)",
+        name, value.x, value.y, value.z, value.w))
+end
+
+local function show_tooltip(text, command, min_value, max_value)
+    if ImGui.BeginItemTooltip() then
+        ImGui.PushTextWrapPos(460)
+        ImGui.TextWrapped(text or "PiP runtime setting.")
+        ImGui.PopTextWrapPos()
+        if command then
+            ImGui.Separator()
+            ImGui.TextDisabled("Console: " .. command)
+        end
+        if min_value and max_value then
+            ImGui.Text(string.format("Minimum: %g    Maximum: %g", min_value, max_value))
+        end
+        ImGui.EndTooltip()
+    end
+end
+
+local function draw_bool(name, label)
+    if not command_present(name) then return end
+    local changed, value = ImGui.Checkbox(label .. "##" .. name, get_bool(name, false))
+    show_tooltip(descriptions[name], name, 0, 1)
+    if changed then set_number(name, value and 1 or 0, true) end
+end
+
+local function draw_float(name, label, speed, integer, known_bounds)
+    local bounds = known_bounds or get_bounds(name)
+    if not bounds then return end
+    local current = get_float(name, 0)
+    local changed, value = ImGui.DragFloat(label .. "##" .. name, current, speed or 0.01,
+        bounds.min, bounds.max, integer and "%.0f" or "%.3f", ImGuiSliderFlags.AlwaysClamp)
+    show_tooltip(descriptions[name], name, bounds.min, bounds.max)
+    if changed then set_number(name, value, integer) end
+end
+
+local function set_curve(id, values)
+    local commands = curve_commands[id]
+    write_vector4(commands[1], vector4():set(values[1], values[2], values[3], values[4]))
+    write_vector4(commands[2], vector4():set(values[5], values[6], values[7], values[8]))
+end
+
+local function apply_preset(name)
+    if name == "realistic" then
+        local values = { 1, 1, 1, 1, 1, 1, 1, 1 }
+        set_curve("exit", values)
+        set_curve("tunnel", values)
+        set_curve("dim", values)
+    elseif name == "cinematic" then
+        set_curve("exit", { 1.12, 1.15, 1.18, 1.22, 1.28, 1.34, 1.42, 1.52 })
+        set_curve("tunnel", { 1.04, 1.06, 1.09, 1.12, 1.17, 1.22, 1.29, 1.38 })
+        set_curve("dim", { 1.02, 1.03, 1.05, 1.07, 1.10, 1.14, 1.19, 1.25 })
+    elseif name == "lil_bro" then
+        local values = { 0, 0, 0, 0, 0, 0, 0, 0 }
+        set_curve("exit", values)
+        set_curve("tunnel", values)
+        set_curve("dim", values)
+    end
+    for _, section in ipairs(curve_sections) do
+        set_number(section.scale, 1, false)
+        set_number(section.offset, 0, false)
+    end
+end
+
+local function draw_presets()
+    if ImGui.Button("Realistic", vector2():set(120, 0)) then apply_preset("realistic") end
+    show_tooltip("Leaves every authored optic profile unchanged. All response multipliers are 1.0.")
+    ImGui.SameLine(0, 8)
+    if ImGui.Button("Cinematic", vector2():set(120, 0)) then apply_preset("cinematic") end
+    show_tooltip("Makes physical scope response easier to notice without making high magnification excessively restrictive.")
+    ImGui.SameLine(0, 8)
+    if ImGui.Button("Lil' Bro", vector2():set(120, 0)) then apply_preset("lil_bro") end
+    show_tooltip("Disables exit-pupil loss, tunneling, and optical dimming while leaving PiP rendering enabled. All response multipliers are 0.0.")
+end
+
+local function draw_basic()
+    draw_bool("r__svp_aperture", "Physical Scope Simulation")
+    draw_float("g_zoom_smooth", "Zoom Smoothing", 0.1)
+    draw_float("g_zoom_analog", "Analog Zoom Steps", 1.0)
+    draw_float("r__svp_render_scale", "Scope Render Scale", 0.01)
+    draw_bool("r__svp_dlss", "DLSS Scope Upscaling")
+end
+
+local function draw_curve(section)
+    local commands = curve_commands[section.id]
+    local low = read_vector4(commands[1])
+    local high = read_vector4(commands[2])
+    ImGui.Text(section.label)
+    show_tooltip(section.description)
+    local changed
+    changed, low, high = ImGui.MagnificationCurve(section.id, low, high, 0, 3, vector2():set(760, 205))
+    local values = string.format(
+        " Current anchors: 1x %.2f, 2x %.2f, 3x %.2f, 4x %.2f, 6x %.2f, 8x %.2f, 12x %.2f, 20x %.2f.",
+        low.x, low.y, low.z, low.w, high.x, high.y, high.z, high.w)
+    show_tooltip(section.description .. " Drag a point vertically; zoom anchors are fixed." .. values, nil, 0, 3)
+    if changed then
+        write_vector4(commands[1], low)
+        write_vector4(commands[2], high)
+    end
+    draw_float(section.scale, "Global Scale", 0.01)
+    draw_float(section.offset, "Global Offset", 0.005)
+end
+
+local function draw_curves()
+    draw_presets()
+    ImGui.Spacing()
+    ImGui.TextWrapped("Curves multiply every scope profile at fixed absolute magnifications. 1.0 preserves the profile, values above 1.0 amplify it, and 0.0 disables that response. Values between points are interpolated.")
+    for _, section in ipairs(curve_sections) do
+        if ImGui.CollapsingHeader(section.label .. "##curve", ImGuiTreeNodeFlags.DefaultOpen) then
+            draw_curve(section)
+        end
+    end
+end
+
+local function draw_advanced()
+    for _, group in ipairs(advanced_groups) do
+        if ImGui.CollapsingHeader(group.name, ImGuiTreeNodeFlags.None) then
+            for _, setting in ipairs(group.settings) do
+                local bounds = get_bounds(setting[1])
+                if bounds then
+                    if bool_commands[setting[1]] then
+                        draw_bool(setting[1], setting[2])
+                    else
+                        draw_float(setting[1], setting[2], (bounds.max - bounds.min) > 100 and 1.0 or 0.01,
+                            integer_commands[setting[1]], bounds)
+                    end
+                end
+            end
+        end
+    end
+end
+
+local function render_window()
+    ImGui.SetNextWindowSize(vector2():set(900, 760), ImGuiCond.FirstUseEver)
+    local expanded, visible = ImGui.Begin("Picture in Picture Settings", show_window, ImGuiWindowFlags.None)
+    show_window = visible
+    if expanded and ImGui.BeginTabBar("pip_settings_tabs", ImGuiTabBarFlags.None) then
+        if ImGui.BeginTabItem("Basic", true, ImGuiTabItemFlags.None) then
+            draw_basic()
+            ImGui.EndTabItem()
+        end
+        if ImGui.BeginTabItem("Response Curves", true, ImGuiTabItemFlags.None) then
+            draw_curves()
+            ImGui.EndTabItem()
+        end
+        if ImGui.BeginTabItem("Advanced", true, ImGuiTabItemFlags.None) then
+            draw_advanced()
+            ImGui.EndTabItem()
+        end
+        ImGui.EndTabBar()
+    end
+    ImGui.End()
+end
+
+if ImGui and ImGui.Groups and ImGui.Groups.Main and ImGui.Groups.Mods then
+    ImGui.Groups.Main.Widget(function()
+        if show_window then render_window() end
+    end)
+    ImGui.Groups.Mods.Widget(function()
+        _, show_window = ImGui.MenuItem("Picture in Picture", nil, show_window, true)
+    end)
+end

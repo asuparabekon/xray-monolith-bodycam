@@ -1,5 +1,6 @@
 #include "pch_script.h"
 #include "bodycam_camera.h"
+#include "bodycam_settings.h"
 #include "Actor.h"
 #include "level.h"
 #include "ai_space.h"
@@ -62,6 +63,40 @@ static void bodycam_add_impulse(LPCSTR kind, float power)
 		actor->cam_BodycamAddImpulse(kind, power);
 }
 
+static object bodycam_get_bindings()
+{
+	lua_State* L = ai().script_engine().lua();
+	object bindings = newtable(L);
+	int index = 1;
+
+	u32 count = 0;
+	const Bodycam::FloatBinding* floats = Bodycam::GetFloatBindings(count);
+	for (u32 i = 0; i < count; ++i)
+	{
+		const Bodycam::FloatBinding& binding = floats[i];
+		object entry = newtable(L);
+		entry["name"] = binding.name;
+		entry["console_name"] = binding.console_name;
+		entry["type"] = "float";
+		entry["min"] = binding.min_value;
+		entry["max"] = binding.max_value;
+		bindings[index++] = entry;
+	}
+
+	const Bodycam::BoolBinding* bools = Bodycam::GetBoolBindings(count);
+	for (u32 i = 0; i < count; ++i)
+	{
+		const Bodycam::BoolBinding& binding = bools[i];
+		object entry = newtable(L);
+		entry["name"] = binding.name;
+		entry["console_name"] = binding.console_name;
+		entry["type"] = "bool";
+		bindings[index++] = entry;
+	}
+
+	return bindings;
+}
+
 static object bodycam_get_state()
 {
 	lua_State* L = ai().script_engine().lua();
@@ -112,6 +147,7 @@ void Bodycam::script_register(lua_State* L)
 		def("apply_preset", &bodycam_apply_preset),
 		def("add_impulse", &bodycam_add_impulse),
 		def("dump", &bodycam_dump),
-		def("get_state", &bodycam_get_state)
+		def("get_state", &bodycam_get_state),
+		def("get_bindings", &bodycam_get_bindings)
 	];
 }

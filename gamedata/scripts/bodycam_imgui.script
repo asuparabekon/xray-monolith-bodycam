@@ -1,0 +1,473 @@
+--- Bodycam runtime settings for the engine ImGui overlay.
+
+local show_bodycam_window = false
+local bindings
+local binding_by_name = {}
+local advanced_groups
+
+local basic_sections = {
+    {
+        name = "Features",
+        settings = {
+            { "camera_decoupling_enable", "Camera Decoupling" },
+            { "vm_spring_enable", "Viewmodel Spring" },
+            { "vm_lowering_enable", "Viewmodel Lowering" },
+            { "bodycam_style_arm_ik_enable", "Bodycam Style Arm IK" },
+            { "stalker2_style_arm_ik_enable", "STALKER 2 Style Arm IK" },
+            { "movement_inertia_enable", "Movement Inertia" },
+            { "movement_inertia_disable_ads", "Disable Movement Inertia During ADS" },
+        },
+    },
+    {
+        name = "Camera",
+        settings = {
+            { "hip_camera_deadzone_yaw", "Horizontal Deadzone" },
+            { "hip_camera_deadzone_pitch", "Vertical Deadzone" },
+            { "hip_camera_follow_speed", "Follow Speed" },
+            { "hip_camera_max_yaw_offset", "Maximum Horizontal Offset" },
+            { "hip_camera_max_pitch_offset", "Maximum Vertical Offset" },
+            { "hip_camera_roll_scale", "Roll Strength" },
+        },
+    },
+    {
+        name = "Viewmodel",
+        settings = {
+            { "vm_mouse_position_scale", "Mouse Position Response" },
+            { "vm_mouse_rotation_scale", "Mouse Rotation Response" },
+            { "vm_spring_speed", "Spring Speed" },
+        },
+    },
+    {
+        name = "Movement",
+        settings = {
+            { "movement_acceleration_time", "Acceleration Time" },
+            { "movement_deceleration_time", "Deceleration Time" },
+            { "movement_turn_response", "Direction Change Weight" },
+            { "movement_stop_response", "Stopping Response" },
+            { "movement_sprint_speed_scale", "Sprint Acceleration Scale" },
+        },
+    },
+    {
+        name = "Viewmodel Lowering",
+        settings = {
+            { "vm_lowering_pitch", "Pitch" },
+            { "vm_lowering_yaw", "Yaw" },
+            { "vm_lowering_roll", "Roll" },
+            { "vm_lowering_x", "Position X" },
+            { "vm_lowering_y", "Position Y" },
+            { "vm_lowering_z", "Position Z" },
+            { "vm_lowering_slow_walk_influence", "Slow Walk Influence" },
+            { "vm_lowering_walk_influence", "Walk Influence" },
+            { "vm_lowering_movement_influence", "Movement Influence" },
+            { "vm_lowering_enter_speed", "Lowering Speed" },
+            { "vm_lowering_return_speed", "Return Speed" },
+        },
+    },
+    {
+        name = "Weapon and Sprint Effects",
+        settings = {
+            { "hip_fire_weapon_impulse", "Hip-fire Weapon Impulse" },
+            { "ads_fire_weapon_impulse", "ADS Weapon Impulse" },
+            { "sprint_transition_vm_blend_scale", "Sprint Transition Strength" },
+            { "sprint_transition_blend_smoothing", "Sprint Transition Smoothing" },
+            { "sprint_transition_start_stop_impulse_scale", "Sprint Start/Stop Weight" },
+        },
+    },
+}
+
+local basic_names = {}
+for _, section in ipairs(basic_sections) do
+    for _, setting in ipairs(section.settings) do
+        basic_names[setting[1]] = true
+    end
+end
+
+local category_order = {
+    "Camera",
+    "Viewmodel",
+    "Movement",
+    "Sprint",
+    "Impulses",
+    "Viewmodel Lowering",
+    "Bodycam Style Arm IK",
+    "STALKER 2 Style Arm IK",
+    "Layer Weights",
+    "Debugging",
+    "General",
+}
+
+local word_names = {
+    ads = "ADS",
+    fov = "FOV",
+    ik = "IK",
+    vm = "Viewmodel",
+    stalker2 = "STALKER 2",
+    x = "X",
+    y = "Y",
+    z = "Z",
+    pos = "Position",
+    rot = "Rotation",
+    mult = "Scale",
+}
+
+local binding_descriptions = {
+    impulse_debug_enable = "Enables diagnostic impulse logging and visualization. Intended for development.",
+    vm_lowering_enable = "Enables dynamic viewmodel lowering while walking.",
+    bodycam_style_arm_ik_enable = "Enables the mouse-driven Bodycam Style arm compliance layer.",
+    stalker2_style_arm_ik_enable = "Enables the separate STALKER 2 Style wrist and authored-motion layer.",
+    movement_inertia_enable = "Enables percentage-based actor acceleration, deceleration, and stopping response.",
+    movement_inertia_disable_ads = "Disables Bodycam movement inertia while aiming down sights.",
+    vm_lowering_disable_in_combat = "Suppresses dynamic viewmodel lowering during recent combat activity.",
+    stalker2_arm_ik_wrist_scale = "Amount of STALKER 2 Style output assigned to wrist motion.",
+    vm_spring_layer_weight = "Final blend weight of the complete viewmodel spring layer.",
+    vm_lowering_layer_weight = "Final blend weight of the complete viewmodel lowering layer.",
+    arm_compliance_layer_weight = "Final blend weight of the Bodycam Style arm compliance layer.",
+    camera_decoupling_enable = "Lets the weapon and aim lead while the camera follows through configurable deadzones.",
+    vm_spring_enable = "Enables mouse-driven procedural viewmodel spring motion.",
+    stalker2_arm_ik_movement_strength = "Strength of movement-driven STALKER 2 Style wrist augmentation.",
+    stalker2_arm_ik_movement_response = "How quickly movement-driven wrist augmentation follows gait changes.",
+    stalker2_arm_ik_slow_walk_scale = "Multiplier applied to movement-driven wrist augmentation during slow walk.",
+    stalker2_arm_ik_mouse_pitch = "Pitch-axis shape and direction for mouse-driven wrist response.",
+    stalker2_arm_ik_mouse_yaw = "Yaw-axis shape and direction for mouse-driven wrist response.",
+    stalker2_arm_ik_mouse_roll = "Roll-axis shape and direction for mouse-driven wrist response.",
+    stalker2_arm_ik_ads_scale = "Multiplier for STALKER 2 Style wrist motion while aiming down sights.",
+    stalker2_arm_ik_mouse_strength = "Overall multiplier for mouse-driven STALKER 2 Style wrist motion.",
+    stalker2_arm_ik_mouse_sensitivity = "How quickly mouse motion reaches the configured wrist angle limits.",
+    stalker2_arm_ik_mouse_max_yaw = "Hard yaw-angle limit for mouse-driven wrist motion.",
+    stalker2_arm_ik_mouse_max_pitch = "Hard pitch-angle limit for mouse-driven wrist motion.",
+    stalker2_arm_ik_mouse_max_roll = "Hard roll-angle limit for mouse-driven wrist motion.",
+    arm_compliance_forearm_scale = "Share of Bodycam Style compliance applied to forearms.",
+    arm_compliance_twist_scale = "Share of Bodycam Style compliance applied to forearm twist bones.",
+    stalker2_arm_ik_strength = "Overall strength of the STALKER 2 Style wrist and arm layer.",
+    stalker2_arm_ik_response = "Primary response speed of the STALKER 2 Style wrist layer.",
+    stalker2_arm_ik_follow_response = "Response speed of the secondary authored-animation arm-follow layer.",
+    stalker2_arm_ik_follow_scale = "Strength of secondary arm motion derived from authored animation.",
+    arm_compliance_mouse_pitch = "Pitch response of Bodycam Style arm compliance to mouse movement.",
+    arm_compliance_mouse_yaw = "Yaw response of Bodycam Style arm compliance to mouse movement.",
+    arm_compliance_mouse_roll = "Roll response of Bodycam Style arm compliance to mouse movement.",
+    arm_compliance_secondary_roll = "Additional counter-roll distributed through the visible arm chain.",
+    arm_compliance_hand_scale = "Share of Bodycam Style compliance applied directly to HUD hand bones.",
+    arm_compliance_upperarm_scale = "Share of Bodycam Style compliance applied to upper arms.",
+    vm_lowering_fire_suppression_time = "Time lowering remains suppressed after firing.",
+    vm_lowering_ads_release_time = "Time lowering remains suppressed after leaving ADS.",
+    vm_lowering_combat_suppression_time = "Time lowering remains suppressed after combat activity.",
+    arm_compliance_strength = "Overall strength of Bodycam Style mouse-driven arm compliance.",
+    arm_compliance_response = "How quickly Bodycam Style arm compliance follows mouse motion.",
+    arm_compliance_ads_scale = "Multiplier for Bodycam Style arm compliance while aiming down sights.",
+    vm_safemode_lowering_y_offset = "Additional vertical lowering offset used by safe or holstered weapon states.",
+    vm_lowering_slow_walk_influence = "Fraction of the lowering pose applied during slow walk.",
+    vm_lowering_walk_influence = "Fraction of the lowering pose applied during normal walk.",
+    vm_lowering_movement_influence = "Overall movement contribution to dynamic weapon lowering.",
+    vm_lowering_enter_speed = "How quickly the viewmodel enters the lowered pose.",
+    vm_lowering_return_speed = "How quickly the viewmodel returns from the lowered pose.",
+    vm_lowering_pitch = "Viewmodel pitch applied by the weapon-lowering pose.",
+    vm_lowering_yaw = "Viewmodel yaw applied by the weapon-lowering pose.",
+    vm_lowering_roll = "Viewmodel roll applied by the weapon-lowering pose.",
+    vm_lowering_x = "Weapon-lowering position along the viewmodel X axis.",
+    vm_lowering_y = "Weapon-lowering position along the viewmodel Y axis.",
+    vm_lowering_z = "Weapon-lowering position along the viewmodel Z axis.",
+    mouse_flick_impulse = "Additional impulse generated by fast mouse movement.",
+    hip_fire_weapon_impulse = "Weapon impulse strength for firing from hip-fire.",
+    ads_fire_weapon_impulse = "Weapon impulse strength for firing while aiming down sights.",
+    impulse_decay_speed = "How quickly general procedural impulses lose energy.",
+    impulse_max_position_offset = "Hard positional displacement limit for accumulated impulses.",
+    impulse_max_rotation_offset = "Hard angular displacement limit for accumulated impulses.",
+    sprint_impulse_camera_scale = "Camera motion contribution from sprint start and stop impulses.",
+    sprint_impulse_fov_scale = "FOV pulse strength produced by sprint start and stop.",
+    sprint_impulse_fov_return_speed = "How quickly the temporary sprint FOV pulse returns to normal.",
+    sprint_impulse_motion_return_speed = "How quickly sprint start and stop motion impulses settle.",
+    ads_transition_impulse = "Impulse applied when entering or leaving ADS.",
+    landing_impulse = "Impulse strength generated when the actor lands.",
+    sprint_transition_vm_position = "Viewmodel positional offset used during the sprint transition bridge.",
+    sprint_transition_animation_handoff_speed = "Normalized sprint progress at which the authored sprint animation takes over.",
+    sprint_transition_impulse = "Legacy shared sprint transition impulse strength.",
+    sprint_start_impulse = "Motion impulse applied when sprint acceleration begins.",
+    sprint_stop_impulse = "Motion impulse applied when sprint deceleration finishes.",
+    sprint_impulse_ads_scale = "Multiplier for sprint-related impulses while aiming down sights.",
+    sprint_transition_vm_blend_scale = "Strength of the procedural bridge into the authored sprint pose.",
+    sprint_transition_blend_smoothing = "Smoothness of the procedural handoff into and out of sprint animation.",
+    sprint_transition_start_stop_impulse_scale = "Strength of weight accents when sprint starts or ends.",
+    sprint_transition_vm_pitch = "Viewmodel pitch used while bridging toward the sprint animation.",
+    sprint_transition_vm_yaw = "Viewmodel yaw used while bridging toward the sprint animation.",
+    sprint_transition_vm_roll = "Viewmodel roll used while bridging toward the sprint animation.",
+    vm_movement_smoothing_speed = "Response rate of the movement-driven viewmodel input filter.",
+    movement_acceleration_time = "Time required to reach the movement speed supplied by the game or movement mods.",
+    movement_deceleration_time = "Time required to slow to a stop after movement input ends.",
+    movement_turn_response = "How strongly velocity redirects when changing movement direction.",
+    movement_stop_response = "Weight and firmness of the procedural stopping response.",
+    movement_sprint_speed_scale = "Multiplier applied to the current game-defined sprint speed target.",
+    vm_ads_sight_anchor_strength = "Strength used to keep the sight picture aligned during procedural ADS motion.",
+    vm_ads_anchor_position_scale = "Maximum positional correction used by the ADS sight anchor.",
+    vm_ads_anchor_rotation_scale = "Maximum angular correction used by the ADS sight anchor.",
+    movement_camera_roll_scale = "Camera roll generated by actor movement and strafing.",
+    movement_camera_position_scale = "Camera positional shift generated by actor movement.",
+    vm_mouse_smoothing_speed = "Response rate of the mouse-driven viewmodel input filter.",
+    vm_mouse_position_scale = "Amount of viewmodel positional motion produced by mouse movement.",
+    vm_mouse_rotation_scale = "Amount of viewmodel rotation produced by mouse movement.",
+    vm_max_position_offset = "Hard limit for procedural viewmodel positional displacement.",
+    vm_max_rotation_offset = "Hard limit for procedural viewmodel angular displacement.",
+    vm_ads_mouse_scale = "Multiplier applied to mouse-driven viewmodel motion while aiming down sights.",
+    vm_ads_impulse_scale = "Multiplier applied to procedural viewmodel impulses while aiming down sights.",
+    ads_camera_max_yaw_offset = "Maximum horizontal separation between the ADS camera and sight direction.",
+    ads_camera_max_pitch_offset = "Maximum vertical separation between the ADS camera and sight direction.",
+    ads_camera_roll_scale = "Camera roll generated by horizontal ADS sight separation.",
+    ads_camera_position_scale = "Camera positional shift generated by ADS sight separation.",
+    vm_spring_speed = "How quickly viewmodel spring displacement follows and returns toward its target.",
+    vm_spring_damping = "Controls viewmodel spring overshoot. Higher values reduce oscillation.",
+    ads_camera_follow_speed = "How quickly the ADS camera catches up to the sight direction.",
+    ads_camera_follow_damping = "Controls overshoot in ADS camera following. Higher values settle more firmly.",
+    ads_camera_deadzone_yaw = "Horizontal sight travel allowed before the ADS camera starts following.",
+    ads_camera_deadzone_pitch = "Vertical sight travel allowed before the ADS camera starts following.",
+    ads_camera_soft_follow_yaw = "Horizontal transition width between the ADS deadzone and full following.",
+    ads_camera_soft_follow_pitch = "Vertical transition width between the ADS deadzone and full following.",
+    hip_camera_soft_follow_pitch = "Vertical transition width between the deadzone and full camera following.",
+    hip_camera_max_yaw_offset = "Maximum horizontal separation between the hip-fire camera and aim direction.",
+    hip_camera_max_pitch_offset = "Maximum vertical separation between the hip-fire camera and aim direction.",
+    hip_camera_roll_scale = "Camera roll generated by horizontal hip-fire aim separation.",
+    hip_camera_position_scale = "Camera positional shift generated by hip-fire aim separation.",
+    ads_camera_inner_zone_response = "Camera response to mouse input while ADS aim remains inside the deadzone.",
+    hip_camera_inner_zone_response = "Camera response to mouse input while hip-fire aim remains inside the deadzone.",
+    hip_camera_follow_speed = "How quickly the hip-fire camera catches up to the viewmodel direction.",
+    hip_camera_follow_damping = "Controls overshoot in hip-fire camera following. Higher values settle more firmly.",
+    hip_camera_deadzone_yaw = "Horizontal mouse travel allowed before the hip-fire camera starts following.",
+    hip_camera_deadzone_pitch = "Vertical mouse travel allowed before the hip-fire camera starts following.",
+    hip_camera_soft_follow_yaw = "Horizontal transition width between the deadzone and full camera following.",
+}
+
+local function human_name(name)
+    local words = {}
+    for word in string.gmatch(name, "[^_]+") do
+        local replacement = word_names[word]
+        if replacement then
+            table.insert(words, replacement)
+        else
+            table.insert(words, string.upper(string.sub(word, 1, 1)) .. string.sub(word, 2))
+        end
+    end
+    return table.concat(words, " ")
+end
+
+local function category_for(name)
+    if string.find(name, "stalker2_", 1, true) == 1 then
+        return "STALKER 2 Style Arm IK"
+    elseif string.find(name, "arm_compliance_", 1, true) == 1 or name == "bodycam_style_arm_ik_enable" then
+        return "Bodycam Style Arm IK"
+    elseif string.find(name, "vm_lowering_", 1, true) == 1 then
+        return "Viewmodel Lowering"
+    elseif string.find(name, "hip_camera_", 1, true) == 1 or string.find(name, "ads_camera_", 1, true) == 1 or
+        string.find(name, "movement_camera_", 1, true) == 1 or name == "camera_decoupling_enable" then
+        return "Camera"
+    elseif string.find(name, "vm_", 1, true) == 1 then
+        return "Viewmodel"
+    elseif string.find(name, "movement_", 1, true) == 1 then
+        return "Movement"
+    elseif string.find(name, "sprint_transition_", 1, true) == 1 or string.find(name, "sprint_", 1, true) == 1 then
+        return "Sprint"
+    elseif string.find(name, "impulse", 1, true) or string.find(name, "fire_weapon", 1, true) or
+        string.find(name, "landing_", 1, true) == 1 or string.find(name, "mouse_flick_", 1, true) == 1 then
+        return "Impulses"
+    elseif string.find(name, "layer_weight", 1, true) then
+        return "Layer Weights"
+    elseif string.find(name, "debug", 1, true) then
+        return "Debugging"
+    end
+    return "General"
+end
+
+local function load_bindings()
+    if bindings then
+        return true
+    end
+    if not bodycam or not bodycam.get_bindings then
+        return false
+    end
+
+    local ok, result = pcall(bodycam.get_bindings)
+    if not ok or not result then
+        return false
+    end
+
+    bindings = result
+    for _, binding in ipairs(bindings) do
+        binding_by_name[binding.name] = binding
+    end
+    return true
+end
+
+local function show_binding_tooltip(binding)
+    if ImGui.BeginItemTooltip() then
+        ImGui.PushTextWrapPos(430)
+        ImGui.TextWrapped(binding_descriptions[binding.name] or ("Adjusts " .. human_name(binding.name) .. "."))
+        ImGui.PopTextWrapPos()
+        ImGui.Separator()
+        ImGui.TextDisabled("Console: " .. binding.console_name)
+        if binding.type == "float" then
+            ImGui.Text(string.format("Minimum: %g    Maximum: %g", binding.min, binding.max))
+        else
+            ImGui.Text("Minimum: 0 (Off)    Maximum: 1 (On)")
+        end
+        ImGui.EndTooltip()
+    end
+end
+
+local function float_format(binding)
+    local span = binding.max - binding.min
+    if span <= 0.5 then
+        return "%.3f"
+    elseif span <= 2.0 then
+        return "%.2f"
+    end
+    return "%.1f"
+end
+
+local function drag_speed(binding)
+    local span = binding.max - binding.min
+    if span <= 0.5 then
+        return 0.001
+    elseif span <= 2.0 then
+        return 0.01
+    end
+    return 0.1
+end
+
+local function draw_binding(binding, label, use_slider)
+    ImGui.TableNextRow(ImGuiTableRowFlags.None, 0)
+    ImGui.TableSetColumnIndex(0)
+    ImGui.Text(label)
+    show_binding_tooltip(binding)
+    ImGui.TableSetColumnIndex(1)
+
+    if binding.type == "bool" then
+        local current = bodycam.get_bool(binding.name, false)
+        local changed, value = ImGui.Checkbox("##" .. binding.name, current)
+        show_binding_tooltip(binding)
+        if changed then
+            bodycam.set_bool(binding.name, value)
+        end
+        return
+    end
+
+    local current = bodycam.get_float(binding.name, 0)
+    local changed, value
+    if use_slider then
+        changed, value = ImGui.SliderFloat("##" .. binding.name, current, binding.min, binding.max,
+            float_format(binding), ImGuiSliderFlags.None)
+    else
+        changed, value = ImGui.DragFloat("##" .. binding.name, current, drag_speed(binding), binding.min,
+            binding.max, float_format(binding), ImGuiSliderFlags.None)
+    end
+    show_binding_tooltip(binding)
+    if changed then
+        bodycam.set_float(binding.name, value)
+    end
+end
+
+local function draw_settings_table(id, settings, use_slider)
+    if not ImGui.BeginTable(id, 2, ImGuiTableFlags.None, vector2():set(0, 0), 0) then
+        return
+    end
+
+    ImGui.TableSetupColumn("Setting", ImGuiTableColumnFlags.None, 0.62, 0)
+    ImGui.TableSetupColumn("Value", ImGuiTableColumnFlags.None, 0.38, 0)
+    for _, setting in ipairs(settings) do
+        local binding = binding_by_name[setting[1]]
+        if binding then
+            draw_binding(binding, setting[2], use_slider)
+        end
+    end
+    ImGui.EndTable()
+end
+
+local function draw_presets()
+    if ImGui.Button("Balanced", vector2():set(110, 0)) then
+        bodycam.apply_preset(1)
+    end
+    ImGui.SameLine(0, 8)
+    if ImGui.Button("Stronger", vector2():set(110, 0)) then
+        bodycam.apply_preset(2)
+    end
+    ImGui.SameLine(0, 8)
+    if ImGui.Button("Cinematic", vector2():set(110, 0)) then
+        bodycam.apply_preset(3)
+    end
+end
+
+local function draw_basic_tab()
+    draw_presets()
+    ImGui.Spacing()
+    for _, section in ipairs(basic_sections) do
+        if ImGui.CollapsingHeader(section.name, ImGuiTreeNodeFlags.DefaultOpen) then
+            draw_settings_table("bodycam_basic_" .. section.name, section.settings, true)
+        end
+    end
+end
+
+local function build_advanced_groups()
+    local groups = {}
+    for _, category in ipairs(category_order) do
+        groups[category] = {}
+    end
+
+    for _, binding in ipairs(bindings) do
+        if not basic_names[binding.name] then
+            local category = category_for(binding.name)
+            table.insert(groups[category], { binding.name, human_name(binding.name) })
+        end
+    end
+    return groups
+end
+
+local function draw_advanced_tab()
+    if not advanced_groups then
+        advanced_groups = build_advanced_groups()
+    end
+    if ImGui.Button("Dump Runtime State", vector2():set(160, 0)) then
+        bodycam.dump()
+    end
+    ImGui.Spacing()
+
+    for _, category in ipairs(category_order) do
+        local settings = advanced_groups[category]
+        if #settings > 0 and ImGui.CollapsingHeader(category, ImGuiTreeNodeFlags.None) then
+            draw_settings_table("bodycam_advanced_" .. category, settings, false)
+        end
+    end
+end
+
+local function render_bodycam_window()
+    ImGui.SetNextWindowSize(vector2():set(860, 680), ImGuiCond.FirstUseEver)
+    local expanded, visible = ImGui.Begin("Bodycam Settings", show_bodycam_window, ImGuiWindowFlags.None)
+    show_bodycam_window = visible
+
+    if expanded then
+        if not load_bindings() then
+            ImGui.TextColored(fcolor():set(1, 0.4, 0.4, 1), "Bodycam binding metadata is unavailable")
+        elseif ImGui.BeginTabBar("bodycam_settings_tabs", ImGuiTabBarFlags.None) then
+            local basic_open = ImGui.BeginTabItem("Basic", true, ImGuiTabItemFlags.None)
+            if basic_open then
+                draw_basic_tab()
+                ImGui.EndTabItem()
+            end
+
+            local advanced_open = ImGui.BeginTabItem("Advanced", true, ImGuiTabItemFlags.None)
+            if advanced_open then
+                draw_advanced_tab()
+                ImGui.EndTabItem()
+            end
+            ImGui.EndTabBar()
+        end
+    end
+    ImGui.End()
+end
+
+if ImGui and ImGui.Groups and ImGui.Groups.Main and ImGui.Groups.Mods then
+    ImGui.Groups.Main.Widget(function()
+        if show_bodycam_window then
+            render_bodycam_window()
+        end
+    end)
+
+    ImGui.Groups.Mods.Widget(function()
+        _, show_bodycam_window = ImGui.MenuItem("Bodycam", nil, show_bodycam_window, true)
+    end)
+end

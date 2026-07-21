@@ -175,6 +175,23 @@ IC float CAI_Stalker::aim_predict_time() const
 	return (m_aim_predict_time < 0.f ? g_aim_predict_time : m_aim_predict_time);
 }
 
+IC void CAI_Stalker::set_fire_queue_scale(float size_k, float interval_k)
+{
+	m_fire_queue_size_k     = size_k;
+	m_fire_queue_interval_k = interval_k;
+}
+
+// Negative = unset: scale 1.0, the combat planner rolls exact vanilla queues.
+IC float CAI_Stalker::fire_queue_size_k() const
+{
+	return (m_fire_queue_size_k < 0.f ? 1.f : m_fire_queue_size_k);
+}
+
+IC float CAI_Stalker::fire_queue_interval_k() const
+{
+	return (m_fire_queue_interval_k < 0.f ? 1.f : m_fire_queue_interval_k);
+}
+
 IC void CAI_Stalker::take_items_enabled(bool value)
 {
 	m_take_items_enabled = value;

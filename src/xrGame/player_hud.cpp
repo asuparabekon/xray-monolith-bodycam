@@ -11,6 +11,8 @@
 #include "weapon.h"
 #include "script_attachment_manager.h"
 #include "../xrEngine/CameraBase.h"
+#include "bodycam_camera.h"
+#include "bodycam_hud_arms.h"
 
 extern int g_nearwall;
 
@@ -576,14 +578,20 @@ void hud_item_measures::load(const shared_str& sect_name, IKinematics* K)
 
 attachable_hud_item::~attachable_hud_item()
 {
-	IRenderVisual* v = m_model->dcast_RenderVisual();
-	::Render->model_Delete(v);
-	m_model = nullptr;
+	if (m_model)
+	{
+		IRenderVisual* v = m_model->dcast_RenderVisual();
+		::Render->model_Delete(v);
+		m_model = nullptr;
+	}
 }
 
 void attachable_hud_item::load(const shared_str& sect_name)
 {
 	m_sect_name = sect_name;
+	m_active_hand_motion.invalidate();
+	m_active_hand_blend = nullptr;
+	++m_active_hand_generation;
 
 	// Visual
 	LPCSTR visual_name = pSettings->r_string(sect_name, "item_visual");
@@ -723,6 +731,7 @@ player_hud::player_hud()
 	script_anim_offset_factor = 0.f;
 	m_item_pos.identity();
 	script_override_arms = false;
+	m_bodycam_hud_arms = xr_new<Bodycam::HudArms>(*this);
 
 	//Bone Callback Params
 	m_bone_callback_params.insert(mk_pair(r_finger0, xr_new<BoneCallbackParams>()));
@@ -760,15 +769,27 @@ player_hud::player_hud()
 	}
 }
 
+void player_hud::DumpStalker2AuthoredMotionProfile()
+{
+	m_bodycam_hud_arms->DumpAuthoredMotionProfile();
+}
+
 player_hud::~player_hud()
 {
-	IRenderVisual* v = m_model->dcast_RenderVisual();
-	::Render->model_Delete(v);
-	m_model = nullptr;
+	xr_delete(m_bodycam_hud_arms);
+	if (m_model)
+	{
+		IRenderVisual* v = m_model->dcast_RenderVisual();
+		::Render->model_Delete(v);
+		m_model = nullptr;
+	}
 
-	v = m_model_2->dcast_RenderVisual();
-	::Render->model_Delete(v);
-	m_model_2 = nullptr;
+	if (m_model_2)
+	{
+		IRenderVisual* v = m_model_2->dcast_RenderVisual();
+		::Render->model_Delete(v);
+		m_model_2 = nullptr;
+	}
 
 	delete_data(m_hand_motions);
 	delete_data(m_script_layers);
@@ -872,6 +893,7 @@ void player_hud::load(const shared_str& player_hud_sect, bool force)
 	// hides the unused arm meshes
 	m_model->dcast_PKinematics()->LL_SetBoneVisible(l_arm, FALSE, TRUE);
 	m_model_2->dcast_PKinematics()->LL_SetBoneVisible(r_arm, FALSE, TRUE);
+	m_bodycam_hud_arms->Reset();
 
 	CInifile::Sect& _sect = pSettings->r_section(player_hud_sect);
 	CInifile::SectCIt _b = _sect.Data.begin();
@@ -1074,7 +1096,6 @@ const Fvector player_hud::attach_pos(u8 part) const
 }
 
 #include "Inventory.h"
-#include "bodycam_camera.h"
 extern float g_freelook_z_offset;
 extern float psHUD_FOV;
 
@@ -1224,6 +1245,10 @@ void player_hud::update(const Fmatrix& cam_trans)
 	m_model_2->UpdateTracks();
 	m_model_2->dcast_PKinematics()->CalculateBones_Invalidate();
 	m_model_2->dcast_PKinematics()->CalculateBones(TRUE);
+
+	Bodycam::ArmPose bodycam_arm_pose;
+	Actor()->cam_BodycamGetArmPose(bodycam_arm_pose);
+	m_bodycam_hud_arms->UpdateAndApply(bodycam_arm_pose, Device.fTimeDelta);
 
 	for (script_layer* anm : m_script_layers)
 	{
@@ -1496,31 +1521,31 @@ float player_hud::SetBlendAnmTime(LPCSTR name, float time)
 }
 
 //0 = both, 1 = left, 2 = right
-void play_blend(player_hud* hud, u8 pid, const MotionID& M, BOOL bMixIn, float speed, bool script_anim = false)
+CBlend* play_blend(player_hud* hud, u8 pid, const MotionID& M, BOOL bMixIn, float speed, bool script_anim = false)
 {
 	switch (pid)
 	{
 	case 0:
 	{
-		if (!script_anim && hud->script_anim_part == 2) return;
+		if (!script_anim && hud->script_anim_part == 2) return nullptr;
 		play_blend(hud, 1, M, bMixIn, speed);
-		play_blend(hud, 2, M, bMixIn, speed);
-		break;
+		return play_blend(hud, 2, M, bMixIn, speed);
 	}
 	case 1:
-		if (!script_anim && hud->script_anim_part == 1) return;
+		if (!script_anim && hud->script_anim_part == 1) return nullptr;
 		hud->m_model_2->PlayCycle(0, M, bMixIn, 0, 0, 0, speed);
 		hud->m_model_2->PlayCycle(1, M, bMixIn, 0, 0, 0, speed);
 		hud->m_model_2->PlayCycle(2, M, bMixIn, 0, 0, 0, speed);
 		hud->m_model_2->dcast_PKinematics()->CalculateBones_Invalidate();
-		break;
+		return nullptr;
 	case 2:
-		if (!script_anim && hud->script_anim_part == 0) return;
-		hud->m_model->PlayCycle(0, M, bMixIn, 0, 0, 0, speed);
+		if (!script_anim && hud->script_anim_part == 0) return nullptr;
+		CBlend* active_blend = hud->m_model->PlayCycle(0, M, bMixIn, 0, 0, 0, speed);
 		hud->m_model->PlayCycle(2, M, bMixIn, 0, 0, 0, speed);
 		hud->m_model->dcast_PKinematics()->CalculateBones_Invalidate();
-		break;
+		return active_blend;
 	}
+	return nullptr;
 }
 
 extern BOOL print_bone_warnings;
@@ -1560,7 +1585,13 @@ u32 player_hud::anim_play(u16 part, const MotionID& M, BOOL bMixIn, const CMotio
 	if (override_part != u16(-1))
 		part_id = override_part;
 
-	play_blend(this, part_id, M, bMixIn, speed);
+	CBlend* active_blend = play_blend(this, part_id, M, bMixIn, speed);
+	if (part < 2 && m_attached_items[part])
+	{
+		m_attached_items[part]->m_active_hand_motion = M;
+		m_attached_items[part]->m_active_hand_blend = active_blend;
+		++m_attached_items[part]->m_active_hand_generation;
+	}
 
 	return motion_length(M, md, speed);
 }
@@ -1726,9 +1757,19 @@ void player_hud::attach_item(CHudItem* item)
 	if (m_attached_items[item_idx] != pi)
 	{
 		if (m_attached_items[item_idx])
+		{
+			m_attached_items[item_idx]->m_active_hand_motion.invalidate();
+			m_attached_items[item_idx]->m_active_hand_blend = nullptr;
+			++m_attached_items[item_idx]->m_active_hand_generation;
 			m_attached_items[item_idx]->m_parent_hud_item->on_b_hud_detach();
+		}
 
 		m_attached_items[item_idx] = pi;
+		pi->m_active_hand_motion.invalidate();
+		pi->m_active_hand_blend = nullptr;
+		++pi->m_active_hand_generation;
+		if (item_idx == 0)
+			m_bodycam_hud_arms->OnWeaponChanged(pi);
 
 		if (item_idx == 0 && m_attached_items[1])
 			m_attached_items[1]->m_parent_hud_item->CheckCompatibility(item);
@@ -1818,7 +1859,12 @@ void player_hud::detach_item_idx(u16 idx)
 	if (NULL == m_attached_items[idx]) return;
 
 	m_attached_items[idx]->m_parent_hud_item->on_b_hud_detach();
+	m_attached_items[idx]->m_active_hand_motion.invalidate();
+	m_attached_items[idx]->m_active_hand_blend = nullptr;
+	++m_attached_items[idx]->m_active_hand_generation;
 	m_attached_items[idx] = NULL;
+	if (idx == 0)
+		m_bodycam_hud_arms->OnWeaponChanged(nullptr);
 
 	if (idx == 1)
 	{

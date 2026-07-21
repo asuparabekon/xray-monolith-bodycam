@@ -2,6 +2,23 @@
 
 This fork is a Bodycam-focused build of the S.T.A.L.K.E.R. Anomaly / GAMMA modded executable.
 
+## **WHAT'S NEW**
+
+1. Full PiP RC8.4 implementation.
+2. Custom realistic physical scope simulation for PiP, featuring:
+   - Dynamic exit-pupil vignetting based on eye alignment.
+   - Scope tunneling, image transmission, field of view, eye relief, and objective diameter modeled separately.
+   - Magnification changes that affect optical behavior instead of simply scaling a shader.
+   - Real-world specifications for supported LPVOs, magnifiers, prism sights, Eastern optics, night-vision optics, and integrated weapon sights.
+3. ImGui menu: press `F11`, then open `Mods > Bodycam` or `Mods > Picture in Picture`.
+4. Dynamic STALKER 2 IK and Bodycam IK effects that make arm movements feel more alive. Choose one or the other.
+5. Bodycam improvements:
+   - Rewritten mouse-input handling for more consistent behavior across sensitivity settings.
+   - Improved ADS and PiP camera coordination.
+   - Updated default tuning and presets.
+   - Cleaner separation between camera, viewmodel, arm, and scope behavior.
+6. Merged the latest MT build.
+
 ## Bodycam MT Version
 
 This version keeps the upstream MT test build as the base and adds an engine-level Bodycam module with:

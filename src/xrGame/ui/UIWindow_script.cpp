@@ -135,8 +135,6 @@ using namespace luabind;
 #pragma optimize("s",on)
 void CUIWindow::script_register(lua_State* L)
 {
-	RegisterLuaDeleteGuard();
-
 	module(L)
 	[
 		def("GetARGB", &GetARGB),

@@ -269,10 +269,9 @@ void CRenderTarget::accum_spot(light* L)
 }
 
 // Stub to use vanilla
-bool CRenderTarget::accum_volumetric_lv(light* L)
+void CRenderTarget::accum_volumetric_lv(light* L)
 {
     accum_volumetric(L);
-	return true;
 }
 
 void CRenderTarget::accum_volumetric(light* L)

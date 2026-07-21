@@ -283,15 +283,13 @@ void CStepManager::play_forced_step(float power, bool b_hud_view)
 
 	if (object->ID() == 0)
 	{
-		SGameMtl* mt = GMLib.GetMaterialByID(mtl_pair->GetMtl1());
-		if (mt)
+		SGameMtl* material = GMLib.GetMaterialByID(mtl_pair->GetMtl1());
+		if (material)
 		{
-			::luabind::functor<bool> funct;
-			if (ai().script_engine().functor("_G.CActor__FootstepCallback", funct))
-			{
-				if (funct(*mt->m_Name, power, b_hud_view))
-					m_step_sound.play_next(mtl_pair, m_object, power, b_hud_view);
-			}
+			::luabind::functor<bool> callback;
+			if (ai().script_engine().functor("_G.CActor__FootstepCallback", callback) &&
+				callback(*material->m_Name, power, b_hud_view))
+				m_step_sound.play_next(mtl_pair, m_object, power, b_hud_view);
 		}
 	}
 	else

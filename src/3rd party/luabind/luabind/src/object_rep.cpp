@@ -23,8 +23,6 @@
 #include <luabind/detail/class_rep.hpp>
 #include <luabind/detail/object_rep.hpp>
 #include <luabind/detail/method_rep.hpp>
-#include <luabind/luabind_delete.h>
-#include <cstring>
 
 #include <luabind/detail/overload_rep_impl.hpp>
 
@@ -38,23 +36,6 @@
 
 namespace luabind { namespace detail
 {
-	static bool has_base_class_named(const class_rep* crep, const char* name)
-	{
-		if (!crep || !name)
-			return false;
-
-		const char* class_name = crep->name();
-		if (class_name && strcmp(class_name, name) == 0)
-			return true;
-
-		for (const class_rep::base_info& base : crep->bases())
-		{
-			if (has_base_class_named(base.base, name))
-				return true;
-		}
-
-		return false;
-	}
 
 	// dest is a function that is called to delete the c++ object this struct holds
 	object_rep::object_rep(void* obj, class_rep* crep, int flags, void(*dest)(void*))
@@ -95,15 +76,7 @@ namespace luabind { namespace detail
 		if (!sz_cmp(debug_class,m_classrep->name()))
 			Log(debug_test_destructor);
 #endif
-		if (m_flags & owner && m_destructor)
-		{
-			const char* class_name = m_classrep ? m_classrep->name() : nullptr;
-			const bool is_ui_window = has_base_class_named(m_classrep, "CUIWindow");
-			if (luabind::delete_hook() && luabind::delete_hook()(m_object, class_name, is_ui_window))
-				return;
-
-			m_destructor(m_object);
-		}
+		if (m_flags & owner && m_destructor) m_destructor(m_object);
 	}
 
 	void object_rep::remove_ownership()

@@ -360,6 +360,7 @@ public:
 	void cam_BodycamDumpState();
 	void cam_BodycamAddImpulse(LPCSTR kind, float power);
 	bool cam_BodycamGetHudOffset(Fvector& pos, Fvector& rot) const;
+	bool cam_BodycamGetArmPose(Bodycam::ArmPose& pose) const;
 	bool cam_BodycamSprintAnimReady() const;
 	IC CCameraBase* cam_FirstEye() { return cameras[eacFirstEye]; }
 	//Swartz: actor shadow
@@ -376,8 +377,8 @@ protected:
 	//virtual	void			cam_Set					(EActorCameras style);
 	void cam_Update(float dt, float fFOV);
 	void cam_Lookout(const Fmatrix& xform, float camera_height);
-	void cam_BodycamVisualReset(const CCameraBase* C);
-	bool cam_BodycamVisualApply(const CCameraBase* C, float dt, float viewport_near);
+	void cam_BodycamVisualReset(const CCameraBase* camera);
+	bool cam_BodycamVisualUpdate(const CCameraBase* camera, float dt, float viewport_near, bool apply_camera);
 	void cam_BodycamAddFireImpulse(float power);
 	void camUpdateLadder(float dt);
 	void cam_SetLadder();
@@ -386,7 +387,7 @@ protected:
 	void cam_SetFreelook();
 	void cam_UnsetFreelook();
 	bool CanUseFreelook();
-	float currentFOV();
+	float currentFOV(bool wantSVPFov = false); // pip wantSVPFov true returns the zoomed fov, false keeps the main view wide while the SVP zooms
 
 	// Cameras
 	CCameraBase* cameras[eacMaxCam];

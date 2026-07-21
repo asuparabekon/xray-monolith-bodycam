@@ -29,6 +29,7 @@
 #include "Missile.h"
 #include "WeaponKnife.h"
 #include "bodycam_camera.h"
+#include "bodycam_math.h"
 #include "bodycam_settings.h"
 
 #include "EffectorBobbing.h"
@@ -46,52 +47,50 @@ struct BodycamAdsState
 	float blend = 0.f;
 };
 
-CWeapon* ActiveWeapon(const CActor& actor)
+CWeapon* ActiveBodycamWeapon(const CActor& actor)
 {
 	return actor.inventory().ActiveItem() ? actor.inventory().ActiveItem()->cast_weapon() : nullptr;
 }
 
 bool HasActiveFirearm(const CActor& actor)
 {
-	const CWeapon* weapon = ActiveWeapon(actor);
+	const CWeapon* weapon = ActiveBodycamWeapon(actor);
 	return weapon && !smart_cast<const CWeaponKnife*>(weapon);
 }
 
 BodycamAdsState GetBodycamAdsState(const CActor& actor)
 {
-	const CWeapon* weapon = ActiveWeapon(actor);
-	const bool active = actor.IsZoomAimingMode() || (weapon && weapon->IsZoomed());
-	float blend = active ? 1.f : 0.f;
-	if (weapon)
-		blend = clampr(weapon->GetZRotatingFactor(), 0.f, 1.f);
-	if (active && blend <= 0.f)
-		blend = 1.f;
-	return { active, blend };
+	const CWeapon* weapon = ActiveBodycamWeapon(actor);
+	if (!weapon)
+		return {};
+
+	const Bodycam::AdsState ads = Bodycam::ResolveAdsState(weapon->IsZoomed(), weapon->GetZRotatingFactor());
+	return { ads.active, ads.blend };
 }
 }
 
-void CActor::cam_BodycamVisualReset(const CCameraBase* C)
+void CActor::cam_BodycamVisualReset(const CCameraBase* camera)
 {
-	m_bodycam.Reset(C, mstate_real, GetBodycamAdsState(*this).blend);
+	m_bodycam.Reset(camera, mstate_real, GetBodycamAdsState(*this).blend);
 }
 
-bool CActor::cam_BodycamVisualApply(const CCameraBase* C, float dt, float viewport_near)
+bool CActor::cam_BodycamVisualUpdate(const CCameraBase* camera, float dt, float viewport_near, bool apply_camera)
 {
-	if (!m_bodycam.CameraEnabled() || !C || this != Level().CurrentEntity())
+	if (!camera || this != Level().CurrentEntity() || !m_bodycam.AnyFeatureEnabled())
 	{
-		cam_BodycamVisualReset(C);
+		cam_BodycamVisualReset(camera);
 		return false;
 	}
 
-	if (cam_active != eacFirstEye || !g_Alive() || m_holder || Device.m_SecondViewport.IsSVPActive() ||
+	if (cam_active != eacFirstEye || !g_Alive() || m_holder ||
 		Level().Cameras().GetCamEffector(cefDemo) || cam_freelook != eflDisabled)
 	{
-		cam_BodycamVisualReset(C);
+		cam_BodycamVisualReset(camera);
 		return false;
 	}
 
 	float target_yaw, target_pitch;
-	C->vDirection.getHP(target_yaw, target_pitch);
+	camera->vDirection.getHP(target_yaw, target_pitch);
 
 	Bodycam::UpdateInput input;
 	input.target_yaw = target_yaw;
@@ -105,14 +104,17 @@ bool CActor::cam_BodycamVisualApply(const CCameraBase* C, float dt, float viewpo
 	input.combat = m_sndShockEffector && m_sndShockEffector->InWork();
 	input.firearm_equipped = HasActiveFirearm(*this);
 	input.actor_speed_fraction = m_bodycam_movement_response.speed_fraction;
+
 	Bodycam::VisualOutput output;
 	m_bodycam.Update(input, output);
+	if (!m_bodycam.CameraEnabled() || !apply_camera)
+		return false;
 
 	Fvector visual_dir, visual_up, visual_right;
-	Bodycam::BuildBasis(output.yaw, output.pitch, output.roll, visual_dir, visual_up, visual_right);
+	Bodycam::BuildCameraBasis(output.yaw, output.pitch, output.roll, visual_dir, visual_up, visual_right);
 
 	Fvector raw_dir, raw_up, raw_right;
-	Bodycam::BuildBasis(target_yaw, target_pitch, 0.f, raw_dir, raw_up, raw_right);
+	Bodycam::BuildCameraBasis(target_yaw, target_pitch, 0.f, raw_dir, raw_up, raw_right);
 
 	Fvector zero;
 	zero.set(0.f, 0.f, 0.f);
@@ -128,34 +130,39 @@ bool CActor::cam_BodycamVisualApply(const CCameraBase* C, float dt, float viewpo
 	visual_pos.mad(final_basis.i, output.pos.x);
 	visual_pos.mad(final_basis.j, output.pos.y);
 	visual_pos.mad(final_basis.k, output.pos.z);
-	const float bodycam_fov = clampr(Cameras().BaseFov() + output.fov_offset, 1.f, 175.f);
-	Cameras().ApplyDeviceOverride(visual_pos, final_basis.k, final_basis.j, bodycam_fov, Cameras().BaseAspect(),
+	const float fov = clampr(Cameras().BaseFov() + output.fov_offset, 1.f, 175.f);
+	Cameras().ApplyDeviceOverride(visual_pos, final_basis.k, final_basis.j, fov, Cameras().BaseAspect(),
 		g_pGamePersistent->Environment().CurrentEnv->far_plane, viewport_near);
 	return true;
 }
 
 void CActor::cam_BodycamAddFireImpulse(float power)
 {
-	if (this != Level().CurrentEntity())
-		return;
-	m_bodycam.AddFireImpulse(power, GetBodycamAdsState(*this).active);
+	if (this == Level().CurrentEntity())
+		m_bodycam.AddFireImpulse(power, GetBodycamAdsState(*this).active);
 }
 
 void CActor::cam_BodycamAddImpulse(LPCSTR kind, float power)
 {
-	if (this != Level().CurrentEntity())
-		return;
-	m_bodycam.AddImpulse(kind, power, GetBodycamAdsState(*this).active);
+	if (this == Level().CurrentEntity())
+		m_bodycam.AddImpulse(kind, power, GetBodycamAdsState(*this).active);
 }
 
 void CActor::cam_BodycamDumpState()
 {
 	m_bodycam.Dump(GetBodycamAdsState(*this).active, MovingState());
+	if (g_player_hud)
+		g_player_hud->DumpStalker2AuthoredMotionProfile();
 }
 
 bool CActor::cam_BodycamGetHudOffset(Fvector& pos, Fvector& rot) const
 {
 	return m_bodycam.GetHudOffset(pos, rot);
+}
+
+bool CActor::cam_BodycamGetArmPose(Bodycam::ArmPose& pose) const
+{
+	return m_bodycam.GetArmPose(pose);
 }
 
 bool CActor::cam_BodycamSprintAnimReady() const
@@ -612,6 +619,14 @@ void CActor::cam_Update(float dt, float fFOV)
 {
 	if (m_holder) return;
 
+	CWeapon* bodycam_weapon = ActiveBodycamWeapon(*this);
+	Bodycam::PipInput pip_input;
+	pip_input.weapon_zoomed = bodycam_weapon && bodycam_weapon->IsZoomed();
+	pip_input.primary_sight = bodycam_weapon && bodycam_weapon->GetZoomType() == 0;
+	pip_input.requested_fov = fFOV;
+	const Bodycam::PipView pip = m_bodycam.UpdatePipView(pip_input);
+	fFOV = pip.main_fov;
+
 	// HUD FOV Update
 	if (this == Level().CurrentControlEntity())
 	{
@@ -831,10 +846,16 @@ void CActor::cam_Update(float dt, float fFOV)
 	if (Level().CurrentEntity() == this)
 	{
 		Level().Cameras().UpdateFromCamera(C);
-		if (eacFirstEye == cam_active && !Level().Cameras().GetCamEffector(cefDemo) && !Device.m_SecondViewport.IsSVPActive())
+		if (eacFirstEye == cam_active && !Level().Cameras().GetCamEffector(cefDemo) && !pip.freeze_world_pose)
 		{
-			if (!cam_BodycamVisualApply(C, dt, _viewport_near))
+			if (!cam_BodycamVisualUpdate(C, dt, _viewport_near, true))
 				Cameras().ApplyDevice(_viewport_near);
+		}
+		else if (pip.freeze_world_pose && eacFirstEye == cam_active &&
+			!Level().Cameras().GetCamEffector(cefDemo))
+		{
+			cam_BodycamVisualUpdate(C, dt, _viewport_near, false);
+			Cameras().ApplyPP();
 		}
 	}
 }

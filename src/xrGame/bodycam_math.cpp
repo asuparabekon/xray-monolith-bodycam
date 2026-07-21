@@ -3,7 +3,7 @@
 
 namespace Bodycam
 {
-void BuildBasis(float yaw, float pitch, float roll, Fvector& dir, Fvector& up, Fvector& right)
+void BuildCameraBasis(float yaw, float pitch, float roll, Fvector& dir, Fvector& up, Fvector& right)
 {
 	dir.setHP(yaw, pitch);
 	dir.normalize_safe();

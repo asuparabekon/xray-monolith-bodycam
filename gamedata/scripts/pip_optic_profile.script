@@ -1,0 +1,162 @@
+local profiles
+local physical_specs
+local keys = {
+    "s3ds_tunneling_parallax",
+    "s3ds_tunneling_min",
+    "s3ds_tunneling_max",
+    "s3ds_eye_tracking_speed",
+    "s3ds_eye_tracking_accel_mm_s2",
+    "s3ds_eye_tracking_limit_mm",
+    "s3ds_eye_relief_low_mm",
+    "s3ds_eye_relief_high_mm",
+    "s3ds_exit_pupil_low_mm",
+    "s3ds_exit_pupil_high_mm",
+    "s3ds_pupil_field_low",
+    "s3ds_pupil_field_high",
+    "s3ds_transmission",
+    "s3ds_twilight_strength",
+}
+
+local function runtime_section(ini, scope_section, weapon_section)
+    if scope_section and ini:section_exist(scope_section) then
+        return scope_section
+    end
+    if weapon_section and ini:section_exist(weapon_section) then
+        return weapon_section
+    end
+end
+
+local function physical_spec(scope_section, weapon_section)
+    physical_specs = physical_specs or ini_file("pip_optic_physical_specs.ltx")
+    local section = runtime_section(physical_specs, scope_section, weapon_section)
+    local spec = section and physical_specs:r_string_ex(section, "spec")
+    if spec and physical_specs:section_exist(spec) then
+        local model = physical_specs:r_string_ex(spec, "runtime_model")
+        if model == "geometric" or model == "display" then
+            return spec, model
+        end
+    end
+end
+
+local function spec_number(spec, key)
+    return spec and physical_specs:r_float_ex(spec, key)
+end
+
+local function angular_fov_deg(spec, endpoint)
+    local degrees = spec_number(spec, "fov_" .. endpoint .. "_deg")
+    if degrees then
+        return degrees
+    end
+
+    local feet = spec_number(spec, "fov_" .. endpoint .. "_ft_100yd")
+    if feet then
+        return math.deg(2 * math.atan(feet * 0.5 / 300))
+    end
+
+    local meters = spec_number(spec, "fov_" .. endpoint .. "_m_100m")
+    if meters then
+        return math.deg(2 * math.atan(meters * 0.5 / 100))
+    end
+
+    local mils = spec_number(spec, "fov_" .. endpoint .. "_mil")
+    if mils then
+        return math.deg(mils / 1000)
+    end
+end
+
+local function eye_relief(spec, endpoint)
+    local value = spec_number(spec, "eye_relief_mm")
+        or spec_number(spec, "eye_relief_" .. endpoint .. "_mm")
+    if value then
+        return value
+    end
+
+    local minimum = spec_number(spec, "eye_relief_" .. endpoint .. "_min_mm")
+    local maximum = spec_number(spec, "eye_relief_" .. endpoint .. "_max_mm")
+    if minimum and maximum then
+        return (minimum + maximum) * 0.5
+    end
+
+    minimum = spec_number(spec, "eye_relief_min_mm")
+    maximum = spec_number(spec, "eye_relief_max_mm")
+    if minimum and maximum then
+        return (minimum + maximum) * 0.5
+    end
+end
+
+local function exit_pupil(spec, endpoint)
+    local magnification = spec_number(spec, "magnification_" .. (endpoint == "low" and "min" or "max"))
+    local exit_pupil = spec_number(spec, "exit_pupil_" .. endpoint .. "_mm")
+    local objective = spec_number(spec, "objective_mm")
+    return exit_pupil or (objective and magnification and objective / magnification)
+end
+
+local function field_scale(spec, endpoint)
+    local exit_pupil_mm = exit_pupil(spec, endpoint)
+    local eye_relief_mm = eye_relief(spec, endpoint)
+    local fov = angular_fov_deg(spec, endpoint)
+    if not (exit_pupil_mm and eye_relief_mm and fov) or exit_pupil_mm <= 0 then
+        return
+    end
+    local field_shift_mm = math.tan(math.rad(fov * 0.5)) * eye_relief_mm
+    return field_shift_mm / (exit_pupil_mm * 0.5)
+end
+
+local function physical_runtime_values(spec, model)
+    if not spec then
+        return {}
+    end
+
+    local low_exit_pupil = exit_pupil(spec, "low")
+    local high_exit_pupil = exit_pupil(spec, "high")
+    local low_field_scale = field_scale(spec, "low")
+    local high_field_scale = field_scale(spec, "high")
+    local values = {
+        s3ds_eye_relief_low_mm = eye_relief(spec, "low"),
+        s3ds_eye_relief_high_mm = eye_relief(spec, "high"),
+        s3ds_exit_pupil_low_mm = low_exit_pupil,
+        s3ds_exit_pupil_high_mm = high_exit_pupil,
+        s3ds_pupil_field_low = low_field_scale,
+        s3ds_pupil_field_high = high_field_scale,
+        s3ds_transmission = model == "display" and 1 or spec_number(spec, "transmission") or 1,
+    }
+
+    -- Complete field geometry replaces legacy tube tuning; partial specs keep the profile fallback.
+    if low_field_scale and high_field_scale then
+        values.s3ds_tunneling_parallax = 0
+        values.s3ds_tunneling_min = 0
+        values.s3ds_tunneling_max = 0
+    end
+
+    if model == "display" then
+        values.s3ds_twilight_strength = 0
+    elseif low_exit_pupil or high_exit_pupil then
+        values.s3ds_twilight_strength = 1
+    end
+
+    return values
+end
+
+local function find_profile(scope_section, weapon_section)
+    profiles = profiles or ini_file("pip_optic_profiles.ltx")
+    return runtime_section(profiles, scope_section, weapon_section)
+end
+
+local function profile_value(profile_section, key)
+    return (profile_section and profiles:r_float_ex(profile_section, key))
+        or profiles:r_float("default", key)
+end
+
+function apply(scope_section, weapon_section)
+    local profile_section = find_profile(scope_section, weapon_section)
+    local spec, model = physical_spec(scope_section, weapon_section)
+    local physical_values = physical_runtime_values(spec, model)
+    for _, key in ipairs(keys) do
+        exec_console_cmd(key .. " " .. (physical_values[key] or profile_value(profile_section, key)))
+    end
+end
+
+function objective_mm(scope_section, weapon_section)
+    local spec = physical_spec(scope_section, weapon_section)
+    return spec_number(spec, "objective_mm")
+end

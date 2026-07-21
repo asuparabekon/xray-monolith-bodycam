@@ -8,6 +8,8 @@
     <string id="ui_mm_modded_exes_gameplay_bodycam_camera_decoupling_enable"><text>Camera Decoupling (bodycam_camera_decoupling_enable)</text></string>
     <string id="ui_mm_modded_exes_gameplay_bodycam_vm_spring_enable"><text>Viewmodel Spring (bodycam_vm_spring_enable)</text></string>
     <string id="ui_mm_modded_exes_gameplay_bodycam_vm_lowering_enable"><text>Viewmodel Lowering (bodycam_vm_lowering_enable)</text></string>
+    <string id="ui_mm_modded_exes_gameplay_bodycam_bodycam_style_arm_ik_enable"><text>Bodycam Style Arm IK (bodycam_style_arm_ik_enable)</text></string>
+    <string id="ui_mm_modded_exes_gameplay_bodycam_stalker2_style_arm_ik_enable"><text>STALKER 2 Style Arm IK (bodycam_stalker2_style_arm_ik_enable)</text></string>
     <string id="ui_mm_modded_exes_gameplay_bodycam_movement_inertia_enable"><text>Movement Inertia (bodycam_movement_inertia_enable)</text></string>
     <string id="ui_mm_modded_exes_gameplay_bodycam_movement_inertia_disable_ads"><text>Disable Movement Inertia While ADS (bodycam_movement_inertia_disable_ads)</text></string>
     <string id="ui_mm_modded_exes_gameplay_bodycam_hip_camera_deadzone_yaw"><text>Hip Camera Deadzone Yaw (bodycam_hip_camera_deadzone_yaw)</text></string>
