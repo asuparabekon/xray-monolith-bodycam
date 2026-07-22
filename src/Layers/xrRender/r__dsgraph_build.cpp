@@ -2,6 +2,7 @@
 
 #include "fhierrarhyvisual.h"
 #include "SkeletonCustom.h"
+#include "SkeletonX.h"
 #include "../../xrEngine/fmesh.h"
 #include "../../xrEngine/irenderable.h"
 
@@ -120,11 +121,26 @@ void CDSGraphManager::r_dsgraph_insert_dynamic(dxRender_Visual *pVisual, Fmatrix
 	{
 		if (sh->flags.iScopeLense == 3)
 		{
+			auto lens_center = [](dxRender_Visual* visual, Fmatrix* root, Fvector& center)
+			{
+				Fmatrix world = *root;
+				if (CSkeletonX* skeleton = fast_dynamic_cast<CSkeletonX*>(visual))
+				{
+					if (!skeleton->SVP_LensBoneVisible())
+						return false;
+					Fmatrix bone;
+					if (skeleton->SVP_LensBoneXform(bone))
+						world.mulB_43(bone);
+				}
+				world.transform_tiny(center, visual->getVisData().sphere.P);
+				return true;
+			};
 			// a scope can flag several lens surfaces (objective + ocular), keep the one in front of the eye
 			// and nearest it (the ocular the player looks through) for the SVP composite, and separately
 			// keep the FARTHEST in-front surface (the objective) as real geometry for the svpscope-2 camera
 			Fvector lp, to;
-			xform->transform_tiny(lp, pVisual->getVisData().sphere.P);
+			if (!lens_center(pVisual, xform, lp))
+				return;
 			to.sub(lp, Device.vCameraPosition);
 			const bool ahead = to.dotproduct(Device.vCameraDirection) > 0.f;
 			const float score = ahead ? to.square_magnitude() : (to.square_magnitude() + 1.0e6f);
@@ -136,10 +152,17 @@ void CDSGraphManager::r_dsgraph_insert_dynamic(dxRender_Visual *pVisual, Fmatrix
 			{
 				auto& f = M.front();
 				Fvector ep, te;
-				f.pMatrix->transform_tiny(ep, f.pVisual->getVisData().sphere.P);
-				te.sub(ep, Device.vCameraPosition);
-				const float fscore = (te.dotproduct(Device.vCameraDirection) > 0.f) ? te.square_magnitude() : (te.square_magnitude() + 1.0e6f);
-				keep_oc = score < fscore;
+				if (!lens_center(f.pVisual, f.pMatrix, ep))
+				{
+					M.clear();
+					keep_oc = true;
+				}
+				else
+				{
+					te.sub(ep, Device.vCameraPosition);
+					const float fscore = (te.dotproduct(Device.vCameraDirection) > 0.f) ? te.square_magnitude() : (te.square_magnitude() + 1.0e6f);
+					keep_oc = score < fscore;
+				}
 			}
 			if (keep_oc)
 			{
@@ -156,9 +179,16 @@ void CDSGraphManager::r_dsgraph_insert_dynamic(dxRender_Visual *pVisual, Fmatrix
 				{
 					auto& f = O.front();
 					Fvector op, te;
-					f.pMatrix->transform_tiny(op, f.pVisual->getVisData().sphere.P);
-					te.sub(op, Device.vCameraPosition);
-					keep_obj = (te.dotproduct(Device.vCameraDirection) > 0.f) && (score > te.square_magnitude());
+					if (!lens_center(f.pVisual, f.pMatrix, op))
+					{
+						O.clear();
+						keep_obj = true;
+					}
+					else
+					{
+						te.sub(op, Device.vCameraPosition);
+						keep_obj = (te.dotproduct(Device.vCameraDirection) > 0.f) && (score > te.square_magnitude());
+					}
 				}
 				if (keep_obj)
 				{

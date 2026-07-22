@@ -42,28 +42,6 @@ local function spec_number(spec, key)
     return spec and physical_specs:r_float_ex(spec, key)
 end
 
-local function angular_fov_deg(spec, endpoint)
-    local degrees = spec_number(spec, "fov_" .. endpoint .. "_deg")
-    if degrees then
-        return degrees
-    end
-
-    local feet = spec_number(spec, "fov_" .. endpoint .. "_ft_100yd")
-    if feet then
-        return math.deg(2 * math.atan(feet * 0.5 / 300))
-    end
-
-    local meters = spec_number(spec, "fov_" .. endpoint .. "_m_100m")
-    if meters then
-        return math.deg(2 * math.atan(meters * 0.5 / 100))
-    end
-
-    local mils = spec_number(spec, "fov_" .. endpoint .. "_mil")
-    if mils then
-        return math.deg(mils / 1000)
-    end
-end
-
 local function eye_relief(spec, endpoint)
     local value = spec_number(spec, "eye_relief_mm")
         or spec_number(spec, "eye_relief_" .. endpoint .. "_mm")
@@ -92,14 +70,14 @@ local function exit_pupil(spec, endpoint)
 end
 
 local function field_scale(spec, endpoint)
-    local exit_pupil_mm = exit_pupil(spec, endpoint)
-    local eye_relief_mm = eye_relief(spec, endpoint)
-    local fov = angular_fov_deg(spec, endpoint)
-    if not (exit_pupil_mm and eye_relief_mm and fov) or exit_pupil_mm <= 0 then
-        return
+    local authored = spec_number(spec, "pupil_field_" .. endpoint)
+    if authored then
+        return authored
     end
-    local field_shift_mm = math.tan(math.rad(fov * 0.5)) * eye_relief_mm
-    return field_shift_mm / (exit_pupil_mm * 0.5)
+
+    -- FOV is a camera/rendering property, not lateral pupil travel. The shader
+    -- derives a safe field scale from the exit and eye pupil radii.
+    return 1
 end
 
 local function physical_runtime_values(spec, model)

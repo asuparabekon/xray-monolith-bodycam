@@ -383,7 +383,7 @@ local function draw_presets()
         bodycam.apply_preset(1)
     end
     ImGui.SameLine(0, 8)
-    if ImGui.Button("Stronger", vector2():set(110, 0)) then
+    if ImGui.Button("Default", vector2():set(110, 0)) then
         bodycam.apply_preset(2)
     end
     ImGui.SameLine(0, 8)

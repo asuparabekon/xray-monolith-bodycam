@@ -53,7 +53,10 @@ float scope_custom_shadow(v_out I, Scope S) {
 	float4 zoom_switch_shadow = float4(0, 0, 0, 0);
 	if (RETICLE_TYPE == RT_SPECTER)
 	{
-		zoom_switch_shadow = sample_zoom_switch_shadow(S.ffp);
+		const float2 zoom_shadow_tc = svp_physical_optics_active()
+			? svp_scope_lens_tc(I.w_P)
+			: S.ffp;
+		zoom_switch_shadow = sample_zoom_switch_shadow(zoom_shadow_tc);
 	}
 
 	float offset = distance(S.exit_pupil, S.sfp) + 1.0;
@@ -67,6 +70,8 @@ float scope_custom_shadow(v_out I, Scope S) {
 	{
 		exit_pupil_tc = svp_scope_lens_tc(I.w_P) + svp_scope_tunneling_offset();
 		shadow_texture = svp_profiled_tunneling_shadow(exit_pupil_tc);
+		shadow_texture = svp_merge_black_shadow(shadow_texture, zoom_switch_shadow);
+		zoom_switch_shadow = float4(0, 0, 0, 0);
 	}
 	else
 	{

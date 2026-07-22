@@ -574,7 +574,10 @@ if (RETICLE_TYPE == RT_DFP_ALT)
 	float4 zoom_switch_shadow = float4(0, 0, 0, 0);
 	if (RETICLE_TYPE == RT_SPECTER)
 	{
-		zoom_switch_shadow = sample_zoom_switch_shadow(reticle_lens_tc, MIN_ZOOM_FOV, MAX_ZOOM_FOV);
+		const float2 zoom_shadow_tc = svp_physical_optics_active()
+			? svp_scope_lens_tc(I.w_P)
+			: reticle_lens_tc;
+		zoom_switch_shadow = sample_zoom_switch_shadow(zoom_shadow_tc, MIN_ZOOM_FOV, MAX_ZOOM_FOV);
 	}
 	
 	// Fixed reticle-space masks do not share the physical PiP pupil coordinates.
@@ -609,7 +612,11 @@ if (RETICLE_TYPE == RT_DFP_ALT)
 		shadow_texture = sample_shadow(exit_pupil_tc, SHADOW_WIDTH + 0.02 * (current_zoom - 1));
 	}
 	if (svp_physical_optics_active())
+	{
 		eyebox_transmission = svp_exit_pupil_transmission(svp_scope_lens_tc(I.w_P));
+		shadow_texture = svp_merge_black_shadow(shadow_texture, zoom_switch_shadow);
+		zoom_switch_shadow = float4(0, 0, 0, 0);
+	}
 	if (!svp_physical_optics_active() && !SETTING(SETTINGS, ST_PARALLAX_SHADOW))
 	{
 		shadow_texture *= 1 - m_hud_params.x;

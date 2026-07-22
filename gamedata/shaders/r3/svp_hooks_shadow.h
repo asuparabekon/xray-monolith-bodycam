@@ -72,6 +72,18 @@ float svp_pupil_overlap(float separation, float exit_radius, float eye_radius)
 	return saturate(area / (3.14159265 * smaller * smaller));
 }
 
+float svp_pupil_field_scale(float exit_radius, float eye_radius)
+{
+	// Manufacturer FOV does not describe lateral pupil travel inside the optic.
+	// Keep field shear within the finite-overlap region instead: the corner ray
+	// may move half a pupil radius beyond the full-overlap boundary, but it may
+	// never separate the aligned pupil discs.
+	const float smaller = min(exit_radius, eye_radius);
+	const float full_overlap_limit = abs(exit_radius - eye_radius);
+	const float maximum_field_separation = full_overlap_limit + smaller * 0.5;
+	return maximum_field_separation / max(1.41421356 * exit_radius, 0.001);
+}
+
 float svp_exit_pupil_transmission(float2 lens_tc)
 {
 	if (shader_scope_params.w >= -1.5 || svp_aperture.x < 0.5
@@ -85,17 +97,24 @@ float svp_exit_pupil_transmission(float2 lens_tc)
 	if (eye_separation <= 0.0001)
 		return 1.0;
 
-	// A riflescope is a refracting system, not an empty tube. Approximate its
-	// field-dependent pupil decenter, then evaluate exact finite-disc overlap.
-	// Dividing by the aligned field overlap keeps a centered optic fully clear.
+	// Approximate field-dependent pupil decenter and compare finite pupil discs.
+	// Normalizing by the aligned overlap keeps a centered optic fully clear.
 	const float2 field = (lens_tc - 0.5) * 2.0;
-	const float2 field_pupil_offset =
-		field * exit_radius * max(svp_pupil_model.x, 0.0);
+	const float field_scale = min(
+		max(svp_pupil_model.x, 0.0),
+		svp_pupil_field_scale(exit_radius, eye_radius));
+	const float2 field_pupil_offset = field * exit_radius * field_scale;
 	const float aligned_overlap = svp_pupil_overlap(
 		length(field_pupil_offset), exit_radius, eye_radius);
 	const float displaced_overlap = svp_pupil_overlap(
 		length(field_pupil_offset - eye_offset), exit_radius, eye_radius);
 	return saturate(displaced_overlap / max(aligned_overlap, 0.001));
+}
+
+float4 svp_merge_black_shadow(float4 persistent_shadow, float4 transient_shadow)
+{
+	const float alpha = 1.0 - (1.0 - persistent_shadow.a) * (1.0 - transient_shadow.a);
+	return float4(0.0, 0.0, 0.0, saturate(alpha));
 }
 
 // Existing thin-hook entry points remain intact for an unextended compatibility shader.
