@@ -20,5 +20,6 @@ struct MouseAimOutput
 
 void ResetMouseAim(MouseAimState& state, float yaw, float pitch);
 void AddMouseAimDelta(MouseAimState& state, float yaw_delta, float pitch_delta);
+void RebaseMouseAim(MouseAimState& state, float yaw_delta, float pitch_delta);
 MouseAimOutput ResolveMouseAim(MouseAimState& state, float target_yaw, float target_pitch);
 } // namespace Bodycam

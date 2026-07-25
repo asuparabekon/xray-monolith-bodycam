@@ -44,7 +44,8 @@ struct SimulationFeatureSettings
 	bool lower_enable = true;
 	bool bodycam_arm_enable = false;
 	bool stalker2_arm_enable = true;
-	bool sprint_bridge_enable = true;
+	bool sprint_transition_enable = true;
+	bool fire_impulse_enable = true;
 	bool impulse_debug = false;
 	bool lower_disable_in_combat = true;
 	float layer_vm_weight = 1.f;
@@ -256,6 +257,10 @@ struct SimulationViewmodelState
 	SVec3 move_intent;
 	SVec3 impulse_pos;
 	SVec3 impulse_rot;
+	SVec3 fire_impulse_pos;
+	SVec3 fire_impulse_rot;
+	SVec3 fire_pos;
+	SVec3 fire_rot;
 	float airborne_time = 0.f;
 };
 
@@ -378,6 +383,7 @@ struct SimulationOutput
 };
 
 void ResetSimulation(SimulationState& state, float yaw, float pitch, std::uint32_t move_flags, float ads_blend);
+void RebaseSimulationLook(SimulationState& state, float yaw_delta, float pitch_delta);
 AdsState ResolveAdsState(bool weapon_zoomed, float weapon_blend);
 
 void UpdateSimulation(const SimulationSettings& settings, SimulationState& state, const SimulationInput& input, SimulationOutput& output);

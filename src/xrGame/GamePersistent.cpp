@@ -493,6 +493,11 @@ void CGamePersistent::update_logo_intro()
 	}
 }
 
+namespace crash_saving {
+    extern void (*save_impl)();
+    extern void _save_impl();
+}
+
 void CGamePersistent::game_loaded()
 {
 	if (Device.dwPrecacheFrame <= 2)
@@ -528,20 +533,28 @@ void CGamePersistent::game_loaded()
 		{
 			Msg("intro_start game_loaded");
 
+            // demonized: Reset mouse state on loading the game
+            pInput->resetMouseState();
+
 			::luabind::functor<void> funct;
 			if (ai().script_engine().functor("_G.OnLoadingScreenKeyPrompt", funct))
 			{
 				funct();
 			}
+
+            // demonized
+            // Enable crash saving here
+            crash_saving::save_impl = &crash_saving::_save_impl;
+
+            // Callback for when player dismisses loading screen after "Press Any Key to Continue" pressed
+            if (ai().script_engine().functor("_G.OnLoadingScreenDismissed", funct))
+            {
+                funct();
+            }
 		}
 
 		m_intro_event = 0;
 	}
-}
-
-namespace crash_saving {
-	extern void (*save_impl)();
-	extern void _save_impl();
 }
 
 void CGamePersistent::update_game_loaded()

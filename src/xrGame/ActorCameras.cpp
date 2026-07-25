@@ -41,6 +41,17 @@ BOOL g_freelook_while_reloading = 1;
 
 namespace
 {
+constexpr float kMaxScriptLookDelta = PI_DIV_2;
+
+u32 NextScriptCameraDeltaId()
+{
+	static u32 next_id = 1;
+	const u32 id = next_id++;
+	if (next_id == 0)
+		next_id = 1;
+	return id;
+}
+
 struct BodycamAdsState
 {
 	bool active = false;
@@ -148,6 +159,16 @@ void CActor::cam_BodycamAddImpulse(LPCSTR kind, float power)
 		m_bodycam.AddImpulse(kind, power, GetBodycamAdsState(*this).active);
 }
 
+void CActor::cam_BodycamSetViewmodelProfile(const Fvector& pos, const Fvector& rot, float blend_speed)
+{
+	m_bodycam.SetViewmodelProfile(pos, rot, blend_speed);
+}
+
+void CActor::cam_BodycamClearViewmodelProfile(float blend_speed)
+{
+	m_bodycam.ClearViewmodelProfile(blend_speed);
+}
+
 void CActor::cam_BodycamDumpState()
 {
 	m_bodycam.Dump(GetBodycamAdsState(*this).active, MovingState());
@@ -174,8 +195,153 @@ bool CActor::cam_BodycamSprintAnimReady() const
 	return m_bodycam_sprint_anim_ready;
 }
 
+u32 CActor::cam_QueueScriptCameraDelta(float yaw_delta, float pitch_delta)
+{
+	if (!_valid(yaw_delta) || !_valid(pitch_delta) || this != Level().CurrentControlEntity() ||
+		!g_Alive() || m_holder || cam_active != eacFirstEye || cam_freelook != eflDisabled ||
+		!cam_CanQueueScriptCameraDelta())
+	{
+		return 0;
+	}
+
+	SScriptCameraDeltaRequest& request = m_script_camera_delta_pending[m_script_camera_delta_pending_count++];
+	request.id = NextScriptCameraDeltaId();
+	request.delta.set(
+		clampr(yaw_delta, -kMaxScriptLookDelta, kMaxScriptLookDelta),
+		clampr(pitch_delta, -kMaxScriptLookDelta, kMaxScriptLookDelta));
+	return request.id;
+}
+
+bool CActor::cam_PollScriptCameraDelta(
+	u32 request_id, EScriptCameraDeltaStatus& status, Fvector2& applied)
+{
+	if (request_id == 0)
+		return false;
+
+	for (u32 i = 0; i < m_script_camera_delta_pending_count; ++i)
+	{
+		if (m_script_camera_delta_pending[i].id != request_id)
+			continue;
+
+		status = eScriptCameraDeltaPending;
+		applied.set(0.f, 0.f);
+		return true;
+	}
+
+	for (u32 i = 0; i < m_script_camera_delta_result_count; ++i)
+	{
+		SScriptCameraDeltaResult& result = m_script_camera_delta_results[i];
+		if (result.id != request_id)
+			continue;
+
+		status = result.status;
+		applied = result.applied;
+		for (u32 j = i + 1; j < m_script_camera_delta_result_count; ++j)
+			m_script_camera_delta_results[j - 1] = m_script_camera_delta_results[j];
+		m_script_camera_delta_results[--m_script_camera_delta_result_count] = {};
+		return true;
+	}
+
+	return false;
+}
+
+bool CActor::cam_CanQueueScriptCameraDelta() const
+{
+	if (m_script_camera_delta_pending_count >= kScriptCameraDeltaPendingCapacity)
+		return false;
+
+	return m_script_camera_delta_pending_count + m_script_camera_delta_result_count <
+		kScriptCameraDeltaResultCapacity;
+}
+
+bool CActor::cam_CancelScriptCameraDelta(u32 request_id)
+{
+	for (u32 i = 0; i < m_script_camera_delta_pending_count; ++i)
+	{
+		if (m_script_camera_delta_pending[i].id != request_id)
+			continue;
+
+		Fvector2 applied = { 0.f, 0.f };
+		if (!cam_StoreScriptCameraDeltaResult(request_id, eScriptCameraDeltaCancelled, applied))
+			return false;
+		for (u32 j = i + 1; j < m_script_camera_delta_pending_count; ++j)
+			m_script_camera_delta_pending[j - 1] = m_script_camera_delta_pending[j];
+		m_script_camera_delta_pending[--m_script_camera_delta_pending_count] = {};
+		return true;
+	}
+
+	return false;
+}
+
+bool CActor::cam_StoreScriptCameraDeltaResult(
+	u32 request_id, EScriptCameraDeltaStatus status, const Fvector2& applied)
+{
+	if (m_script_camera_delta_result_count >= kScriptCameraDeltaResultCapacity)
+		return false;
+
+	SScriptCameraDeltaResult& result =
+		m_script_camera_delta_results[m_script_camera_delta_result_count++];
+	result.id = request_id;
+	result.status = status;
+	result.applied = applied;
+	return true;
+}
+
+void CActor::cam_CancelScriptCameraDeltas()
+{
+	Fvector2 applied = { 0.f, 0.f };
+	for (u32 i = 0; i < m_script_camera_delta_pending_count; ++i)
+	{
+		const bool stored = cam_StoreScriptCameraDeltaResult(
+			m_script_camera_delta_pending[i].id, eScriptCameraDeltaCancelled, applied);
+		R_ASSERT2(stored, "Script camera delta result capacity exhausted");
+		m_script_camera_delta_pending[i] = {};
+	}
+	m_script_camera_delta_pending_count = 0;
+}
+
+void CActor::cam_ApplyScriptCameraDeltas(CCameraBase* camera)
+{
+	if (m_script_camera_delta_pending_count == 0)
+		return;
+
+	if (!camera || this != Level().CurrentControlEntity() || !g_Alive() || m_holder ||
+		cam_active != eacFirstEye || cam_freelook != eflDisabled)
+	{
+		cam_CancelScriptCameraDeltas();
+		return;
+	}
+
+	Fvector2 total_applied = { 0.f, 0.f };
+	for (u32 i = 0; i < m_script_camera_delta_pending_count; ++i)
+	{
+		const SScriptCameraDeltaRequest& request = m_script_camera_delta_pending[i];
+		const float old_yaw = camera->yaw;
+		const float old_pitch = camera->pitch;
+		if (!fis_zero(request.delta.x))
+			camera->Move(request.delta.x > 0.f ? kRIGHT : kLEFT, _abs(request.delta.x));
+		if (!fis_zero(request.delta.y))
+			camera->Move(request.delta.y > 0.f ? kUP : kDOWN, _abs(request.delta.y));
+
+		Fvector2 applied;
+		applied.set(
+			angle_difference_signed(camera->yaw, old_yaw),
+			angle_difference_signed(camera->pitch, old_pitch));
+		total_applied.add(applied);
+		const bool stored =
+			cam_StoreScriptCameraDeltaResult(request.id, eScriptCameraDeltaApplied, applied);
+		R_ASSERT2(stored, "Script camera delta result capacity exhausted");
+		m_script_camera_delta_pending[i] = {};
+	}
+	m_script_camera_delta_pending_count = 0;
+
+	m_bodycam.RebaseLookDelta(total_applied.x, total_applied.y);
+}
+
 void CActor::cam_Set(EActorCameras style)
 {
+	if (style != cam_active)
+		cam_CancelScriptCameraDeltas();
 	CCameraBase* old_cam = cam_Active();
 	cam_active = style;
 	old_cam->OnDeactivate();
@@ -250,6 +416,7 @@ void CActor::cam_UnsetLadder()
 
 void CActor::cam_SetFreelook()
 {
+	cam_CancelScriptCameraDeltas();
 	cam_freelook = eflEnabling;
 }
 
@@ -617,7 +784,11 @@ float firstPersonDeathHeadScale = 3.f;
 
 void CActor::cam_Update(float dt, float fFOV)
 {
-	if (m_holder) return;
+	if (m_holder)
+	{
+		cam_CancelScriptCameraDeltas();
+		return;
+	}
 
 	CWeapon* bodycam_weapon = ActiveBodycamWeapon(*this);
 	Bodycam::PipInput pip_input;
@@ -734,6 +905,7 @@ void CActor::cam_Update(float dt, float fFOV)
 
 	CCameraBase* C = cam_Active();
 
+	cam_ApplyScriptCameraDeltas(C);
 	C->Update(point, dangle);
 	C->f_fov = fFOV;
 

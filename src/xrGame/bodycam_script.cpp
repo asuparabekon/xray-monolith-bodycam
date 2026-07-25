@@ -63,6 +63,27 @@ static void bodycam_add_impulse(LPCSTR kind, float power)
 		actor->cam_BodycamAddImpulse(kind, power);
 }
 
+static void bodycam_set_viewmodel_profile(float pos_x, float pos_y, float pos_z,
+	float pitch, float yaw, float roll, float blend_speed)
+{
+	CActor* actor = smart_cast<CActor*>(Level().CurrentEntity());
+	if (!actor)
+		return;
+
+	Fvector pos;
+	pos.set(pos_x, pos_y, pos_z);
+	Fvector rot;
+	rot.set(yaw, pitch, roll);
+	actor->cam_BodycamSetViewmodelProfile(pos, rot, blend_speed);
+}
+
+static void bodycam_clear_viewmodel_profile(float blend_speed)
+{
+	CActor* actor = smart_cast<CActor*>(Level().CurrentEntity());
+	if (actor)
+		actor->cam_BodycamClearViewmodelProfile(blend_speed);
+}
+
 static object bodycam_get_bindings()
 {
 	lua_State* L = ai().script_engine().lua();
@@ -78,6 +99,7 @@ static object bodycam_get_bindings()
 		entry["name"] = binding.name;
 		entry["console_name"] = binding.console_name;
 		entry["type"] = "float";
+		entry["default"] = binding.default_value;
 		entry["min"] = binding.min_value;
 		entry["max"] = binding.max_value;
 		bindings[index++] = entry;
@@ -91,6 +113,7 @@ static object bodycam_get_bindings()
 		entry["name"] = binding.name;
 		entry["console_name"] = binding.console_name;
 		entry["type"] = "bool";
+		entry["default"] = !!binding.default_value;
 		bindings[index++] = entry;
 	}
 
@@ -146,6 +169,8 @@ void Bodycam::script_register(lua_State* L)
 		def("set_layer_weight", &bodycam_set_layer_weight),
 		def("apply_preset", &bodycam_apply_preset),
 		def("add_impulse", &bodycam_add_impulse),
+		def("set_viewmodel_profile", &bodycam_set_viewmodel_profile),
+		def("clear_viewmodel_profile", &bodycam_clear_viewmodel_profile),
 		def("dump", &bodycam_dump),
 		def("get_state", &bodycam_get_state),
 		def("get_bindings", &bodycam_get_bindings)

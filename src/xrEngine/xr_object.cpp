@@ -216,6 +216,10 @@ CObject::CObject() :
 	NameSection = NULL;
 	NameVisual = NULL;
 
+#ifdef CBULLETMANAGER_EX
+    BulletCheckVisual = false;
+#endif
+
 #ifdef DEBUG
     dbg_update_shedule = u32(-1) / 2;
     dbg_update_cl = u32(-1) / 2;
@@ -248,6 +252,10 @@ void CObject::Load(LPCSTR section)
 		cNameVisual_set(tmp);
 	}
 	setVisible(false);
+
+#ifdef CBULLETMANAGER_EX
+    BulletCheckVisual = !!READ_IF_EXISTS(pSettings, r_bool, section, "bullet_check_visual", FALSE);
+#endif
 }
 
 BOOL CObject::net_Spawn(CSE_Abstract* data)

@@ -865,17 +865,17 @@ function anomaly_add_to_db(obj)
 	}
 end
 
-function anomaly_restrictor_iterate_func(entity)
-	if (IsMonster(entity)) then
-		local pos = entity:position()
-		local obj = get_object_by_id(anomaly_restrictor_db_k)
+-- Active online monsters registry to bypass expensive engine spatial queries
+local db_online_monsters = {}
 
-		-- Dont try to enable evading for far away entities, it doesnt matter that much but is a good optimization
-		local valid = entity:alive() and entity:id() ~= AC_ID and pos:distance_to_sqr(device().cam_pos) < (150 + anomaly_restrictor_db_v.radius)^2 and obj:position():distance_to_sqr(pos) < anomaly_restrictor_db_v.radius^2
-		if valid then
-			anomaly_restrictor_db_v.entities[entity:id()] = true
-		end
+function track_monsters_on_spawn(obj)
+	if IsMonster(obj) then
+		db_online_monsters[obj:id()] = obj
 	end
+end
+
+function track_monsters_on_destroy(obj)
+	db_online_monsters[obj:id()] = nil
 end
 
 local function concat_by_func(t, f, sep)
@@ -886,6 +886,7 @@ local function concat_by_func(t, f, sep)
 	end
 	return s
 end
+
 local function concat_by_name(k, v)
 	local obj = level.object_by_id(k)
 	if obj then
@@ -921,7 +922,29 @@ function anomaly_restrictor_update()
 				if pos_dist_invalidate then
 					anomaly_restrictor_db_v.last_pos = new_pos
 				end
-				level.iterate_nearest(new_pos, anomaly_restrictor_db_v.radius, anomaly_restrictor_iterate_func)
+
+				-- Pure-Lua distance check bypass and optimized monster search loop over db_online_monsters.
+				-- Bypasses level.iterate_nearest to avoid Luabind interop and C++ sorting overhead.
+				local radius = anomaly_restrictor_db_v.radius
+				local cache_cam_pos = device().cam_pos
+				local max_dist_limit = 150 + (radius * 2)
+				local dist_to_cam_sqr = new_pos:distance_to_sqr(cache_cam_pos)
+
+				if dist_to_cam_sqr < (max_dist_limit * max_dist_limit) then
+					local cache_cam_limit_sqr = (150 + radius) * (150 + radius)
+					local radius_sqr = radius * radius
+
+					for id, entity in pairs(db_online_monsters) do
+						if entity:alive() then
+							local pos = entity:position()
+							if pos:distance_to_sqr(new_pos) < radius_sqr then
+								if pos:distance_to_sqr(cache_cam_pos) < cache_cam_limit_sqr then
+									anomaly_restrictor_db_v.entities[id] = true
+								end
+							end
+						end
+					end
+				end
 
 				local new_entities = anomaly_restrictor_db_v.entities
 
@@ -1503,6 +1526,10 @@ function on_game_start()
 	-- Toggle anomaly evading for entities, postpone to loading screen dismissed to ignore initial alife switch 
 	do
 		RegisterScriptCallback("game_object_on_net_spawn", anomaly_add_to_db)
+
+		RegisterScriptCallback("game_object_on_net_spawn", track_monsters_on_spawn)
+		RegisterScriptCallback("game_object_on_net_destroy", track_monsters_on_destroy)
+
 		RegisterScriptCallback("on_loading_screen_dismissed", function()
 			-- Per anomaly update via level.iterate_nearest, less stuttery, less reliable which is alright, we don't want perfect evasion
 			RegisterScriptCallback("actor_on_update", anomaly_restrictor_update)

@@ -12,6 +12,7 @@
     <string id="ui_mm_modded_exes_gameplay_bodycam_stalker2_style_arm_ik_enable"><text>STALKER 2 Style Arm IK (bodycam_stalker2_style_arm_ik_enable)</text></string>
     <string id="ui_mm_modded_exes_gameplay_bodycam_movement_inertia_enable"><text>Movement Inertia (bodycam_movement_inertia_enable)</text></string>
     <string id="ui_mm_modded_exes_gameplay_bodycam_movement_inertia_disable_ads"><text>Disable Movement Inertia While ADS (bodycam_movement_inertia_disable_ads)</text></string>
+    <string id="ui_mm_modded_exes_gameplay_bodycam_sprint_transition_enable"><text>Sprint Transition (bodycam_sprint_transition_enable)</text></string>
     <string id="ui_mm_modded_exes_gameplay_bodycam_hip_camera_deadzone_yaw"><text>Hip Camera Deadzone Yaw (bodycam_hip_camera_deadzone_yaw)</text></string>
     <string id="ui_mm_modded_exes_gameplay_bodycam_hip_camera_deadzone_pitch"><text>Hip Camera Deadzone Pitch (bodycam_hip_camera_deadzone_pitch)</text></string>
     <string id="ui_mm_modded_exes_gameplay_bodycam_hip_camera_follow_speed"><text>Hip Camera Follow Speed (bodycam_hip_camera_follow_speed)</text></string>
@@ -37,6 +38,7 @@
     <string id="ui_mm_modded_exes_gameplay_bodycam_vm_lowering_movement_influence"><text>Viewmodel Lowering Movement Influence (bodycam_vm_lowering_movement_influence)</text></string>
     <string id="ui_mm_modded_exes_gameplay_bodycam_vm_lowering_enter_speed"><text>Viewmodel Lowering Enter Speed (bodycam_vm_lowering_enter_speed)</text></string>
     <string id="ui_mm_modded_exes_gameplay_bodycam_vm_lowering_return_speed"><text>Viewmodel Lowering Return Speed (bodycam_vm_lowering_return_speed)</text></string>
+    <string id="ui_mm_modded_exes_gameplay_bodycam_fire_impulse_enable"><text>Bodycam Fire Impulses (bodycam_fire_impulse_enable)</text></string>
     <string id="ui_mm_modded_exes_gameplay_bodycam_hip_fire_weapon_impulse"><text>Hip Fire Weapon Impulse (bodycam_hip_fire_weapon_impulse)</text></string>
     <string id="ui_mm_modded_exes_gameplay_bodycam_ads_fire_weapon_impulse"><text>ADS Fire Weapon Impulse (bodycam_ads_fire_weapon_impulse)</text></string>
     <string id="ui_mm_modded_exes_gameplay_bodycam_sprint_transition_vm_blend_scale"><text>Sprint Transition Viewmodel Blend Scale (bodycam_sprint_transition_vm_blend_scale)</text></string>

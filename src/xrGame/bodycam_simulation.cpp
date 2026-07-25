@@ -436,7 +436,7 @@ float SmoothTime(float current, float target, float seconds, float dt)
 
 void UpdateSprintLayer(const SimulationSettings& settings, SimulationState& state, const SimulationInput& input)
 {
-	if (!settings.features.sprint_bridge_enable || !input.firearm_equipped)
+	if (!settings.features.sprint_transition_enable || !input.firearm_equipped)
 	{
 		ResetSprint(state);
 		ClearSprintImpulseQueue(state);
@@ -816,6 +816,10 @@ void ResetSimulation(SimulationState& state, float yaw, float pitch, std::uint32
 	state.viewmodel.move_intent.Set(0.f, 0.f, 0.f);
 	state.viewmodel.impulse_pos.Set(0.f, 0.f, 0.f);
 	state.viewmodel.impulse_rot.Set(0.f, 0.f, 0.f);
+	state.viewmodel.fire_impulse_pos.Set(0.f, 0.f, 0.f);
+	state.viewmodel.fire_impulse_rot.Set(0.f, 0.f, 0.f);
+	state.viewmodel.fire_pos.Set(0.f, 0.f, 0.f);
+	state.viewmodel.fire_rot.Set(0.f, 0.f, 0.f);
 	ClearSprintImpulseQueue(state);
 	ResetSprint(state);
 	ResetLowering(state);
@@ -825,6 +829,21 @@ void ResetSimulation(SimulationState& state, float yaw, float pitch, std::uint32
 	state.prev_move_flags = move_flags;
 	state.prev_ads = ads_blend > 0.f;
 	state.camera.initialized = true;
+}
+
+void RebaseSimulationLook(SimulationState& state, float yaw_delta, float pitch_delta)
+{
+	if (state.camera.initialized)
+	{
+		state.camera.yaw = AngleNormalizeSigned(state.camera.yaw + yaw_delta);
+		state.camera.pitch = AngleNormalizeSigned(state.camera.pitch + pitch_delta);
+	}
+
+	if (state.viewmodel.mouse_aim_initialized)
+	{
+		state.viewmodel.mouse_aim_yaw = AngleNormalizeSigned(state.viewmodel.mouse_aim_yaw + yaw_delta);
+		state.viewmodel.mouse_aim_pitch = AngleNormalizeSigned(state.viewmodel.mouse_aim_pitch + pitch_delta);
+	}
 }
 
 void UpdateSimulation(const SimulationSettings& settings, SimulationState& state, const SimulationInput& input, SimulationOutput& output)
@@ -841,6 +860,19 @@ void UpdateSimulation(const SimulationSettings& settings, SimulationState& state
 
 	const bool vm_spring_enabled = settings.features.vm_enable && settings.features.layer_vm_weight > kEpsilon;
 	const bool lower_enabled = settings.features.lower_enable && settings.features.layer_lower_weight > kEpsilon;
+	const bool fire_impulse_enabled = settings.features.fire_impulse_enable;
+	if (!fire_impulse_enabled)
+	{
+		state.viewmodel.fire_impulse_pos.Set(0.f, 0.f, 0.f);
+		state.viewmodel.fire_impulse_rot.Set(0.f, 0.f, 0.f);
+		state.viewmodel.fire_pos.Set(0.f, 0.f, 0.f);
+		state.viewmodel.fire_rot.Set(0.f, 0.f, 0.f);
+	}
+	const bool fire_impulse_active = fire_impulse_enabled &&
+		(state.viewmodel.fire_impulse_pos.Magnitude() > kEpsilon ||
+			state.viewmodel.fire_impulse_rot.Magnitude() > kEpsilon ||
+			state.viewmodel.fire_pos.Magnitude() > kEpsilon ||
+			state.viewmodel.fire_rot.Magnitude() > kEpsilon);
 	const bool vm_effects_enabled = vm_spring_enabled || lower_enabled;
 	const bool mouse_input_enabled = vm_effects_enabled ||
 		((settings.features.bodycam_arm_enable || settings.features.stalker2_arm_enable) && settings.features.layer_arm_weight > kEpsilon);
@@ -863,25 +895,25 @@ void UpdateSimulation(const SimulationSettings& settings, SimulationState& state
 		move_target.Mul(1.35f);
 	SmoothVector(state.viewmodel.move_intent, move_target, settings.viewmodel.move_filter, input.dt);
 	UpdateSprintLayer(settings, state, input);
-	const bool sprint_bridge_active = settings.features.sprint_bridge_enable && input.firearm_equipped && !input.ads &&
+	const bool sprint_bridge_active = settings.features.sprint_transition_enable && input.firearm_equipped && !input.ads &&
 		settings.features.layer_vm_weight > kEpsilon && SprintStrength(settings) > kEpsilon &&
 		(state.sprint.viewmodel_amount > kEpsilon || !!(input.move_flags & smfSprint));
-	const bool hud_transform_enabled = vm_effects_enabled || sprint_bridge_active;
+	const bool hud_transform_enabled = vm_effects_enabled || sprint_bridge_active || fire_impulse_active;
+
+	if (settings.features.sprint_transition_enable)
+	{
+		if (input.firearm_equipped && (input.move_flags & smfSprint) && !(state.prev_move_flags & smfSprint))
+			AddSprintTransitionImpulse(settings, state, input, true);
+		else if (input.firearm_equipped && !(input.move_flags & smfSprint) && (state.prev_move_flags & smfSprint))
+			AddSprintTransitionImpulse(settings, state, input, false);
+		UpdateSprintImpulseQueue(settings, state, input.dt);
+	}
 
 	if (vm_effects_enabled)
 	{
 		const bool airborne = !!(input.move_flags & (smfFall | smfJump));
 		const bool landing = !!(input.move_flags & smfLanding);
 		const bool real_landing = landing && state.viewmodel.airborne_time > 0.12f;
-		if (input.firearm_equipped && (input.move_flags & smfSprint) && !(state.prev_move_flags & smfSprint))
-		{
-			AddSprintTransitionImpulse(settings, state, input, true);
-		}
-		else if (input.firearm_equipped && !(input.move_flags & smfSprint) && (state.prev_move_flags & smfSprint))
-		{
-			AddSprintTransitionImpulse(settings, state, input, false);
-		}
-		UpdateSprintImpulseQueue(settings, state, input.dt);
 		if (input.ads && !state.prev_ads)
 		{
 			state.viewmodel.impulse_pos.Add(0.f, 0.002f * settings.impulse.ads_impulse, -0.006f * settings.impulse.ads_impulse);
@@ -914,6 +946,17 @@ void UpdateSimulation(const SimulationSettings& settings, SimulationState& state
 		state.viewmodel.impulse_rot.Mul(1.f - impulse_decay);
 		state.camera.impulse_pos.Mul(1.f - impulse_decay);
 		state.camera.impulse_roll *= 1.f - impulse_decay;
+	}
+	if (fire_impulse_enabled)
+	{
+		output.impulse_pos_clamped |= ClampVector(
+			state.viewmodel.fire_impulse_pos, std::max(settings.impulse.impulse_pos_cap, 0.f));
+		output.impulse_rot_clamped |= ClampVector(
+			state.viewmodel.fire_impulse_rot, std::max(settings.impulse.impulse_rot_cap, 0.f));
+		const float impulse_decay = Clamp(
+			1.f - std::exp(-std::max(settings.impulse.decay, 0.01f) * Clamp(input.dt, 0.f, 0.033f)), 0.f, 1.f);
+		state.viewmodel.fire_impulse_pos.Mul(1.f - impulse_decay);
+		state.viewmodel.fire_impulse_rot.Mul(1.f - impulse_decay);
 	}
 
 	UpdateSprintFovPulse(settings, state, input.dt);
@@ -1029,6 +1072,16 @@ void UpdateSimulation(const SimulationSettings& settings, SimulationState& state
 		vm_mouse_rot.Mul(ads_mouse_mult);
 		vm_impulse_pos.Mul(ads_impulse_mult);
 		vm_impulse_rot.Mul(ads_impulse_mult);
+		SVec3 fire_target_pos = state.viewmodel.fire_impulse_pos;
+		SVec3 fire_target_rot = state.viewmodel.fire_impulse_rot;
+		fire_target_pos.Mul(ads_impulse_mult);
+		fire_target_rot.Mul(ads_impulse_mult);
+		SpringVector(state.viewmodel.fire_pos, fire_target_pos,
+			settings.viewmodel.follow_speed, settings.viewmodel.damping, input.dt);
+		SpringVector(state.viewmodel.fire_rot, fire_target_rot,
+			settings.viewmodel.follow_speed, settings.viewmodel.damping, input.dt);
+		ClampVector(state.viewmodel.fire_pos, std::max(settings.impulse.impulse_pos_cap, 0.f));
+		ClampVector(state.viewmodel.fire_rot, std::max(settings.impulse.impulse_rot_cap, 0.f));
 
 		SVec3 vm_sprint_pos;
 		SVec3 vm_sprint_rot;
@@ -1073,8 +1126,10 @@ void UpdateSimulation(const SimulationSettings& settings, SimulationState& state
 		weighted_lower_pos.Mul(settings.features.layer_lower_weight);
 		weighted_lower_rot.Mul(settings.features.layer_lower_weight);
 		output.viewmodel_pos = weighted_vm_pos;
+		output.viewmodel_pos.Add(state.viewmodel.fire_pos);
 		output.viewmodel_pos.Add(weighted_lower_pos);
 		output.viewmodel_rot = weighted_vm_rot;
+		output.viewmodel_rot.Add(state.viewmodel.fire_rot);
 		output.viewmodel_rot.Add(weighted_lower_rot);
 		output.viewmodel_active = true;
 	}
@@ -1084,6 +1139,10 @@ void UpdateSimulation(const SimulationSettings& settings, SimulationState& state
 		state.viewmodel.rot.Set(0.f, 0.f, 0.f);
 		state.viewmodel.impulse_pos.Set(0.f, 0.f, 0.f);
 		state.viewmodel.impulse_rot.Set(0.f, 0.f, 0.f);
+		state.viewmodel.fire_impulse_pos.Set(0.f, 0.f, 0.f);
+		state.viewmodel.fire_impulse_rot.Set(0.f, 0.f, 0.f);
+		state.viewmodel.fire_pos.Set(0.f, 0.f, 0.f);
+		state.viewmodel.fire_rot.Set(0.f, 0.f, 0.f);
 	}
 	UpdateBodycamArmLayer(settings, state, input, output);
 	UpdateStalker2ArmLayer(settings, state, input, output);
@@ -1211,7 +1270,7 @@ void AddFireImpulse(const SimulationSettings& settings, SimulationState& state, 
 		state.lowering.fire_recovery = std::max(state.lowering.fire_recovery, std::max(settings.lowering.fire_timeout, 0.f));
 		state.lowering.combat_timer = std::max(state.lowering.combat_timer, std::max(settings.lowering.combat_timeout, 0.f));
 	}
-	if (!settings.features.vm_enable)
+	if (!settings.features.fire_impulse_enable)
 		return;
 
 	const float fire_impulse = ads ? settings.impulse.ads_fire_impulse : settings.impulse.fire_impulse;
@@ -1220,10 +1279,10 @@ void AddFireImpulse(const SimulationSettings& settings, SimulationState& state, 
 		return;
 
 	const float side = state.viewmodel.mouse_speed.x >= 0.f ? -1.f : 1.f;
-	state.viewmodel.impulse_pos.Add(0.f, -0.0015f * p, -0.0040f * p);
-	state.viewmodel.impulse_rot.Add(-0.32f * p, 0.f, 0.10f * side * p);
-	ClampVector(state.viewmodel.impulse_pos, std::max(settings.impulse.impulse_pos_cap, 0.f));
-	ClampVector(state.viewmodel.impulse_rot, std::max(settings.impulse.impulse_rot_cap, 0.f));
+	state.viewmodel.fire_impulse_pos.Add(0.f, -0.0015f * p, -0.0040f * p);
+	state.viewmodel.fire_impulse_rot.Add(-0.32f * p, 0.f, 0.10f * side * p);
+	ClampVector(state.viewmodel.fire_impulse_pos, std::max(settings.impulse.impulse_pos_cap, 0.f));
+	ClampVector(state.viewmodel.fire_impulse_rot, std::max(settings.impulse.impulse_rot_cap, 0.f));
 }
 
 bool AddNamedImpulse(const SimulationSettings& settings, SimulationState& state, const char* kind, float power, bool ads)

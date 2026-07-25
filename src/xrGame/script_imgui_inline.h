@@ -210,8 +210,8 @@ IC bool ImGui_MagnificationCurve(LPCSTR label, Fvector4& low, Fvector4& high,
 	ImGui::InvisibleButton("curve", ImVec2(graph_width, graph_height), ImGuiButtonFlags_MouseButtonLeft);
 	const ImVec2 canvas_min = ImGui::GetItemRectMin();
 	const ImVec2 canvas_max = ImGui::GetItemRectMax();
-	const ImVec2 plot_min(canvas_min.x + 34.f, canvas_min.y + 8.f);
-	const ImVec2 plot_max(canvas_max.x - 8.f, canvas_max.y - 22.f);
+	const ImVec2 plot_min(canvas_min.x + 42.f, canvas_min.y + 10.f);
+	const ImVec2 plot_max(canvas_max.x - 10.f, canvas_max.y - 24.f);
 	const float log_max = logf(magnifications[7]);
 	auto point_position = [&](int index)
 	{
@@ -261,18 +261,83 @@ IC bool ImGui_MagnificationCurve(LPCSTR label, Fvector4& low, Fvector4& high,
 	{
 		const float y = plot_min.y + (plot_max.y - plot_min.y) * (float(grid) / 4.f);
 		draw->AddLine(ImVec2(plot_min.x, y), ImVec2(plot_max.x, y), ImGui::GetColorU32(ImGuiCol_Separator), 1.f);
+		char value_text[16];
+		const float grid_value = value_max - (value_max - value_min) * (float(grid) / 4.f);
+		xr_sprintf(value_text, "%.2g", grid_value);
+		draw->AddText(ImVec2(canvas_min.x + 6.f, y - 7.f), ImGui::GetColorU32(ImGuiCol_TextDisabled), value_text);
 	}
+
+	if (value_min <= 1.f && value_max >= 1.f)
+	{
+		const float neutral = (1.f - value_min) / _max(value_max - value_min, EPS);
+		const float neutral_y = plot_max.y - neutral * (plot_max.y - plot_min.y);
+		draw->AddLine(ImVec2(plot_min.x, neutral_y), ImVec2(plot_max.x, neutral_y),
+			ImGui::GetColorU32(ImGuiCol_PlotHistogram), 2.f);
+		draw->AddText(ImVec2(plot_min.x + 5.f, neutral_y - 15.f),
+			ImGui::GetColorU32(ImGuiCol_TextDisabled), "profile baseline");
+	}
+
+	ImVec4 fill_color = ImGui::GetStyleColorVec4(ImGuiCol_PlotLines);
+	fill_color.w = 0.10f;
+	for (int i = 1; i < 8; ++i)
+	{
+		const ImVec2 previous = point_position(i - 1);
+		const ImVec2 current = point_position(i);
+		const ImVec2 area[4] = {
+			previous,
+			current,
+			ImVec2(current.x, plot_max.y),
+			ImVec2(previous.x, plot_max.y),
+		};
+		draw->AddConvexPolyFilled(area, 4, ImGui::GetColorU32(fill_color));
+	}
+
+	int hovered_point = -1;
+	if (ImGui::IsItemHovered())
+	{
+		const float mouse_x = ImGui::GetMousePos().x;
+		float nearest = FLT_MAX;
+		for (int i = 0; i < 8; ++i)
+		{
+			const float distance = _abs(mouse_x - point_position(i).x);
+			if (distance < nearest)
+			{
+				nearest = distance;
+				hovered_point = i;
+			}
+		}
+	}
+
 	for (int i = 0; i < 8; ++i)
 	{
 		const ImVec2 point = point_position(i);
-		draw->AddLine(ImVec2(point.x, plot_min.y), ImVec2(point.x, plot_max.y), ImGui::GetColorU32(ImGuiCol_Separator), 1.f);
+		draw->AddLine(ImVec2(point.x, plot_min.y), ImVec2(point.x, plot_max.y),
+			ImGui::GetColorU32(hovered_point == i ? ImGuiCol_PlotLinesHovered : ImGuiCol_Separator),
+			hovered_point == i ? 1.5f : 1.f);
 		char text[16];
 		xr_sprintf(text, "%gx", magnifications[i]);
-		draw->AddText(ImVec2(point.x - 7.f, plot_max.y + 4.f), ImGui::GetColorU32(ImGuiCol_TextDisabled), text);
+		const ImVec2 axis_text_size = ImGui::CalcTextSize(text);
+		const float axis_text_x = clampr(point.x - axis_text_size.x * 0.5f,
+			canvas_min.x + 3.f, canvas_max.x - axis_text_size.x - 3.f);
+		draw->AddText(ImVec2(axis_text_x, plot_max.y + 4.f), ImGui::GetColorU32(ImGuiCol_TextDisabled), text);
 		if (i > 0)
 			draw->AddLine(point_position(i - 1), point, ImGui::GetColorU32(ImGuiCol_PlotLines), 2.f);
-		draw->AddCircleFilled(point, 5.f,
-			ImGui::GetColorU32(active_curve == curve_id && active_point == i ? ImGuiCol_PlotLinesHovered : ImGuiCol_PlotLines));
+		const bool highlighted = (active_curve == curve_id && active_point == i) || hovered_point == i;
+		draw->AddCircleFilled(point, highlighted ? 7.f : 5.f,
+			ImGui::GetColorU32(highlighted ? ImGuiCol_PlotLinesHovered : ImGuiCol_PlotLines));
+		if (hovered_point == i)
+		{
+			char point_text[32];
+			xr_sprintf(point_text, "%gx  %.2f", magnifications[i], *values[i]);
+			const ImVec2 text_size = ImGui::CalcTextSize(point_text);
+			const float text_x = i >= 6 ? point.x - text_size.x - 12.f : point.x + 10.f;
+			const float text_y = _max(plot_min.y + 4.f, point.y - text_size.y - 10.f);
+			const ImVec2 bubble_min(text_x - 5.f, text_y - 3.f);
+			const ImVec2 bubble_max(text_x + text_size.x + 5.f, text_y + text_size.y + 3.f);
+			draw->AddRectFilled(bubble_min, bubble_max, ImGui::GetColorU32(ImGuiCol_PopupBg), 3.f);
+			draw->AddRect(bubble_min, bubble_max, ImGui::GetColorU32(ImGuiCol_Border), 3.f);
+			draw->AddText(ImVec2(text_x, text_y), ImGui::GetColorU32(ImGuiCol_Text), point_text);
+		}
 	}
 	ImGui::PopID();
 	return changed;

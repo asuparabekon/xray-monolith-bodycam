@@ -534,6 +534,25 @@ void CScriptGameObject::set_hud_fire_bone_silencer(LPCSTR bone_name)
 {
 	set_hud_fire_bone_silencer(bone_id(bone_name, true));
 }
+bool CScriptGameObject::hud_inertion_enabled() const
+{
+    CHudItem* item = smart_cast<CHudItem*>(&object());
+    if (!item)
+    {
+        return false;
+    }
+    return !!item->HudInertionEnabled();
+}
+
+void CScriptGameObject::set_hud_inertion_enabled(bool value)
+{
+    CHudItem* item = smart_cast<CHudItem*>(&object());
+    if (!item)
+    {
+        return;
+    }
+    item->SetHudInertionEnabled(value ? TRUE : FALSE);
+}
 
 u16 CScriptGameObject::bone_id(LPCSTR bone_name, bool bHud)
 {
@@ -734,6 +753,18 @@ bool CScriptGameObject::is_bone_visible(u16 bone_id, bool bHud)
 
 	return result;
 }
+
+#ifdef CBULLETMANAGER_EX
+bool CScriptGameObject::GetBulletCheckVisual()
+{
+    return object().GetBulletCheckVisual();
+}
+
+void CScriptGameObject::SetBulletCheckVisual(bool value)
+{
+    object().SetBulletCheckVisual(value);
+}
+#endif
 
 //////////////////////////////////////////////////////////////////////////
 //////////////////////////////////////////////////////////////////////////

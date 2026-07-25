@@ -965,6 +965,33 @@ float get_cam_effector_fov(int id)
 	return e ? e->m_fov : 0.0f;
 }
 
+u32 queue_actor_camera_delta(float yaw_delta, float pitch_delta)
+{
+	CActor* actor = Actor();
+	return actor ? actor->cam_QueueScriptCameraDelta(yaw_delta, pitch_delta) : 0;
+}
+
+u32 poll_actor_camera_delta(u32 request_id, float& yaw, float& pitch)
+{
+	CActor* actor = Actor();
+	CActor::EScriptCameraDeltaStatus status;
+	Fvector2 applied = { 0.f, 0.f };
+	yaw = 0.f;
+	pitch = 0.f;
+	if (!actor || !actor->cam_PollScriptCameraDelta(request_id, status, applied))
+		return 0;
+
+	yaw = applied.x;
+	pitch = applied.y;
+	return status + 1;
+}
+
+bool cancel_actor_camera_delta(u32 request_id)
+{
+	CActor* actor = Actor();
+	return actor && actor->cam_CancelScriptCameraDelta(request_id);
+}
+
 
 bool check_cam_effector(int id)
 {
@@ -2646,6 +2673,10 @@ void CLevel::script_register(lua_State* L)
 			def("get_cam_effector_length", &get_cam_effector_length),
 			def("set_cam_effector_fov", &set_cam_effector_fov),
 			def("get_cam_effector_fov", &get_cam_effector_fov),
+			def("queue_actor_camera_delta", &queue_actor_camera_delta),
+			def("poll_actor_camera_delta", &poll_actor_camera_delta,
+				pure_out_value<2>() + pure_out_value<3>()),
+			def("cancel_actor_camera_delta", &cancel_actor_camera_delta),
 			def("check_cam_effector", &check_cam_effector),
 			def("add_pp_effector", &add_pp_effector),
 			def("set_pp_effector_factor", &set_pp_effector_factor),

@@ -1,0 +1,263 @@
+-- Per-weapon hip-fire viewmodel profiles for Bodycam.
+-- Profiles are keyed by weapon section, report the resolved HUD section for
+-- authoring, and are faded out by the engine's existing ADS transition.
+
+local config_section_prefix = "bodycam_weapon_hud_"
+local default_blend_speed = 8
+local save_delay_ms = 500
+
+local current_hud_section
+local current_weapon_section
+local current_profile
+local save_due_time
+local show_window = false
+
+local function blank_profile()
+    return {
+        enabled = false,
+        pos_x = 0,
+        pos_y = 0,
+        pos_z = 0,
+        pitch = 0,
+        yaw = 0,
+        roll = 0,
+        blend_speed = default_blend_speed,
+    }
+end
+
+local function storage()
+    return axr_main and axr_main.config
+end
+
+local function storage_section(weapon_section)
+    return config_section_prefix .. weapon_section
+end
+
+local function read_value(ini, section, key, value_type, fallback)
+    if not ini or not ini:section_exist(section) or not ini:line_exist(section, key) then
+        return fallback
+    end
+    return ini:r_value(section, key, value_type, fallback)
+end
+
+local function load_profile(weapon_section)
+    local profile = blank_profile()
+    local ini = storage()
+    local section = storage_section(weapon_section)
+    profile.enabled = read_value(ini, section, "enabled", 1, false)
+    profile.pos_x = read_value(ini, section, "pos_x", 2, 0)
+    profile.pos_y = read_value(ini, section, "pos_y", 2, 0)
+    profile.pos_z = read_value(ini, section, "pos_z", 2, 0)
+    profile.pitch = read_value(ini, section, "pitch", 2, 0)
+    profile.yaw = read_value(ini, section, "yaw", 2, 0)
+    profile.roll = read_value(ini, section, "roll", 2, 0)
+    profile.blend_speed = read_value(ini, section, "blend_speed", 2, default_blend_speed)
+    return profile
+end
+
+local function write_profile()
+    local ini = storage()
+    if not ini or not current_weapon_section or not current_profile then
+        return
+    end
+
+    local section = storage_section(current_weapon_section)
+    ini:w_value(section, "enabled", current_profile.enabled)
+    ini:w_value(section, "pos_x", current_profile.pos_x)
+    ini:w_value(section, "pos_y", current_profile.pos_y)
+    ini:w_value(section, "pos_z", current_profile.pos_z)
+    ini:w_value(section, "pitch", current_profile.pitch)
+    ini:w_value(section, "yaw", current_profile.yaw)
+    ini:w_value(section, "roll", current_profile.roll)
+    ini:w_value(section, "blend_speed", current_profile.blend_speed)
+    ini:save()
+    save_due_time = nil
+end
+
+local function apply_profile()
+    if not bodycam or not current_profile then
+        return
+    end
+
+    if current_profile.enabled then
+        bodycam.set_viewmodel_profile(
+            current_profile.pos_x,
+            current_profile.pos_y,
+            current_profile.pos_z,
+            current_profile.pitch,
+            current_profile.yaw,
+            current_profile.roll,
+            current_profile.blend_speed
+        )
+    else
+        bodycam.clear_viewmodel_profile(current_profile.blend_speed)
+    end
+end
+
+local function resolve_active_weapon_section()
+    local actor = db.actor
+    local item = actor and actor:active_item()
+    if not item or not IsWeapon(item) then
+        return nil
+    end
+    return item:section()
+end
+
+local function resolve_hud_section(weapon_section)
+    local ini = system_ini()
+    if not ini:line_exist(weapon_section, "hud") then
+        return nil
+    end
+    return ini:r_string(weapon_section, "hud")
+end
+
+local function refresh_active_profile()
+    local weapon_section = resolve_active_weapon_section()
+    if weapon_section == current_weapon_section then
+        return
+    end
+
+    if save_due_time then
+        write_profile()
+    end
+
+    local hud_section = weapon_section and resolve_hud_section(weapon_section) or nil
+    current_weapon_section = weapon_section
+    current_hud_section = hud_section
+    current_profile = weapon_section and load_profile(weapon_section) or nil
+    if current_profile then
+        apply_profile()
+    elseif bodycam then
+        bodycam.clear_viewmodel_profile(default_blend_speed)
+    end
+end
+
+local function mark_changed()
+    apply_profile()
+    save_due_time = time_global() + save_delay_ms
+end
+
+local function actor_on_update()
+    local now = time_global()
+    refresh_active_profile()
+    if save_due_time and now >= save_due_time then
+        write_profile()
+    end
+end
+
+local function actor_on_net_destroy()
+    if save_due_time then
+        write_profile()
+    end
+    current_weapon_section = nil
+    current_hud_section = nil
+    current_profile = nil
+    if bodycam then
+        bodycam.clear_viewmodel_profile(default_blend_speed)
+    end
+end
+
+local function tooltip(text, minimum, maximum, default_value, format)
+    if ImGui.IsItemHovered(ImGuiHoveredFlags.ForTooltip) then
+        ImGui.BeginTooltip()
+        ImGui.Text(text)
+        if minimum ~= nil and maximum ~= nil then
+            ImGui.Separator()
+            ImGui.Text(string.format(
+                "Minimum: " .. format .. "    Maximum: " .. format .. "    Default: " .. format,
+                minimum, maximum, default_value))
+            ImGui.TextDisabled("Right-click the control to reset it.")
+        end
+        ImGui.EndTooltip()
+    end
+end
+
+local function draw_checkbox(label, field, description)
+    local changed, value = ImGui.Checkbox(label, current_profile[field])
+    tooltip(description)
+    if changed then
+        current_profile[field] = value
+        mark_changed()
+    end
+end
+
+local function draw_float(label, field, speed, minimum, maximum, format, description)
+    local changed, value = ImGui.DragFloat(label, current_profile[field], speed, minimum, maximum,
+        format, ImGuiSliderFlags.AlwaysClamp)
+    local reset = ImGui.IsItemClicked(ImGuiMouseButton.Right)
+    local default_value = field == "blend_speed" and default_blend_speed or 0
+    tooltip(description, minimum, maximum, default_value, format)
+    if changed or reset then
+        if reset then
+            value = default_value
+        end
+        current_profile[field] = value
+        mark_changed()
+    end
+end
+
+local function draw_profile_editor()
+    ImGui.SetNextWindowSize(vector2():set(540, 430), ImGuiCond.FirstUseEver)
+    local expanded, visible = ImGui.Begin("Weapon HUD Profiles", show_window, ImGuiWindowFlags.None)
+    show_window = visible
+
+    if expanded then
+        refresh_active_profile()
+        if not current_weapon_section or not current_hud_section or not current_profile then
+            ImGui.Text("Equip a firearm to edit its HUD profile.")
+        else
+            ImGui.Text("Weapon section: " .. current_weapon_section)
+            ImGui.Text("HUD section: " .. current_hud_section)
+            ImGui.Separator()
+            draw_checkbox("Enable profile", "enabled",
+                "Applies this profile outside ADS. The existing ADS transition fades it cleanly to zero.")
+
+            ImGui.Spacing()
+            ImGui.Text("Position")
+            draw_float("X##weapon_hud", "pos_x", 0.001, -0.5, 0.5, "%.3f",
+                "Moves the complete weapon-and-hands viewmodel horizontally.")
+            draw_float("Y##weapon_hud", "pos_y", 0.001, -0.5, 0.5, "%.3f",
+                "Moves the complete weapon-and-hands viewmodel vertically.")
+            draw_float("Z##weapon_hud", "pos_z", 0.001, -0.5, 0.5, "%.3f",
+                "Moves the complete weapon-and-hands viewmodel forward or backward.")
+
+            ImGui.Spacing()
+            ImGui.Text("Rotation")
+            draw_float("Pitch##weapon_hud", "pitch", 0.05, -45, 45, "%.2f",
+                "Rotates the complete viewmodel around its pitch axis.")
+            draw_float("Yaw##weapon_hud", "yaw", 0.05, -45, 45, "%.2f",
+                "Rotates the complete viewmodel around its yaw axis.")
+            draw_float("Roll##weapon_hud", "roll", 0.05, -45, 45, "%.2f",
+                "Rotates the complete viewmodel around its roll axis.")
+
+            ImGui.Spacing()
+            draw_float("Weapon switch blend speed", "blend_speed", 0.1, 0.1, 30, "%.1f",
+                "Controls how quickly this profile blends in after equipping the weapon.")
+
+            ImGui.Spacing()
+            if ImGui.Button("Reset Current Weapon", vector2():set(180, 0)) then
+                current_profile = blank_profile()
+                mark_changed()
+            end
+        end
+    end
+    ImGui.End()
+end
+
+function on_game_start()
+    RegisterScriptCallback("actor_on_update", actor_on_update)
+    RegisterScriptCallback("actor_on_net_destroy", actor_on_net_destroy)
+    refresh_active_profile()
+end
+
+if ImGui and ImGui.Groups and ImGui.Groups.Main and ImGui.Groups.Mods then
+    ImGui.Groups.Main.Widget(function()
+        if show_window then
+            draw_profile_editor()
+        end
+    end)
+
+    ImGui.Groups.Mods.Widget(function()
+        _, show_window = ImGui.MenuItem("Weapon HUD Profiles", nil, show_window, true)
+    end)
+end

@@ -252,6 +252,10 @@ public:
 	void CommitEvents(); // @ the start of frame
 	void Render();
     void __stdcall net_Relcase(CObject* obj);
+
+#ifdef CBULLETMANAGER_EX
+	bool ValidateHitDynamicVisualMesh(SBullet& B, collide::rq_result& R, Fvector& collide_position, float range);
+#endif
 };
 
 struct bullet_test_callback_data
@@ -262,4 +266,7 @@ struct bullet_test_callback_data
 #if 1//def DEBUG
 	float high_time;
 #endif // #ifdef DEBUG
+#ifdef CBULLETMANAGER_EX
+    float max_distance;
+#endif
 };

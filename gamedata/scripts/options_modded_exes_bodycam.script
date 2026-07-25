@@ -65,6 +65,7 @@ PAGE = page {
     bodycam_bool { id = "stalker2_style_arm_ik_enable", text = label("stalker2_style_arm_ik_enable"), def = true, key = "stalker2_style_arm_ik_enable" },
     bodycam_bool { id = "movement_inertia_enable", text = label("movement_inertia_enable"), def = true, key = "movement_inertia_enable" },
     bodycam_bool { id = "movement_inertia_disable_ads", text = label("movement_inertia_disable_ads"), def = true, key = "movement_inertia_disable_ads" },
+    bodycam_bool { id = "sprint_transition_enable", text = label("sprint_transition_enable"), def = true, key = "sprint_transition_enable" },
 
     line {},
     bodycam_num { id = "hip_camera_deadzone_yaw", text = label("hip_camera_deadzone_yaw"), def = 1.5, min = 0.0, max = 30.0, step = 0.1, key = "hip_camera_deadzone_yaw" },
@@ -100,6 +101,7 @@ PAGE = page {
     bodycam_num { id = "vm_lowering_return_speed", text = label("vm_lowering_return_speed"), def = 0.4, min = 0.0, max = 1.0, step = 0.1, key = "vm_lowering_return_speed" },
 
     line {},
+    bodycam_bool { id = "fire_impulse_enable", text = label("fire_impulse_enable"), def = true, key = "fire_impulse_enable" },
     bodycam_num { id = "hip_fire_weapon_impulse", text = label("hip_fire_weapon_impulse"), def = 5.0, min = 0.0, max = 5.0, step = 0.1, key = "hip_fire_weapon_impulse" },
     bodycam_num { id = "ads_fire_weapon_impulse", text = label("ads_fire_weapon_impulse"), def = 1.35, min = 0.0, max = 5.0, step = 0.1, key = "ads_fire_weapon_impulse" },
     bodycam_num { id = "sprint_transition_vm_blend_scale", text = label("sprint_transition_vm_blend_scale"), def = 1.5, min = 0.0, max = 2.0, step = 0.1, key = "sprint_transition_vm_blend_scale" },

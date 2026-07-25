@@ -19,6 +19,13 @@
 #define		PRIORITY_NORMAL	8
 #define		PRIORITY_LOW	4
 
+// Background PPL task group used to (re)load textures off the calling thread.
+// Defined in dx10ResourceManager_Resources.cpp; CResourceManager::_CreateTexture
+// dispatches brand-new textures' initial Load() through it whenever the device is
+// ready. apply_load() below reuses the same queue for evicted textures instead of
+// calling Load() inline.
+extern xr_task_group textures_load_tasks;
+
 void resptrcode_texture::create(LPCSTR _name)
 {
 	PROF_EVENT("resptrcode_texture::create");
@@ -151,8 +158,38 @@ void CTexture::PostLoad()
 
 void CTexture::apply_load(u32 dwStage)
 {
-    if (!flags.bLoaded) Load();
-    else PostLoad();
+    if (!flags.bLoaded)
+    {
+        // Never loaded, or just dropped by EvictStalledTextures(). Load() ends up in
+        // D3DX11CreateTextureFromMemory, which races the resource thread if run inline
+        // here (this can run on the render thread mid-gameplay just as easily as on a
+        // loading-screen thread during level load - neither is safe in the MT build).
+        // Queue the (re)load the same way _CreateTexture() does for new textures instead;
+        // bLoading guards against re-queuing every call while that's in flight.
+        if (!flags.bLoading)
+        {
+#ifdef DEBUG
+            Msg("* [TexReload] queued: %s", cName.c_str());
+#endif // DEBUG
+            CTexture* self = this;
+            static DWORD this_thread_id = 0;
+            this_thread_id = GetCurrentThreadId();
+            textures_load_tasks.run([self]()
+            {
+                if (this_thread_id != GetCurrentThreadId()) { PROF_THREAD("X-Ray PPL Thread") }
+                self->Load();
+            });
+        }
+        // Bind nothing (or whatever is already there, e.g. mid-flight from an
+        // in-flight Load()) for this call. apply_normal() waits out any in-flight
+        // load, so this never touches D3D resources that are being created
+        // concurrently. Once the queued Load() completes, PostLoad() re-points
+        // `bind` at the real apply_* handler and subsequent calls stop landing here.
+        apply_normal(dwStage);
+        return;
+    }
+
+    PostLoad();
     if (bind == xr_make_delegate(this, &CTexture::apply_load))
     {
         // This should not happen - if bind is still apply_load, fall back to apply_normal

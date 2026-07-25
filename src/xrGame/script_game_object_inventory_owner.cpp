@@ -2041,6 +2041,39 @@ void CScriptGameObject::unregister_in_combat()
 	stalker->agent_manager().member().unregister_in_combat(stalker);
 }
 
+// Force-plant enemy as a visible-memory object on this stalker (CMemoryManager::
+// make_object_visible_somewhen - the same call the engine uses when distributing wounded
+// targets across a squad, agent_enemy_manager.cpp). Enemy selection scores a currently seen
+// enemy far above hit/sound memory, so an enemy injected only via hit memory never wins
+// selection; this puts him in the seen class, where the engine's nearest-seen logic takes over.
+void CScriptGameObject::make_enemy_visible(CScriptGameObject* enemy)
+{
+	CAI_Stalker* stalker = smart_cast<CAI_Stalker*>(&object());
+	if (!stalker)
+	{
+		ai().script_engine().script_log(ScriptStorage::eLuaMessageTypeError,
+		                                "CAI_Stalker : cannot access class member make_enemy_visible!");
+		return;
+	}
+
+	if (!enemy)
+	{
+		ai().script_engine().script_log(ScriptStorage::eLuaMessageTypeError,
+		                                "CAI_Stalker : make_enemy_visible : enemy is nil!");
+		return;
+	}
+
+	const CEntityAlive* entity = smart_cast<const CEntityAlive*>(&enemy->object());
+	if (!entity)
+	{
+		ai().script_engine().script_log(ScriptStorage::eLuaMessageTypeError,
+		                                "CAI_Stalker : make_enemy_visible : enemy is not an alive entity!");
+		return;
+	}
+
+	stalker->memory().make_object_visible_somewhen(entity);
+}
+
 CCoverPoint const* CScriptGameObject::find_best_cover(Fvector position_to_cover_from)
 {
 	CAI_Stalker* stalker = smart_cast<CAI_Stalker*>(&object());

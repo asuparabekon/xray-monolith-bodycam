@@ -11,6 +11,8 @@ struct RuntimeFeatureSettings
 	BOOL lower_enable = TRUE;
 	BOOL bodycam_arm_enable = FALSE;
 	BOOL stalker2_arm_enable = TRUE;
+	BOOL fire_impulse_enable = TRUE;
+	BOOL sprint_transition_enable = TRUE;
 	BOOL impulse_debug = FALSE;
 	BOOL lower_disable_in_combat = TRUE;
 	float layer_vm_weight = 1.f;
@@ -47,6 +49,7 @@ struct FloatBinding
 	LPCSTR name;
 	LPCSTR console_name;
 	float* value;
+	float default_value;
 	float min_value;
 	float max_value;
 };
@@ -56,6 +59,7 @@ struct BoolBinding
 	LPCSTR name;
 	LPCSTR console_name;
 	BOOL* value;
+	BOOL default_value;
 };
 
 RuntimeConfig& GetConfig();

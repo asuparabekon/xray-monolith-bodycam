@@ -3,6 +3,7 @@
 
     Objects
         ignore_collision - Objects can use "ignore_collision" in section configs to ignore collision with another objects. Can be map geometry, other physic objects, and creatures. Example: ignore_collision = map,obj,npc
+		bullet_check_visual - Bullets must both hit a bone hitbox and a triangle of the bone's visual model to register a hit.
 
     Outfits, Actor
         legs_visual - Model for first person body legs

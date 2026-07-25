@@ -486,6 +486,7 @@
     <ClInclude Include="..\bodycam_pip_adapter.h" />
     <ClInclude Include="..\bodycam_settings.h" />
     <ClInclude Include="..\bodycam_simulation.h" />
+    <ClInclude Include="..\bodycam_viewmodel_profile.h" />
     <ClInclude Include="..\ActorAnimation.h" />
     <ClInclude Include="..\ActorBackpack.h" />
     <ClInclude Include="..\ActorCondition.h" />
@@ -2217,6 +2218,9 @@
     </ClCompile>
     <ClCompile Include="..\bodycam_script.cpp">
       <PrecompiledHeaderFile>pch_script.h</PrecompiledHeaderFile>
+    </ClCompile>
+    <ClCompile Include="..\bodycam_viewmodel_profile.cpp">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
     </ClCompile>
     <ClCompile Include="..\ActorCondition.cpp">
       <PrecompiledHeaderFile>pch_script.h</PrecompiledHeaderFile>

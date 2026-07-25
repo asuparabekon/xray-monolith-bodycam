@@ -165,6 +165,11 @@ class_<CScriptGameObject> script_register_game_object2(class_<CScriptGameObject>
 		// demonized: list all bones
 		.def("list_bones", SAFE_WRAP(&CScriptGameObject::list_bones))
 
+#ifdef CBULLETMANAGER_EX
+		.def("GetBulletCheckVisual", SAFE_WRAP(&CScriptGameObject::GetBulletCheckVisual))
+		.def("SetBulletCheckVisual", SAFE_WRAP(&CScriptGameObject::SetBulletCheckVisual))
+#endif
+
 		//////////////////////////////////////////////////////////////////////////
 		// Space restrictions
 		//////////////////////////////////////////////////////////////////////////
@@ -527,6 +532,8 @@ class_<CScriptGameObject> script_register_game_object2(class_<CScriptGameObject>
 		.def("set_hud_fire_bone2", SAFE_WRAP((void (CScriptGameObject::*)(LPCSTR))(&CScriptGameObject::set_hud_fire_bone2)))
 		.def("set_hud_fire_bone_silencer", SAFE_WRAP((void (CScriptGameObject::*)(u16))(&CScriptGameObject::set_hud_fire_bone_silencer)))
 		.def("set_hud_fire_bone_silencer", SAFE_WRAP((void (CScriptGameObject::*)(LPCSTR))(&CScriptGameObject::set_hud_fire_bone_silencer)))
+		.def("hud_inertion_enabled", SAFE_WRAP(&CScriptGameObject::hud_inertion_enabled))
+		.def("set_hud_inertion_enabled", SAFE_WRAP(&CScriptGameObject::set_hud_inertion_enabled))
 		// For EatableItem
 		.def("set_remaining_uses", SAFE_WRAP(&CScriptGameObject::SetRemainingUses))
 		.def("get_remaining_uses", SAFE_WRAP(&CScriptGameObject::GetRemainingUses))

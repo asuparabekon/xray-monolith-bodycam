@@ -41,6 +41,15 @@ void AddMouseAimDelta(MouseAimState& state, float yaw_delta, float pitch_delta)
 	state.pending_pitch += pitch_delta;
 }
 
+void RebaseMouseAim(MouseAimState& state, float yaw_delta, float pitch_delta)
+{
+	if (!state.initialized)
+		return;
+
+	state.yaw = NormalizeAngle(state.yaw + yaw_delta);
+	state.pitch = NormalizeAngle(state.pitch + pitch_delta);
+}
+
 MouseAimOutput ResolveMouseAim(MouseAimState& state, float target_yaw, float target_pitch)
 {
 	if (!state.initialized)

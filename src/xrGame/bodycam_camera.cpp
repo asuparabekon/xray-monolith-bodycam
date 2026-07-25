@@ -109,6 +109,37 @@ void CBodycam::AddMouseLookDelta(float yaw_delta, float pitch_delta)
 	AddMouseAimDelta(m_mouse_aim, yaw_delta, pitch_delta);
 }
 
+void CBodycam::RebaseLookDelta(float yaw_delta, float pitch_delta)
+{
+	RebaseMouseAim(m_mouse_aim, yaw_delta, pitch_delta);
+	RebaseSimulationLook(m_state, yaw_delta, pitch_delta);
+}
+
+void CBodycam::SetViewmodelProfile(const Fvector& pos, const Fvector& rot, float blend_speed)
+{
+	SVec3 profile_pos;
+	profile_pos.Set(pos.x, pos.y, pos.z);
+	SVec3 profile_rot;
+	profile_rot.Set(rot.x, rot.y, rot.z);
+	Bodycam::SetViewmodelProfile(m_viewmodel_profile, profile_pos, profile_rot, blend_speed);
+}
+
+void CBodycam::ClearViewmodelProfile(float blend_speed)
+{
+	Bodycam::ClearViewmodelProfile(m_viewmodel_profile, blend_speed);
+}
+
+void CBodycam::ApplyViewmodelProfile(float dt, float ads_blend)
+{
+	const ViewmodelProfileOutput profile = UpdateViewmodelProfile(m_viewmodel_profile, dt, ads_blend);
+	if (!profile.active)
+		return;
+
+	m_viewmodel_active = TRUE;
+	m_viewmodel_pos.add(ToFvector(profile.pos));
+	m_viewmodel_rot.add(ToFvector(profile.rot));
+}
+
 PipView CBodycam::UpdatePipView(const PipInput& input)
 {
 	return m_pip_adapter.Update(input);
@@ -154,6 +185,7 @@ void CBodycam::Update(const UpdateInput& input, VisualOutput& output)
 	{
 		ClearViewmodelOutput();
 	}
+	ApplyViewmodelProfile(input.dt, input.ads_blend);
 
 	m_arm_pose = BuildArmPose(sim_output);
 
@@ -221,6 +253,10 @@ void CBodycam::Dump(bool ads, u32 mstate) const
 	Msg("* bodycam mouse speed[%0.3f %0.3f] accel[%0.3f %0.3f] move[%0.3f %0.3f %0.3f]", RadToDeg(m_state.viewmodel.mouse_speed.x), RadToDeg(m_state.viewmodel.mouse_speed.y), RadToDeg(m_state.viewmodel.mouse_accel.x), RadToDeg(m_state.viewmodel.mouse_accel.y), m_state.viewmodel.move_intent.x, m_state.viewmodel.move_intent.y, m_state.viewmodel.move_intent.z);
 	Msg("* bodycam impulse pos[%0.4f %0.4f %0.4f] rot[%0.3f %0.3f %0.3f] airborne=%0.3f caps pos=%0.3f rot=%0.3f", m_state.viewmodel.impulse_pos.x, m_state.viewmodel.impulse_pos.y, m_state.viewmodel.impulse_pos.z, m_state.viewmodel.impulse_rot.x, m_state.viewmodel.impulse_rot.y, m_state.viewmodel.impulse_rot.z, m_state.viewmodel.airborne_time, config.impulse.impulse_pos_cap, config.impulse.impulse_rot_cap);
 	Msg("* bodycam viewmodel pos[%0.4f %0.4f %0.4f] rot[%0.3f %0.3f %0.3f] ads_mult mouse=%0.3f impulse=%0.3f", m_state.viewmodel.pos.x, m_state.viewmodel.pos.y, m_state.viewmodel.pos.z, m_state.viewmodel.rot.x, m_state.viewmodel.rot.y, m_state.viewmodel.rot.z, config.viewmodel.ads_mouse_mult, config.viewmodel.ads_impulse_mult);
+	Msg("* bodycam weapon profile enabled=%d target_pos[%0.4f %0.4f %0.4f] target_rot[%0.3f %0.3f %0.3f] blend=%0.2f",
+		m_viewmodel_profile.enabled, m_viewmodel_profile.target_pos.x, m_viewmodel_profile.target_pos.y,
+		m_viewmodel_profile.target_pos.z, m_viewmodel_profile.target_rot.x, m_viewmodel_profile.target_rot.y,
+		m_viewmodel_profile.target_rot.z, m_viewmodel_profile.blend_speed);
 	Msg("* bodycam movement target=%0.3f actual=%0.3f fraction=%0.3f accel enabled=%d ads_disable=%d accel=%0.3f decel=%0.3f",
 		m_movement_target_speed, m_movement_actual_speed, m_movement_speed_fraction, config.movement.enable, config.movement.ads_disable,
 		config.movement.accel_time, config.movement.decel_time);
@@ -268,11 +304,11 @@ bool CBodycam::CameraEnabled() const
 
 bool CBodycam::HudEnabled() const
 {
-	return HudEffectsEnabled();
+	return HudEffectsEnabled() || Bodycam::ViewmodelProfileActive(m_viewmodel_profile);
 }
 
 bool CBodycam::AnyFeatureEnabled() const
 {
-	return AnyEffectEnabled();
+	return AnyEffectEnabled() || Bodycam::ViewmodelProfileActive(m_viewmodel_profile);
 }
 } // namespace Bodycam

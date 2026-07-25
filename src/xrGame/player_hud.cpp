@@ -222,9 +222,8 @@ void attachable_hud_item::set_bone_visible(const shared_str& bone_name, BOOL bVi
 		m_model->LL_SetBoneVisible(bone_id, bVisibility, TRUE);
 }
 
-void attachable_hud_item::update(bool bForce)
+void attachable_hud_item::update_attach_offset()
 {
-	if (!bForce && m_upd_firedeps_frame == Device.dwFrame) return;
 	bool is_16x9 = UI().is_widescreen();
 
 	if (!!m_measures.m_prop_flags.test(hud_item_measures::e_16x9_mode_now) != is_16x9)
@@ -234,6 +233,12 @@ void attachable_hud_item::update(bool bForce)
 	ypr.mul(PI / 180.f);
 	m_attach_offset.setHPB(ypr.x, ypr.y, ypr.z);
 	m_attach_offset.translate_over(m_parent->m_adjust_mode ? m_parent->m_adjust_obj[0] : m_measures.m_item_attach[0]);
+}
+
+void attachable_hud_item::update(bool bForce)
+{
+	if (!bForce && m_upd_firedeps_frame == Device.dwFrame) return;
+	update_attach_offset();
 
 	if (m_attach_place_idx == SCOPE_ATTACH_IDX) {
 		m_item_transform.set(m_parent->attached_item(0)->m_item_transform);
@@ -729,6 +734,10 @@ player_hud::player_hud()
 	m_adjust_mode = false;
 	script_anim_part = u8(-1);
 	script_anim_offset_factor = 0.f;
+	script_anim_item_attached = false;
+	script_anim_item_model = nullptr;
+	script_anim_lead_gun = false;
+	m_attach_idx = 0;
 	m_item_pos.identity();
 	script_override_arms = false;
 	m_bodycam_hud_arms = xr_new<Bodycam::HudArms>(*this);
@@ -854,6 +863,10 @@ void player_hud::load(const shared_str& player_hud_sect, bool force)
 	::Render->hud_loading = true;
 	m_model = smart_cast<IKinematicsAnimated*>(::Render->model_Create(model_name.c_str()));
 	m_model_2 = smart_cast<IKinematicsAnimated*>(::Render->model_Create(pSettings->line_exist(player_hud_sect, "visual_2") ? pSettings->r_string(player_hud_sect, "visual_2") : model_name.c_str()));
+	IKinematics* left_model = m_model_2 ? m_model_2->dcast_PKinematics() : nullptr;
+	m_left_hand_bone = left_model ? left_model->LL_BoneID("l_hand") : BI_NONE;
+	if (left_model && m_left_hand_bone == BI_NONE)
+		m_left_hand_bone = left_model->LL_BoneID("bip01_l_hand");
 
     if (m_model)
     {
@@ -1246,6 +1259,31 @@ void player_hud::update(const Fmatrix& cam_trans)
 	m_model_2->dcast_PKinematics()->CalculateBones_Invalidate();
 	m_model_2->dcast_PKinematics()->CalculateBones(TRUE);
 
+	Fmatrix left_item_hand_relative;
+	bool left_item_follows_hand = false;
+	if (m_attached_items[1])
+	{
+		m_attached_items[1]->update_attach_offset();
+		left_item_follows_hand = capture_left_hand_attachment(
+			m_attached_items[1]->m_attach_offset,
+			m_attached_items[1]->m_measures.m_bLeadGunLeftHand,
+			left_item_hand_relative);
+	}
+
+	Fmatrix script_item_hand_relative;
+	bool script_item_follows_hand = false;
+	if (script_anim_item_attached && script_anim_item_model && m_attach_idx == 1)
+	{
+		Fmatrix script_item_offset;
+		Fvector script_item_rotation = item_pos[1];
+		script_item_rotation.mul(PI / 180.f);
+		script_item_offset.setHPB(
+			script_item_rotation.x, script_item_rotation.y, script_item_rotation.z);
+		script_item_offset.translate_over(item_pos[0]);
+		script_item_follows_hand = capture_left_hand_attachment(
+			script_item_offset, script_anim_lead_gun, script_item_hand_relative);
+	}
+
 	Bodycam::ArmPose bodycam_arm_pose;
 	Actor()->cam_BodycamGetArmPose(bodycam_arm_pose);
 	m_bodycam_hud_arms->UpdateAndApply(bodycam_arm_pose, Device.fTimeDelta);
@@ -1378,13 +1416,22 @@ void player_hud::update(const Fmatrix& cam_trans)
 		m_attached_items[0]->update(true);
 
 	if (m_attached_items[1])
+	{
 		m_attached_items[1]->update(true);
+		if (left_item_follows_hand)
+			compose_left_hand_attachment(
+				left_item_hand_relative, m_attached_items[1]->m_item_transform);
+	}
 
 	if (m_attached_items[SCOPE_ATTACH_IDX])
 		m_attached_items[SCOPE_ATTACH_IDX]->update(true);
 
 	if (script_anim_item_attached && script_anim_item_model)
+	{
 		update_script_item();
+		if (script_item_follows_hand)
+			compose_left_hand_attachment(script_item_hand_relative, m_item_pos);
+	}
 
 	// single hand offset smoothing + syncing back to other hand animation on end
 	if (script_anim_part != u8(-1))
@@ -1927,6 +1974,46 @@ void player_hud::calc_transform(u16 attach_slot_idx, const Fmatrix& offset, Fmat
 	Fmatrix ancor_m = kin->LL_GetTransform(m_ancors[(leadGun ? 0 : attach_slot_idx)]);
 	result.mul((attach_slot_idx == 0) ? m_transform : m_transform_2, ancor_m);
 	result.mulB_43(offset);
+}
+
+bool player_hud::capture_left_hand_attachment(const Fmatrix& item_offset, bool lead_gun,
+	Fmatrix& hand_relative) const
+{
+	if (!m_model_2 || m_ancors.size() < 2)
+		return false;
+
+	IKinematics* model = m_model_2->dcast_PKinematics();
+	const u16 hand = left_hand_bone();
+	const u16 anchor = m_ancors[lead_gun ? 0 : 1];
+	if (hand == BI_NONE || anchor == BI_NONE ||
+		hand >= model->LL_BoneCount() || anchor >= model->LL_BoneCount())
+		return false;
+
+	Fmatrix inverse_hand;
+	inverse_hand.invert(model->LL_GetTransform(hand));
+	hand_relative.mul_43(inverse_hand, model->LL_GetTransform(anchor));
+	hand_relative.mulB_43(item_offset);
+	return true;
+}
+
+bool player_hud::compose_left_hand_attachment(const Fmatrix& hand_relative, Fmatrix& result) const
+{
+	if (!m_model_2)
+		return false;
+
+	IKinematics* model = m_model_2->dcast_PKinematics();
+	const u16 hand = left_hand_bone();
+	if (hand == BI_NONE || hand >= model->LL_BoneCount())
+		return false;
+
+	result.mul_43(m_transform_2, model->LL_GetTransform(hand));
+	result.mulB_43(hand_relative);
+	return true;
+}
+
+u16 player_hud::left_hand_bone() const
+{
+	return m_left_hand_bone;
 }
 
 bool player_hud::inertion_allowed()

@@ -17,12 +17,12 @@ RuntimeConfig& GetConfig()
 }
 
 #define BODYCAM_FLOAT(name, member, minimum, maximum) \
-	{ #name, "bodycam_" #name, &g_bodycam_config.member, minimum, maximum }
+	{ #name, "bodycam_" #name, &g_bodycam_config.member, g_default_bodycam_config.member, minimum, maximum }
 #define BODYCAM_BOOL(name, member) \
-	{ #name, "bodycam_" #name, &g_bodycam_config.member }
+	{ #name, "bodycam_" #name, &g_bodycam_config.member, g_default_bodycam_config.member }
 // This public command already contains the bodycam_ prefix.
 #define BODYCAM_BOOL_EXACT(name, member) \
-	{ #name, #name, &g_bodycam_config.member }
+	{ #name, #name, &g_bodycam_config.member, g_default_bodycam_config.member }
 
 static FloatBinding g_float_bindings[] = {
 	// Hip-fire camera response.
@@ -167,6 +167,8 @@ static BoolBinding g_bool_bindings[] = {
 	BODYCAM_BOOL(vm_lowering_enable, features.lower_enable),
 	BODYCAM_BOOL_EXACT(bodycam_style_arm_ik_enable, features.bodycam_arm_enable),
 	BODYCAM_BOOL(stalker2_style_arm_ik_enable, features.stalker2_arm_enable),
+	BODYCAM_BOOL(fire_impulse_enable, features.fire_impulse_enable),
+	BODYCAM_BOOL(sprint_transition_enable, features.sprint_transition_enable),
 	BODYCAM_BOOL(movement_inertia_enable, movement.enable),
 	BODYCAM_BOOL(movement_inertia_disable_ads, movement.ads_disable),
 	BODYCAM_BOOL(vm_lowering_disable_in_combat, features.lower_disable_in_combat),
@@ -196,6 +198,8 @@ static PresetBool g_preset_bools[] = {
 	{ &g_bodycam_config.features.lower_enable, { FALSE, TRUE, TRUE, TRUE } },
 	{ &g_bodycam_config.features.bodycam_arm_enable, { FALSE, FALSE, FALSE, FALSE } },
 	{ &g_bodycam_config.features.stalker2_arm_enable, { FALSE, TRUE, TRUE, TRUE } },
+	{ &g_bodycam_config.features.fire_impulse_enable, { FALSE, TRUE, TRUE, TRUE } },
+	{ &g_bodycam_config.features.sprint_transition_enable, { FALSE, TRUE, TRUE, TRUE } },
 	{ &g_bodycam_config.movement.enable, { FALSE, TRUE, TRUE, TRUE } },
 	{ &g_bodycam_config.movement.ads_disable, { TRUE, TRUE, TRUE, TRUE } },
 };
@@ -319,12 +323,15 @@ void DumpConfigBindings()
 	for (u32 i = 0; i < _countof(g_float_bindings); ++i)
 	{
 		const FloatBinding& binding = g_float_bindings[i];
-		Msg("* bodycam config %s (%s)=%0.4f range[%0.4f %0.4f]", binding.name, binding.console_name, *binding.value, binding.min_value, binding.max_value);
+		Msg("* bodycam config %s (%s)=%0.4f default=%0.4f range[%0.4f %0.4f]",
+			binding.name, binding.console_name, *binding.value, binding.default_value,
+			binding.min_value, binding.max_value);
 	}
 	for (u32 i = 0; i < _countof(g_bool_bindings); ++i)
 	{
 		const BoolBinding& binding = g_bool_bindings[i];
-		Msg("* bodycam config %s (%s)=%d", binding.name, binding.console_name, *binding.value ? 1 : 0);
+		Msg("* bodycam config %s (%s)=%d default=%d", binding.name, binding.console_name,
+			*binding.value ? 1 : 0, binding.default_value ? 1 : 0);
 	}
 }
 
@@ -336,12 +343,12 @@ bool CameraEnabled()
 bool HudEffectsEnabled()
 {
 	const RuntimeFeatureSettings& features = g_bodycam_config.features;
-	const bool sprint_bridge_enabled = g_bodycam_config.movement.enable &&
+	const bool sprint_transition_enabled = !!features.sprint_transition_enable &&
 		features.layer_vm_weight > kFeatureEpsilon && g_bodycam_config.sprint.strength > kFeatureEpsilon;
 
 	return !!features.vm_enable || !!features.lower_enable ||
 		!!features.bodycam_arm_enable || !!features.stalker2_arm_enable ||
-		sprint_bridge_enabled;
+		!!features.fire_impulse_enable || sprint_transition_enabled;
 }
 
 bool AnyEffectEnabled()
@@ -453,7 +460,8 @@ SimulationSettings GetSimulationSettings()
 	settings.features.lower_enable = !!g_bodycam_config.features.lower_enable;
 	settings.features.bodycam_arm_enable = !!g_bodycam_config.features.bodycam_arm_enable;
 	settings.features.stalker2_arm_enable = !!g_bodycam_config.features.stalker2_arm_enable;
-	settings.features.sprint_bridge_enable = !!g_bodycam_config.movement.enable;
+	settings.features.fire_impulse_enable = !!g_bodycam_config.features.fire_impulse_enable;
+	settings.features.sprint_transition_enable = !!g_bodycam_config.features.sprint_transition_enable;
 	settings.features.impulse_debug = !!g_bodycam_config.features.impulse_debug;
 	settings.features.lower_disable_in_combat = !!g_bodycam_config.features.lower_disable_in_combat;
 	settings.camera = g_bodycam_config.camera;

@@ -39,6 +39,7 @@
 #include "svp_mags.h"
 #include "pch_script.h"
 #include "script_game_object.h"
+#include "ai/stalker/ai_stalker.h"
 
 #define WEAPON_REMOVE_TIME		60000
 #define ROTATION_TIME			0.25f
@@ -3257,6 +3258,26 @@ void CWeapon::OnStateSwitch(u32 S, u32 oldState)
 {
 	inherited::OnStateSwitch(S, oldState);
 	m_BriefInfo_CalcFrame = 0;
+
+	// NPC reload edges for Lua (npc_on_weapon_reload_start / _stop). Actor reloads already surface
+	// through the actor binder callback (actor_on_weapon_reload); a stalker's reload was observable
+	// only by polling get_state() == eReload per tick. Fired here because every weapon type converges
+	// on CWeapon::OnStateSwitch - the tri-state shotgun path skips CWeaponMagazined's override for
+	// S == eReload. Best-effort stop edge: a weapon detached mid-reload (death, drop) loses its
+	// stalker parent and fires nothing - get_state() stays the authoritative read.
+	if (S != oldState && (S == eReload || oldState == eReload))
+	{
+		CAI_Stalker* stalker = smart_cast<CAI_Stalker*>(H_Parent());
+		if (stalker)
+		{
+			::luabind::functor<void> funct;
+			LPCSTR fname = (S == eReload)
+				? "_G.CAI_Stalker__OnWeaponReloadStart"
+				: "_G.CAI_Stalker__OnWeaponReloadStop";
+			if (ai().script_engine().functor(fname, funct))
+				funct(stalker->lua_game_object(), lua_game_object());
+		}
+	}
 
 	if (GetState() == eReload)
 	{

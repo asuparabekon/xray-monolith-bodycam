@@ -285,10 +285,22 @@ const CCoverPoint* CAI_Stalker::best_cover(const Fvector& position_to_cover_from
 	const CCoverPoint* best_cover = find_best_cover(position_to_cover_from);
 	if (best_cover != m_best_cover)
 	{
-		on_best_cover_changed(best_cover, m_best_cover);
-		m_best_cover = best_cover;
-		m_best_cover_advance_cover = 0;
-		m_best_cover_can_try_advance = false;
+		// Let Lua veto replacing the held cover before on_best_cover_changed clears the cover props.
+		// allow = false keeps m_best_cover. Only when a cover is already held; no functor means allow.
+		bool allow = true;
+		if (m_best_cover)
+		{
+			luabind::functor<bool> repick_funct;
+			if (ai().script_engine().functor("_G.CAI_Stalker__AllowCoverRepick", repick_funct))
+				allow = repick_funct(lua_game_object());
+		}
+		if (allow)
+		{
+			on_best_cover_changed(best_cover, m_best_cover);
+			m_best_cover = best_cover;
+			m_best_cover_advance_cover = 0;
+			m_best_cover_can_try_advance = false;
+		}
 	}
 
 	m_best_cover_value = m_best_cover ? best_cover_value(position_to_cover_from) : flt_max;

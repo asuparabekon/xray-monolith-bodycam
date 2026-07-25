@@ -3,98 +3,336 @@
 local show_bodycam_window = false
 local bindings
 local binding_by_name = {}
-local advanced_groups
+local custom_section = "bodycam_imgui_custom"
+local custom_save_delay_ms = 500
+local custom_save_due_time
+local selected_feature = 1
 
-local basic_sections = {
+local feature_tabs = {
     {
-        name = "Features",
-        settings = {
-            { "camera_decoupling_enable", "Camera Decoupling" },
-            { "vm_spring_enable", "Viewmodel Spring" },
-            { "vm_lowering_enable", "Viewmodel Lowering" },
-            { "bodycam_style_arm_ik_enable", "Bodycam Style Arm IK" },
-            { "stalker2_style_arm_ik_enable", "STALKER 2 Style Arm IK" },
-            { "movement_inertia_enable", "Movement Inertia" },
-            { "movement_inertia_disable_ads", "Disable Movement Inertia During ADS" },
+        name = "Camera Decoupling",
+        toggle = { "camera_decoupling_enable", "Enabled" },
+        sections = {
+            {
+                name = "Hip-fire Response",
+                settings = {
+                    { "hip_camera_deadzone_yaw", "Horizontal Deadzone" },
+                    { "hip_camera_deadzone_pitch", "Vertical Deadzone" },
+                    { "hip_camera_follow_speed", "Follow Speed" },
+                    { "hip_camera_max_yaw_offset", "Maximum Horizontal Offset" },
+                    { "hip_camera_max_pitch_offset", "Maximum Vertical Offset" },
+                    { "hip_camera_roll_scale", "Roll Strength" },
+                },
+            },
+            {
+                name = "Hip-fire Fine Tuning",
+                settings = {
+                    { "hip_camera_inner_zone_response", "Inner-zone Response" },
+                    { "hip_camera_follow_damping", "Follow Damping" },
+                    { "hip_camera_soft_follow_yaw", "Horizontal Soft Zone" },
+                    { "hip_camera_soft_follow_pitch", "Vertical Soft Zone" },
+                    { "hip_camera_position_scale", "Position Shift" },
+                },
+            },
+            {
+                name = "ADS Response",
+                settings = {
+                    { "ads_camera_deadzone_yaw", "Horizontal Deadzone" },
+                    { "ads_camera_deadzone_pitch", "Vertical Deadzone" },
+                    { "ads_camera_follow_speed", "Follow Speed" },
+                    { "ads_camera_max_yaw_offset", "Maximum Horizontal Offset" },
+                    { "ads_camera_max_pitch_offset", "Maximum Vertical Offset" },
+                },
+            },
+            {
+                name = "ADS Fine Tuning",
+                settings = {
+                    { "ads_camera_inner_zone_response", "Inner-zone Response" },
+                    { "ads_camera_follow_damping", "Follow Damping" },
+                    { "ads_camera_soft_follow_yaw", "Horizontal Soft Zone" },
+                    { "ads_camera_soft_follow_pitch", "Vertical Soft Zone" },
+                    { "ads_camera_roll_scale", "Roll Strength" },
+                    { "ads_camera_position_scale", "Position Shift" },
+                },
+            },
+            {
+                name = "Movement Response",
+                settings = {
+                    { "movement_camera_roll_scale", "Movement Roll" },
+                    { "movement_camera_position_scale", "Movement Position Shift" },
+                },
+            },
         },
     },
     {
-        name = "Camera",
-        settings = {
-            { "hip_camera_deadzone_yaw", "Horizontal Deadzone" },
-            { "hip_camera_deadzone_pitch", "Vertical Deadzone" },
-            { "hip_camera_follow_speed", "Follow Speed" },
-            { "hip_camera_max_yaw_offset", "Maximum Horizontal Offset" },
-            { "hip_camera_max_pitch_offset", "Maximum Vertical Offset" },
-            { "hip_camera_roll_scale", "Roll Strength" },
-        },
-    },
-    {
-        name = "Viewmodel",
-        settings = {
-            { "vm_mouse_position_scale", "Mouse Position Response" },
-            { "vm_mouse_rotation_scale", "Mouse Rotation Response" },
-            { "vm_spring_speed", "Spring Speed" },
-        },
-    },
-    {
-        name = "Movement",
-        settings = {
-            { "movement_acceleration_time", "Acceleration Time" },
-            { "movement_deceleration_time", "Deceleration Time" },
-            { "movement_turn_response", "Direction Change Weight" },
-            { "movement_stop_response", "Stopping Response" },
-            { "movement_sprint_speed_scale", "Sprint Acceleration Scale" },
+        name = "Viewmodel Spring",
+        toggle = { "vm_spring_enable", "Enabled" },
+        sections = {
+            {
+                name = "Response",
+                settings = {
+                    { "vm_mouse_position_scale", "Mouse Position Response" },
+                    { "vm_mouse_rotation_scale", "Mouse Rotation Response" },
+                    { "vm_spring_speed", "Follow and Return Speed" },
+                },
+            },
+            {
+                name = "Limits and Filtering",
+                settings = {
+                    { "vm_spring_damping", "Spring Damping" },
+                    { "vm_max_position_offset", "Maximum Position Offset" },
+                    { "vm_max_rotation_offset", "Maximum Rotation Offset" },
+                    { "vm_mouse_smoothing_speed", "Mouse Input Smoothing" },
+                    { "vm_movement_smoothing_speed", "Movement Input Smoothing" },
+                },
+            },
+            {
+                name = "ADS Behavior",
+                settings = {
+                    { "vm_ads_mouse_scale", "Mouse Response Scale" },
+                    { "vm_ads_impulse_scale", "Impulse Scale" },
+                    { "vm_ads_sight_anchor_strength", "Sight Anchor Strength" },
+                    { "vm_ads_anchor_position_scale", "Anchor Position Limit" },
+                    { "vm_ads_anchor_rotation_scale", "Anchor Rotation Limit" },
+                },
+            },
+            {
+                name = "Event Impulses",
+                settings = {
+                    { "ads_transition_impulse", "ADS Transition" },
+                    { "landing_impulse", "Landing" },
+                    { "mouse_flick_impulse", "Mouse Flick" },
+                },
+            },
         },
     },
     {
         name = "Viewmodel Lowering",
-        settings = {
-            { "vm_lowering_pitch", "Pitch" },
-            { "vm_lowering_yaw", "Yaw" },
-            { "vm_lowering_roll", "Roll" },
-            { "vm_lowering_x", "Position X" },
-            { "vm_lowering_y", "Position Y" },
-            { "vm_lowering_z", "Position Z" },
-            { "vm_lowering_slow_walk_influence", "Slow Walk Influence" },
-            { "vm_lowering_walk_influence", "Walk Influence" },
-            { "vm_lowering_movement_influence", "Movement Influence" },
-            { "vm_lowering_enter_speed", "Lowering Speed" },
-            { "vm_lowering_return_speed", "Return Speed" },
+        toggle = { "vm_lowering_enable", "Enabled" },
+        sections = {
+            {
+                name = "Behavior",
+                settings = {
+                    { "vm_lowering_disable_in_combat", "Disable During Combat" },
+                },
+            },
+            {
+                name = "Lowered Pose",
+                settings = {
+                    { "vm_lowering_pitch", "Pitch" },
+                    { "vm_lowering_yaw", "Yaw" },
+                    { "vm_lowering_roll", "Roll" },
+                    { "vm_lowering_x", "Position X" },
+                    { "vm_lowering_y", "Position Y" },
+                    { "vm_lowering_z", "Position Z" },
+                },
+            },
+            {
+                name = "Walk States",
+                settings = {
+                    { "vm_lowering_slow_walk_influence", "Slow Walk Influence" },
+                    { "vm_lowering_walk_influence", "Walk Influence" },
+                    { "vm_lowering_movement_influence", "Overall Movement Influence" },
+                    { "vm_safemode_lowering_y_offset", "Safe-mode Vertical Offset" },
+                },
+            },
+            {
+                name = "Transitions and Suppression",
+                settings = {
+                    { "vm_lowering_enter_speed", "Lowering Speed" },
+                    { "vm_lowering_return_speed", "Return Speed" },
+                    { "vm_lowering_fire_suppression_time", "Post-fire Suppression Time" },
+                    { "vm_lowering_ads_release_time", "Post-ADS Suppression Time" },
+                    { "vm_lowering_combat_suppression_time", "Combat Suppression Time" },
+                },
+            },
         },
     },
     {
-        name = "Weapon and Sprint Effects",
-        settings = {
-            { "hip_fire_weapon_impulse", "Hip-fire Weapon Impulse" },
-            { "ads_fire_weapon_impulse", "ADS Weapon Impulse" },
-            { "sprint_transition_vm_blend_scale", "Sprint Transition Strength" },
-            { "sprint_transition_blend_smoothing", "Sprint Transition Smoothing" },
-            { "sprint_transition_start_stop_impulse_scale", "Sprint Start/Stop Weight" },
+        name = "Movement Inertia",
+        toggle = { "movement_inertia_enable", "Enabled" },
+        sections = {
+            {
+                name = "Response",
+                settings = {
+                    { "movement_inertia_disable_ads", "Disable During ADS" },
+                    { "movement_acceleration_time", "Acceleration Time" },
+                    { "movement_deceleration_time", "Deceleration Time" },
+                    { "movement_turn_response", "Direction Change Weight" },
+                    { "movement_stop_response", "Stopping Response" },
+                    { "movement_sprint_speed_scale", "Sprint Speed Scale" },
+                },
+            },
+        },
+    },
+    {
+        name = "Sprint Transition",
+        toggle = { "sprint_transition_enable", "Enabled" },
+        sections = {
+            {
+                name = "Transition",
+                settings = {
+                    { "sprint_transition_vm_blend_scale", "Transition Strength" },
+                    { "sprint_transition_blend_smoothing", "Transition Smoothing" },
+                    { "sprint_transition_start_stop_impulse_scale", "Start and Stop Weight" },
+                },
+            },
+            {
+                name = "Procedural Bridge",
+                settings = {
+                    { "sprint_transition_vm_pitch", "Pitch" },
+                    { "sprint_transition_vm_yaw", "Yaw" },
+                    { "sprint_transition_vm_roll", "Roll" },
+                    { "sprint_transition_vm_position", "Position Offset" },
+                    { "sprint_transition_animation_handoff_speed", "Animation Handoff Point" },
+                },
+            },
+            {
+                name = "Sprint Impulses",
+                settings = {
+                    { "sprint_transition_impulse", "Shared Transition Impulse" },
+                    { "sprint_start_impulse", "Start Impulse" },
+                    { "sprint_stop_impulse", "Stop Impulse" },
+                    { "sprint_impulse_ads_scale", "ADS Scale" },
+                    { "sprint_impulse_camera_scale", "Camera Scale" },
+                    { "sprint_impulse_fov_scale", "FOV Scale" },
+                    { "sprint_impulse_fov_return_speed", "FOV Return Speed" },
+                    { "sprint_impulse_motion_return_speed", "Motion Return Speed" },
+                },
+            },
+        },
+    },
+    {
+        name = "Bodycam Style Arm IK",
+        toggle = { "bodycam_style_arm_ik_enable", "Enabled" },
+        sections = {
+            {
+                name = "Response",
+                settings = {
+                    { "arm_compliance_strength", "Overall Strength" },
+                    { "arm_compliance_response", "Response Speed" },
+                    { "arm_compliance_ads_scale", "ADS Scale" },
+                },
+            },
+            {
+                name = "Mouse Response",
+                settings = {
+                    { "arm_compliance_mouse_pitch", "Pitch Response" },
+                    { "arm_compliance_mouse_yaw", "Yaw Response" },
+                    { "arm_compliance_mouse_roll", "Roll Response" },
+                    { "arm_compliance_secondary_roll", "Secondary Roll" },
+                },
+            },
+            {
+                name = "Arm Distribution",
+                settings = {
+                    { "arm_compliance_hand_scale", "Hand Share" },
+                    { "arm_compliance_upperarm_scale", "Upper-arm Share" },
+                    { "arm_compliance_forearm_scale", "Forearm Share" },
+                    { "arm_compliance_twist_scale", "Forearm Twist Share" },
+                },
+            },
+        },
+    },
+    {
+        name = "STALKER 2 Style Arm IK",
+        toggle = { "stalker2_style_arm_ik_enable", "Enabled" },
+        sections = {
+            {
+                name = "Response",
+                settings = {
+                    { "stalker2_arm_ik_strength", "Overall Strength" },
+                    { "stalker2_arm_ik_ads_scale", "ADS Scale" },
+                },
+            },
+            {
+                name = "Mouse Response",
+                settings = {
+                    { "stalker2_arm_ik_mouse_strength", "Mouse Strength" },
+                    { "stalker2_arm_ik_mouse_sensitivity", "Mouse Sensitivity" },
+                    { "stalker2_arm_ik_mouse_pitch", "Pitch Response" },
+                    { "stalker2_arm_ik_mouse_yaw", "Yaw Response" },
+                    { "stalker2_arm_ik_mouse_roll", "Roll Response" },
+                    { "stalker2_arm_ik_mouse_max_yaw", "Maximum Yaw" },
+                    { "stalker2_arm_ik_mouse_max_pitch", "Maximum Pitch" },
+                    { "stalker2_arm_ik_mouse_max_roll", "Maximum Roll" },
+                },
+            },
+            {
+                name = "Authored Movement Response",
+                settings = {
+                    { "stalker2_arm_ik_movement_strength", "Movement Strength" },
+                    { "stalker2_arm_ik_movement_response", "Movement Response" },
+                    { "stalker2_arm_ik_slow_walk_scale", "Slow Walk Scale" },
+                    { "stalker2_arm_ik_wrist_scale", "Wrist Share" },
+                },
+            },
+            {
+                name = "Arm Follow",
+                settings = {
+                    { "stalker2_arm_ik_response", "Wrist Response" },
+                    { "stalker2_arm_ik_follow_response", "Arm Follow Response" },
+                    { "stalker2_arm_ik_follow_scale", "Arm Follow Strength" },
+                },
+            },
+        },
+    },
+    {
+        name = "Fire Impulses",
+        toggle = { "fire_impulse_enable", "Enabled" },
+        sections = {
+            {
+                name = "Weapon Kick",
+                settings = {
+                    { "hip_fire_weapon_impulse", "Hip-fire Strength" },
+                    { "ads_fire_weapon_impulse", "ADS Strength" },
+                },
+            },
+            {
+                name = "Shared Limits",
+                settings = {
+                    { "impulse_decay_speed", "Decay Speed" },
+                    { "impulse_max_position_offset", "Maximum Position Offset" },
+                    { "impulse_max_rotation_offset", "Maximum Rotation Offset" },
+                },
+            },
         },
     },
 }
 
-local basic_names = {}
-for _, section in ipairs(basic_sections) do
-    for _, setting in ipairs(section.settings) do
-        basic_names[setting[1]] = true
+local diagnostics_sections = {
+    {
+        name = "Layer Weights",
+        settings = {
+            { "vm_spring_layer_weight", "Viewmodel Spring Weight" },
+            { "vm_lowering_layer_weight", "Viewmodel Lowering Weight" },
+            { "arm_compliance_layer_weight", "Bodycam Arm IK Weight" },
+        },
+    },
+    {
+        name = "Debugging",
+        settings = {
+            { "impulse_debug_enable", "Impulse Debug Output" },
+        },
+    },
+}
+
+local assigned_names = {}
+for _, tab in ipairs(feature_tabs) do
+    if tab.toggle then
+        assigned_names[tab.toggle[1]] = true
+    end
+    for _, section in ipairs(tab.sections) do
+        for _, setting in ipairs(section.settings) do
+            assigned_names[setting[1]] = true
+        end
     end
 end
-
-local category_order = {
-    "Camera",
-    "Viewmodel",
-    "Movement",
-    "Sprint",
-    "Impulses",
-    "Viewmodel Lowering",
-    "Bodycam Style Arm IK",
-    "STALKER 2 Style Arm IK",
-    "Layer Weights",
-    "Debugging",
-    "General",
-}
+for _, section in ipairs(diagnostics_sections) do
+    for _, setting in ipairs(section.settings) do
+        assigned_names[setting[1]] = true
+    end
+end
 
 local word_names = {
     ads = "ADS",
@@ -117,6 +355,8 @@ local binding_descriptions = {
     stalker2_style_arm_ik_enable = "Enables the separate STALKER 2 Style wrist and authored-motion layer.",
     movement_inertia_enable = "Enables percentage-based actor acceleration, deceleration, and stopping response.",
     movement_inertia_disable_ads = "Disables Bodycam movement inertia while aiming down sights.",
+    sprint_transition_enable = "Enables procedural sprint acceleration, camera weight, viewmodel bridging, and start/stop response.",
+    fire_impulse_enable = "Enables Bodycam's additive viewmodel kick when a weapon fires.",
     vm_lowering_disable_in_combat = "Suppresses dynamic viewmodel lowering during recent combat activity.",
     stalker2_arm_ik_wrist_scale = "Amount of STALKER 2 Style output assigned to wrist motion.",
     vm_spring_layer_weight = "Final blend weight of the complete viewmodel spring layer.",
@@ -247,33 +487,6 @@ local function human_name(name)
     return table.concat(words, " ")
 end
 
-local function category_for(name)
-    if string.find(name, "stalker2_", 1, true) == 1 then
-        return "STALKER 2 Style Arm IK"
-    elseif string.find(name, "arm_compliance_", 1, true) == 1 or name == "bodycam_style_arm_ik_enable" then
-        return "Bodycam Style Arm IK"
-    elseif string.find(name, "vm_lowering_", 1, true) == 1 then
-        return "Viewmodel Lowering"
-    elseif string.find(name, "hip_camera_", 1, true) == 1 or string.find(name, "ads_camera_", 1, true) == 1 or
-        string.find(name, "movement_camera_", 1, true) == 1 or name == "camera_decoupling_enable" then
-        return "Camera"
-    elseif string.find(name, "vm_", 1, true) == 1 then
-        return "Viewmodel"
-    elseif string.find(name, "movement_", 1, true) == 1 then
-        return "Movement"
-    elseif string.find(name, "sprint_transition_", 1, true) == 1 or string.find(name, "sprint_", 1, true) == 1 then
-        return "Sprint"
-    elseif string.find(name, "impulse", 1, true) or string.find(name, "fire_weapon", 1, true) or
-        string.find(name, "landing_", 1, true) == 1 or string.find(name, "mouse_flick_", 1, true) == 1 then
-        return "Impulses"
-    elseif string.find(name, "layer_weight", 1, true) then
-        return "Layer Weights"
-    elseif string.find(name, "debug", 1, true) then
-        return "Debugging"
-    end
-    return "General"
-end
-
 local function load_bindings()
     if bindings then
         return true
@@ -294,6 +507,62 @@ local function load_bindings()
     return true
 end
 
+local function custom_storage()
+    return axr_main and axr_main.config
+end
+
+local function save_custom_preset()
+    local ini = custom_storage()
+    if not ini or not load_bindings() then
+        return
+    end
+
+    for _, binding in ipairs(bindings) do
+        if binding.type == "bool" then
+            ini:w_value(custom_section, binding.name, bodycam.get_bool(binding.name, binding.default))
+        else
+            ini:w_value(custom_section, binding.name, bodycam.get_float(binding.name, binding.default))
+        end
+    end
+    ini:save()
+    custom_save_due_time = nil
+end
+
+local function schedule_custom_save()
+    custom_save_due_time = time_global() + custom_save_delay_ms
+end
+
+local function apply_custom_preset()
+    local ini = custom_storage()
+    if not ini or not ini:section_exist(custom_section) or not load_bindings() then
+        return
+    end
+
+    for _, binding in ipairs(bindings) do
+        if ini:line_exist(custom_section, binding.name) then
+            if binding.type == "bool" then
+                bodycam.set_bool(binding.name,
+                    ini:r_value(custom_section, binding.name, 1, binding.default))
+            else
+                bodycam.set_float(binding.name,
+                    ini:r_value(custom_section, binding.name, 2, binding.default))
+            end
+        end
+    end
+end
+
+local function actor_on_update()
+    if custom_save_due_time and time_global() >= custom_save_due_time then
+        save_custom_preset()
+    end
+end
+
+local function preserve_pending_custom_preset()
+    if custom_save_due_time then
+        save_custom_preset()
+    end
+end
+
 local function show_binding_tooltip(binding)
     if ImGui.BeginItemTooltip() then
         ImGui.PushTextWrapPos(430)
@@ -302,10 +571,13 @@ local function show_binding_tooltip(binding)
         ImGui.Separator()
         ImGui.TextDisabled("Console: " .. binding.console_name)
         if binding.type == "float" then
-            ImGui.Text(string.format("Minimum: %g    Maximum: %g", binding.min, binding.max))
+            ImGui.Text(string.format("Minimum: %g    Maximum: %g    Default: %g",
+                binding.min, binding.max, binding.default))
         else
-            ImGui.Text("Minimum: 0 (Off)    Maximum: 1 (On)")
+            ImGui.Text(string.format("Minimum: 0 (Off)    Maximum: 1 (On)    Default: %s",
+                binding.default and "On" or "Off"))
         end
+        ImGui.TextDisabled("Right-click the control to reset it.")
         ImGui.EndTooltip()
     end
 end
@@ -340,9 +612,14 @@ local function draw_binding(binding, label, use_slider)
     if binding.type == "bool" then
         local current = bodycam.get_bool(binding.name, false)
         local changed, value = ImGui.Checkbox("##" .. binding.name, current)
+        local reset = ImGui.IsItemClicked(ImGuiMouseButton.Right)
         show_binding_tooltip(binding)
-        if changed then
+        if changed or reset then
+            if reset then
+                value = binding.default
+            end
             bodycam.set_bool(binding.name, value)
+            schedule_custom_save()
         end
         return
     end
@@ -356,9 +633,14 @@ local function draw_binding(binding, label, use_slider)
         changed, value = ImGui.DragFloat("##" .. binding.name, current, drag_speed(binding), binding.min,
             binding.max, float_format(binding), ImGuiSliderFlags.None)
     end
+    local reset = ImGui.IsItemClicked(ImGuiMouseButton.Right)
     show_binding_tooltip(binding)
-    if changed then
+    if changed or reset then
+        if reset then
+            value = binding.default
+        end
         bodycam.set_float(binding.name, value)
+        schedule_custom_save()
     end
 end
 
@@ -379,82 +661,138 @@ local function draw_settings_table(id, settings, use_slider)
 end
 
 local function draw_presets()
-    if ImGui.Button("Balanced", vector2():set(110, 0)) then
-        bodycam.apply_preset(1)
-    end
-    ImGui.SameLine(0, 8)
     if ImGui.Button("Default", vector2():set(110, 0)) then
+        preserve_pending_custom_preset()
         bodycam.apply_preset(2)
     end
     ImGui.SameLine(0, 8)
+    if ImGui.Button("Balanced", vector2():set(110, 0)) then
+        preserve_pending_custom_preset()
+        bodycam.apply_preset(1)
+    end
+    ImGui.SameLine(0, 8)
     if ImGui.Button("Cinematic", vector2():set(110, 0)) then
+        preserve_pending_custom_preset()
         bodycam.apply_preset(3)
     end
+    ImGui.SameLine(0, 8)
+    if ImGui.Button("Custom", vector2():set(110, 0)) then
+        preserve_pending_custom_preset()
+        apply_custom_preset()
+    end
 end
 
-local function draw_basic_tab()
-    draw_presets()
+local function draw_sections(tab_id, sections)
+    for index, section in ipairs(sections) do
+        if index > 1 then
+            ImGui.Spacing()
+            ImGui.Separator()
+            ImGui.Spacing()
+        end
+        ImGui.TextDisabled(section.name)
+        ImGui.Spacing()
+        draw_settings_table("bodycam_" .. tab_id .. "_" .. section.name, section.settings, true)
+    end
+end
+
+local function draw_navigation()
+    ImGui.TextDisabled("FEATURES")
     ImGui.Spacing()
-    for _, section in ipairs(basic_sections) do
-        if ImGui.CollapsingHeader(section.name, ImGuiTreeNodeFlags.DefaultOpen) then
-            draw_settings_table("bodycam_basic_" .. section.name, section.settings, true)
+    for index, feature in ipairs(feature_tabs) do
+        local clicked = ImGui.Selectable(
+            feature.name .. "##bodycam_nav_" .. index,
+            selected_feature == index,
+            ImGuiSelectableFlags.None,
+            vector2():set(0, 32))
+        if clicked then
+            selected_feature = index
         end
+    end
+
+    ImGui.Spacing()
+    ImGui.Separator()
+    ImGui.Spacing()
+    local diagnostics_index = #feature_tabs + 1
+    local clicked = ImGui.Selectable(
+        "Diagnostics##bodycam_nav_diagnostics",
+        selected_feature == diagnostics_index,
+        ImGuiSelectableFlags.None,
+        vector2():set(0, 32))
+    if clicked then
+        selected_feature = diagnostics_index
     end
 end
 
-local function build_advanced_groups()
-    local groups = {}
-    for _, category in ipairs(category_order) do
-        groups[category] = {}
-    end
-
+local function draw_diagnostics()
+    draw_sections("Diagnostics", diagnostics_sections)
+    local unassigned = {}
     for _, binding in ipairs(bindings) do
-        if not basic_names[binding.name] then
-            local category = category_for(binding.name)
-            table.insert(groups[category], { binding.name, human_name(binding.name) })
+        if not assigned_names[binding.name] then
+            table.insert(unassigned, { binding.name, human_name(binding.name) })
         end
     end
-    return groups
-end
-
-local function draw_advanced_tab()
-    if not advanced_groups then
-        advanced_groups = build_advanced_groups()
+    if #unassigned > 0 and ImGui.CollapsingHeader("Unassigned Settings", ImGuiTreeNodeFlags.None) then
+        draw_settings_table("bodycam_unassigned", unassigned, false)
     end
+
+    ImGui.Spacing()
+    ImGui.Separator()
+    ImGui.Spacing()
     if ImGui.Button("Dump Runtime State", vector2():set(160, 0)) then
         bodycam.dump()
     end
+end
+
+local function draw_selected_feature()
+    draw_presets()
+    ImGui.Spacing()
+    ImGui.Separator()
     ImGui.Spacing()
 
-    for _, category in ipairs(category_order) do
-        local settings = advanced_groups[category]
-        if #settings > 0 and ImGui.CollapsingHeader(category, ImGuiTreeNodeFlags.None) then
-            draw_settings_table("bodycam_advanced_" .. category, settings, false)
+    local feature = feature_tabs[selected_feature]
+    if feature then
+        if feature.toggle then
+            draw_settings_table("bodycam_toggle_" .. feature.name, { feature.toggle }, true)
+            ImGui.Spacing()
+            ImGui.Separator()
+            ImGui.Spacing()
         end
+        draw_sections(feature.name, feature.sections)
+    else
+        draw_diagnostics()
     end
 end
 
+local function draw_bodycam_settings()
+    if not ImGui.BeginTable(
+        "bodycam_settings_layout",
+        2,
+        ImGuiTableFlags.BordersInnerV,
+        vector2():set(0, 0),
+        0) then
+        return
+    end
+
+    ImGui.TableSetupColumn("Features", ImGuiTableColumnFlags.WidthFixed, 220, 0)
+    ImGui.TableSetupColumn("Options", ImGuiTableColumnFlags.WidthStretch, 0, 0)
+    ImGui.TableNextRow(ImGuiTableRowFlags.None, 0)
+    ImGui.TableSetColumnIndex(0)
+    draw_navigation()
+    ImGui.TableSetColumnIndex(1)
+    draw_selected_feature()
+    ImGui.EndTable()
+end
+
 local function render_bodycam_window()
-    ImGui.SetNextWindowSize(vector2():set(860, 680), ImGuiCond.FirstUseEver)
+    ImGui.SetNextWindowSize(vector2():set(1020, 720), ImGuiCond.FirstUseEver)
     local expanded, visible = ImGui.Begin("Bodycam Settings", show_bodycam_window, ImGuiWindowFlags.None)
     show_bodycam_window = visible
 
     if expanded then
         if not load_bindings() then
             ImGui.TextColored(fcolor():set(1, 0.4, 0.4, 1), "Bodycam binding metadata is unavailable")
-        elseif ImGui.BeginTabBar("bodycam_settings_tabs", ImGuiTabBarFlags.None) then
-            local basic_open = ImGui.BeginTabItem("Basic", true, ImGuiTabItemFlags.None)
-            if basic_open then
-                draw_basic_tab()
-                ImGui.EndTabItem()
-            end
-
-            local advanced_open = ImGui.BeginTabItem("Advanced", true, ImGuiTabItemFlags.None)
-            if advanced_open then
-                draw_advanced_tab()
-                ImGui.EndTabItem()
-            end
-            ImGui.EndTabBar()
+        else
+            draw_bodycam_settings()
         end
     end
     ImGui.End()
@@ -470,4 +808,8 @@ if ImGui and ImGui.Groups and ImGui.Groups.Main and ImGui.Groups.Mods then
     ImGui.Groups.Mods.Widget(function()
         _, show_bodycam_window = ImGui.MenuItem("Bodycam", nil, show_bodycam_window, true)
     end)
+end
+
+function on_game_start()
+    RegisterScriptCallback("actor_on_update", actor_on_update)
 end

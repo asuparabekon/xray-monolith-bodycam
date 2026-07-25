@@ -5427,6 +5427,9 @@
     <ClInclude Include="bodycam_simulation.h">
       <Filter>Core\Client\Objects\actor\base</Filter>
     </ClInclude>
+    <ClInclude Include="bodycam_viewmodel_profile.h">
+      <Filter>Core\Client\Objects\actor\base</Filter>
+    </ClInclude>
     <ClInclude Include="actor_anim_defs.h">
       <Filter>Core\Client\Objects\actor\base</Filter>
     </ClInclude>
@@ -9105,6 +9108,9 @@
       <Filter>Core\Client\Objects\actor\base</Filter>
     </ClCompile>
     <ClCompile Include="bodycam_simulation.cpp">
+      <Filter>Core\Client\Objects\actor\base</Filter>
+    </ClCompile>
+    <ClCompile Include="bodycam_viewmodel_profile.cpp">
       <Filter>Core\Client\Objects\actor\base</Filter>
     </ClCompile>
     <ClCompile Include="bodycam_script.cpp">

@@ -359,9 +359,20 @@ public:
 	IC CCameraBase* cam_Active() { return cameras[cam_active]; }
 	void cam_BodycamDumpState();
 	void cam_BodycamAddImpulse(LPCSTR kind, float power);
+	void cam_BodycamSetViewmodelProfile(const Fvector& pos, const Fvector& rot, float blend_speed);
+	void cam_BodycamClearViewmodelProfile(float blend_speed);
 	bool cam_BodycamGetHudOffset(Fvector& pos, Fvector& rot) const;
 	bool cam_BodycamGetArmPose(Bodycam::ArmPose& pose) const;
 	bool cam_BodycamSprintAnimReady() const;
+	enum EScriptCameraDeltaStatus : u8
+	{
+		eScriptCameraDeltaPending,
+		eScriptCameraDeltaApplied,
+		eScriptCameraDeltaCancelled,
+	};
+	u32 cam_QueueScriptCameraDelta(float yaw_delta, float pitch_delta);
+	bool cam_PollScriptCameraDelta(u32 request_id, EScriptCameraDeltaStatus& status, Fvector2& applied);
+	bool cam_CancelScriptCameraDelta(u32 request_id);
 	IC CCameraBase* cam_FirstEye() { return cameras[eacFirstEye]; }
 	//Swartz: actor shadow
 	IC EActorCameras active_cam() { return cam_active; } //KD: need to know which cam active outside actor methods
@@ -380,6 +391,11 @@ protected:
 	void cam_BodycamVisualReset(const CCameraBase* camera);
 	bool cam_BodycamVisualUpdate(const CCameraBase* camera, float dt, float viewport_near, bool apply_camera);
 	void cam_BodycamAddFireImpulse(float power);
+	void cam_ApplyScriptCameraDeltas(CCameraBase* camera);
+	void cam_CancelScriptCameraDeltas();
+	bool cam_CanQueueScriptCameraDelta() const;
+	bool cam_StoreScriptCameraDeltaResult(
+		u32 request_id, EScriptCameraDeltaStatus status, const Fvector2& applied);
 	void camUpdateLadder(float dt);
 	void cam_SetLadder();
 	void cam_UnsetLadder();
@@ -396,6 +412,23 @@ protected:
 	float current_ik_cam_shift;
 	Fvector vPrevCamDir;
 	float fCurAVelocity;
+	struct SScriptCameraDeltaRequest
+	{
+		u32 id = 0;
+		Fvector2 delta = { 0.f, 0.f };
+	};
+	struct SScriptCameraDeltaResult
+	{
+		u32 id = 0;
+		EScriptCameraDeltaStatus status = eScriptCameraDeltaCancelled;
+		Fvector2 applied = { 0.f, 0.f };
+	};
+	static constexpr u32 kScriptCameraDeltaPendingCapacity = 16;
+	static constexpr u32 kScriptCameraDeltaResultCapacity = 32;
+	SScriptCameraDeltaRequest m_script_camera_delta_pending[kScriptCameraDeltaPendingCapacity] = {};
+	SScriptCameraDeltaResult m_script_camera_delta_results[kScriptCameraDeltaResultCapacity] = {};
+	u32 m_script_camera_delta_pending_count = 0;
+	u32 m_script_camera_delta_result_count = 0;
 	Bodycam::CBodycam m_bodycam;
 	CEffectorBobbing* pCamBobbing;
 

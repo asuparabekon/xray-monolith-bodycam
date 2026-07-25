@@ -266,6 +266,29 @@ How to compile exes:
 13. A short video demonstration of the entire process: https://youtu.be/MmZwyM2QO38
 
 ## Changelog
+**2026.07.22**
+* Main and MT:
+  * fix non working `on_loading_screen_dismissed` callback when `keypress_on_start 0`
+  * fixed missing fields in `ammo_base` mentioned in https://github.com/themrdemonized/xray-monolith/pull/612
+  * Bookshelf9854: replace level.iterate_nearest with pre-filtered monsters registry in anomaly_restrictor_update (https://github.com/themrdemonized/xray-monolith/pull/605)
+  * damiansirbu:
+    * Cover re-pick veto callback (npc_on_best_cover_repick) (https://github.com/themrdemonized/xray-monolith/pull/607)
+    * NPC weapon reload event callbacks (npc_on_weapon_reload_start/stop) (https://github.com/themrdemonized/xray-monolith/pull/611)
+    * Bind make_enemy_visible (force seen-class enemy memory for stalkers)  (https://github.com/themrdemonized/xray-monolith/pull/613)
+  * emgComplex: feat(HudItem):lua binding for toggle fl_inertion_enable (https://github.com/themrdemonized/xray-monolith/pull/619)
+  * GhenTuong: Add an option "bullet_check_visual" in object section to validate bullet hit. (https://github.com/themrdemonized/xray-monolith/pull/620)
+
+* MT:
+  * Possible crash fix on level change in LocatorAPI
+  * noisethanks: Address a race condition with reloading evicted textures by using texture_load_tasks PPL group. (https://github.com/themrdemonized/xray-monolith/pull/604)
+
+**2026.07.13**
+* Main and MT:
+  * erepb: fix: replay spot add-properties at click... (https://github.com/themrdemonized/xray-monolith/pull/598)
+  * Verdatim25: Add new Cvar pseudogiant_dodge_stomp_while_falling (https://github.com/themrdemonized/xray-monolith/pull/599)
+  * GhenTuong: CCar development. Drone, Visual camera, Camera Scope (https://github.com/themrdemonized/xray-monolith/pull/600)
+  * damiansirbu: feat(ai): per-NPC fire queue scale setter (https://github.com/themrdemonized/xray-monolith/pull/603)
+
 **2026.07.06**
 * Main and MT:
   * Fix `CPatrolPoint::load_from_config` not working properly
@@ -2316,4 +2339,3 @@ override = true
 
 * Exported distance_to_xz_sqr() function of Fvector
 * Redesigned duplicate section error, it will additionally print what file adds the section in the first place in addition to the file that has the duplicate
-

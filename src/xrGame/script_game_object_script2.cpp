@@ -380,6 +380,7 @@ class_<CScriptGameObject> script_register_game_object1(class_<CScriptGameObject>
 
 		.def("register_in_combat", SAFE_WRAP(&CScriptGameObject::register_in_combat))
 		.def("unregister_in_combat", SAFE_WRAP(&CScriptGameObject::unregister_in_combat))
+		.def("make_enemy_visible", SAFE_WRAP(&CScriptGameObject::make_enemy_visible))
 		.def("find_best_cover", SAFE_WRAP(&CScriptGameObject::find_best_cover))
 
 		.def("use_smart_covers_only", SAFE_WRAP((bool (CScriptGameObject::*)() const)&CScriptGameObject::use_smart_covers_only))

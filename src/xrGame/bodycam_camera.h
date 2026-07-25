@@ -7,6 +7,7 @@ struct lua_State;
 #include "bodycam_simulation.h"
 #include "bodycam_mouse_input.h"
 #include "bodycam_pip_adapter.h"
+#include "bodycam_viewmodel_profile.h"
 
 namespace Bodycam
 {
@@ -89,10 +90,13 @@ public:
 	bool AnyFeatureEnabled() const;
 	void Reset(const CCameraBase* camera, u32 mstate, float ads_blend);
 	void AddMouseLookDelta(float yaw_delta, float pitch_delta);
+	void RebaseLookDelta(float yaw_delta, float pitch_delta);
 	void Update(const UpdateInput& input, VisualOutput& output);
 	PipView UpdatePipView(const PipInput& input);
 	void AddFireImpulse(float power, bool ads);
 	void AddImpulse(LPCSTR kind, float power, bool ads);
+	void SetViewmodelProfile(const Fvector& pos, const Fvector& rot, float blend_speed);
+	void ClearViewmodelProfile(float blend_speed);
 	void Dump(bool ads, u32 mstate) const;
 	bool GetHudOffset(Fvector& pos, Fvector& rot) const;
 	bool GetArmPose(ArmPose& pose) const;
@@ -110,9 +114,11 @@ private:
 	float m_movement_target_speed = 0.f;
 	float m_movement_actual_speed = 0.f;
 	float m_movement_speed_fraction = 0.f;
+	ViewmodelProfileState m_viewmodel_profile;
 
 	void ClearViewmodelOutput();
 	void ClearHudOutput();
+	void ApplyViewmodelProfile(float dt, float ads_blend);
 };
 
 bool GetDebugSnapshot(DebugSnapshot& snapshot);

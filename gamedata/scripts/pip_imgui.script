@@ -2,6 +2,11 @@
 
 local show_window = false
 local console
+local custom_section = "pip_imgui_custom"
+local custom_save_delay_ms = 500
+local custom_save_due_time
+local selected_curve = 1
+local active_curve_preset
 
 local curve_commands = {
     exit = { "r__svp_exit_curve_1_4", "r__svp_exit_curve_6_20" },
@@ -12,7 +17,7 @@ local curve_commands = {
 local curve_sections = {
     {
         id = "exit",
-        label = "Exit-pupil sensitivity",
+        label = "Exit-pupil Loss",
         description = "Scales image loss caused by eye-to-scope misalignment. The authored exit pupil and eye relief remain the physical baseline.",
         scale = "r__svp_exit_scale",
         offset = "r__svp_exit_offset",
@@ -26,7 +31,7 @@ local curve_sections = {
     },
     {
         id = "dim",
-        label = "Scope dimming",
+        label = "Image Dimming",
         description = "Scales optical brightness loss from exit-pupil and ambient-light calculations.",
         scale = "r__svp_dim_scale",
         offset = "r__svp_dim_offset",
@@ -183,6 +188,14 @@ local integer_commands = {
     r__svp_aperture_debug = true,
 }
 
+local basic_commands = {
+    "r__svp_aperture",
+    "g_zoom_smooth",
+    "g_zoom_analog",
+    "r__svp_render_scale",
+    "r__svp_dlss",
+}
+
 local function get_console()
     console = console or _G.get_console()
     return console
@@ -203,6 +216,45 @@ end
 local function get_float(name, fallback)
     local ok, value = pcall(function() return get_console():get_float(name) end)
     return ok and value or fallback
+end
+
+local function get_number(name, fallback, integer)
+    if integer then
+        local ok, value = pcall(function() return get_console():get_integer(name) end)
+        return ok and value or fallback
+    end
+    return get_float(name, fallback)
+end
+
+local function custom_storage()
+    return axr_main and axr_main.config
+end
+
+local function for_each_custom_command(callback)
+    local visited = {}
+    local function visit(name)
+        if not visited[name] then
+            visited[name] = true
+            callback(name)
+        end
+    end
+
+    for _, name in ipairs(basic_commands) do
+        visit(name)
+    end
+    for _, group in ipairs(advanced_groups) do
+        for _, setting in ipairs(group.settings) do
+            visit(setting[1])
+        end
+    end
+    for _, section in ipairs(curve_sections) do
+        visit(section.scale)
+        visit(section.offset)
+    end
+end
+
+local function schedule_custom_save()
+    custom_save_due_time = time_global() + custom_save_delay_ms
 end
 
 local function get_bool(name, fallback)
@@ -255,23 +307,97 @@ local function draw_bool(name, label)
     if not command_present(name) then return end
     local changed, value = ImGui.Checkbox(label .. "##" .. name, get_bool(name, false))
     show_tooltip(descriptions[name], name, 0, 1)
-    if changed then set_number(name, value and 1 or 0, true) end
+    if changed then
+        set_number(name, value and 1 or 0, true)
+        schedule_custom_save()
+    end
 end
 
 local function draw_float(name, label, speed, integer, known_bounds)
     local bounds = known_bounds or get_bounds(name)
-    if not bounds then return end
-    local current = get_float(name, 0)
+    if not bounds then return false end
+    local current = get_number(name, 0, integer)
     local changed, value = ImGui.DragFloat(label .. "##" .. name, current, speed or 0.01,
         bounds.min, bounds.max, integer and "%.0f" or "%.3f", ImGuiSliderFlags.AlwaysClamp)
     show_tooltip(descriptions[name], name, bounds.min, bounds.max)
-    if changed then set_number(name, value, integer) end
+    if changed then
+        set_number(name, value, integer)
+        schedule_custom_save()
+    end
+    return changed
 end
 
 local function set_curve(id, values)
     local commands = curve_commands[id]
     write_vector4(commands[1], vector4():set(values[1], values[2], values[3], values[4]))
     write_vector4(commands[2], vector4():set(values[5], values[6], values[7], values[8]))
+end
+
+local function save_custom_preset()
+    local ini = custom_storage()
+    if not ini then
+        return
+    end
+
+    for_each_custom_command(function(name)
+        if command_present(name) then
+            local integer = bool_commands[name] or integer_commands[name]
+            ini:w_value(custom_section, name, get_number(name, 0, integer))
+        end
+    end)
+    for _, section in ipairs(curve_sections) do
+        local commands = curve_commands[section.id]
+        local low = read_vector4(commands[1])
+        local high = read_vector4(commands[2])
+        local values = { low.x, low.y, low.z, low.w, high.x, high.y, high.z, high.w }
+        for i, value in ipairs(values) do
+            ini:w_value(custom_section, section.id .. "_curve_" .. i, value)
+        end
+    end
+    ini:save()
+    custom_save_due_time = nil
+end
+
+local function apply_custom_preset()
+    local ini = custom_storage()
+    if not ini or not ini:section_exist(custom_section) then
+        return
+    end
+
+    for_each_custom_command(function(name)
+        if command_present(name) and ini:line_exist(custom_section, name) then
+            local integer = bool_commands[name] or integer_commands[name]
+            local current = get_number(name, 0, integer)
+            local value = ini:r_value(custom_section, name, 2, current)
+            set_number(name, value, integer)
+        end
+    end)
+    for _, section in ipairs(curve_sections) do
+        local commands = curve_commands[section.id]
+        local low = read_vector4(commands[1])
+        local high = read_vector4(commands[2])
+        local values = { low.x, low.y, low.z, low.w, high.x, high.y, high.z, high.w }
+        for i = 1, 8 do
+            local key = section.id .. "_curve_" .. i
+            if ini:line_exist(custom_section, key) then
+                values[i] = ini:r_value(custom_section, key, 2, values[i])
+            end
+        end
+        set_curve(section.id, values)
+    end
+    active_curve_preset = "custom"
+end
+
+local function actor_on_update()
+    if custom_save_due_time and time_global() >= custom_save_due_time then
+        save_custom_preset()
+    end
+end
+
+local function preserve_pending_custom_preset()
+    if custom_save_due_time then
+        save_custom_preset()
+    end
 end
 
 local function apply_preset(name)
@@ -294,17 +420,101 @@ local function apply_preset(name)
         set_number(section.scale, 1, false)
         set_number(section.offset, 0, false)
     end
+    active_curve_preset = name
+end
+
+local function draw_preset_button(id, label, tooltip, width)
+    local active = active_curve_preset == id
+    if active then
+        ImGui.PushStyleColor(ImGuiCol.Button, fcolor():set(0.12, 0.34, 0.62, 1))
+        ImGui.PushStyleColor(ImGuiCol.ButtonHovered, fcolor():set(0.16, 0.42, 0.74, 1))
+    end
+    local clicked = ImGui.Button(label, vector2():set(width, 0))
+    if active then
+        ImGui.PopStyleColor(2)
+    end
+    show_tooltip(tooltip)
+    return clicked
+end
+
+local function curve_matches(section, expected)
+    local commands = curve_commands[section.id]
+    local low = read_vector4(commands[1])
+    local high = read_vector4(commands[2])
+    local actual = { low.x, low.y, low.z, low.w, high.x, high.y, high.z, high.w }
+    for index, value in ipairs(actual) do
+        if math.abs(value - expected[index]) > 0.001 then
+            return false
+        end
+    end
+    return math.abs(get_number(section.scale, 1, false) - 1) <= 0.001 and
+        math.abs(get_number(section.offset, 0, false)) <= 0.001
+end
+
+local function detect_curve_preset()
+    local flat_one = { 1, 1, 1, 1, 1, 1, 1, 1 }
+    local flat_zero = { 0, 0, 0, 0, 0, 0, 0, 0 }
+    if curve_matches(curve_sections[1], flat_one) and
+        curve_matches(curve_sections[2], flat_one) and
+        curve_matches(curve_sections[3], flat_one) then
+        return "realistic"
+    end
+    if curve_matches(curve_sections[1], flat_zero) and
+        curve_matches(curve_sections[2], flat_zero) and
+        curve_matches(curve_sections[3], flat_zero) then
+        return "lil_bro"
+    end
+    if curve_matches(curve_sections[1], { 1.12, 1.15, 1.18, 1.22, 1.28, 1.34, 1.42, 1.52 }) and
+        curve_matches(curve_sections[2], { 1.04, 1.06, 1.09, 1.12, 1.17, 1.22, 1.29, 1.38 }) and
+        curve_matches(curve_sections[3], { 1.02, 1.03, 1.05, 1.07, 1.10, 1.14, 1.19, 1.25 }) then
+        return "cinematic"
+    end
+    return "custom"
 end
 
 local function draw_presets()
-    if ImGui.Button("Realistic", vector2():set(120, 0)) then apply_preset("realistic") end
-    show_tooltip("Leaves every authored optic profile unchanged. All response multipliers are 1.0.")
+    if not active_curve_preset then
+        active_curve_preset = detect_curve_preset()
+    end
+    ImGui.TextDisabled("PRESETS")
+    ImGui.Spacing()
+    local available = ImGui.GetContentRegionAvail()
+    local button_width = math.max(90, (available.x - 24) / 4)
+    if draw_preset_button(
+        "realistic",
+        "Realistic",
+        "Leaves every authored optic profile unchanged. All response multipliers are 1.0.",
+        button_width) then
+        preserve_pending_custom_preset()
+        apply_preset("realistic")
+    end
     ImGui.SameLine(0, 8)
-    if ImGui.Button("Cinematic", vector2():set(120, 0)) then apply_preset("cinematic") end
-    show_tooltip("Makes physical scope response easier to notice without making high magnification excessively restrictive.")
+    if draw_preset_button(
+        "cinematic",
+        "Cinematic",
+        "Makes physical scope response easier to notice without making high magnification excessively restrictive.",
+        button_width) then
+        preserve_pending_custom_preset()
+        apply_preset("cinematic")
+    end
     ImGui.SameLine(0, 8)
-    if ImGui.Button("Lil' Bro", vector2():set(120, 0)) then apply_preset("lil_bro") end
-    show_tooltip("Disables exit-pupil loss, tunneling, and optical dimming while leaving PiP rendering enabled. All response multipliers are 0.0.")
+    if draw_preset_button(
+        "lil_bro",
+        "Lil' Bro",
+        "Disables exit-pupil loss, tunneling, and optical dimming while leaving PiP rendering enabled.",
+        button_width) then
+        preserve_pending_custom_preset()
+        apply_preset("lil_bro")
+    end
+    ImGui.SameLine(0, 8)
+    if draw_preset_button(
+        "custom",
+        "Custom",
+        "Loads the last values changed manually in this window. Built-in presets never overwrite this slot.",
+        button_width) then
+        preserve_pending_custom_preset()
+        apply_custom_preset()
+    end
 end
 
 local function draw_basic()
@@ -319,10 +529,20 @@ local function draw_curve(section)
     local commands = curve_commands[section.id]
     local low = read_vector4(commands[1])
     local high = read_vector4(commands[2])
-    ImGui.Text(section.label)
-    show_tooltip(section.description)
+    ImGui.TextWrapped(section.description)
+    ImGui.Spacing()
+    ImGui.TextDisabled("0.0 disables the response    1.0 preserves the authored profile    Above 1.0 amplifies it")
+    ImGui.Spacing()
+    local available = ImGui.GetContentRegionAvail()
+    local graph_width = math.max(1, available.x - 4)
     local changed
-    changed, low, high = ImGui.MagnificationCurve(section.id, low, high, 0, 3, vector2():set(760, 205))
+    changed, low, high = ImGui.MagnificationCurve(
+        section.id,
+        low,
+        high,
+        0,
+        3,
+        vector2():set(graph_width, 260))
     local values = string.format(
         " Current anchors: 1x %.2f, 2x %.2f, 3x %.2f, 4x %.2f, 6x %.2f, 8x %.2f, 12x %.2f, 20x %.2f.",
         low.x, low.y, low.z, low.w, high.x, high.y, high.z, high.w)
@@ -330,20 +550,79 @@ local function draw_curve(section)
     if changed then
         write_vector4(commands[1], low)
         write_vector4(commands[2], high)
+        active_curve_preset = "custom"
+        schedule_custom_save()
     end
-    draw_float(section.scale, "Global Scale", 0.01)
-    draw_float(section.offset, "Global Offset", 0.005)
+    local anchors = {
+        { "1x", low.x }, { "2x", low.y }, { "3x", low.z }, { "4x", low.w },
+        { "6x", high.x }, { "8x", high.y }, { "12x", high.z }, { "20x", high.w },
+    }
+    if ImGui.BeginTable(
+        "pip_curve_anchor_values_" .. section.id,
+        8,
+        ImGuiTableFlags.BordersInnerV,
+        vector2():set(0, 0),
+        0) then
+        for _, anchor in ipairs(anchors) do
+            ImGui.TableSetupColumn(anchor[1], ImGuiTableColumnFlags.WidthStretch, 0, 0)
+        end
+        ImGui.TableHeadersRow()
+        ImGui.TableNextRow(ImGuiTableRowFlags.None, 0)
+        for index, anchor in ipairs(anchors) do
+            ImGui.TableSetColumnIndex(index - 1)
+            ImGui.Text(string.format("%.2f", anchor[2]))
+        end
+        ImGui.EndTable()
+    end
+    ImGui.Spacing()
+    ImGui.TextDisabled("PROFILE ADJUSTMENT")
+    ImGui.Spacing()
+    if draw_float(section.scale, "Global Scale", 0.01) then
+        active_curve_preset = "custom"
+    end
+    if draw_float(section.offset, "Global Offset", 0.005) then
+        active_curve_preset = "custom"
+    end
+end
+
+local function draw_curve_navigation()
+    ImGui.TextDisabled("RESPONSES")
+    ImGui.Spacing()
+    for index, section in ipairs(curve_sections) do
+        local clicked = ImGui.Selectable(
+            section.label .. "##pip_curve_nav_" .. section.id,
+            selected_curve == index,
+            ImGuiSelectableFlags.None,
+            vector2():set(0, 34))
+        if clicked then
+            selected_curve = index
+        end
+    end
 end
 
 local function draw_curves()
     draw_presets()
     ImGui.Spacing()
-    ImGui.TextWrapped("Curves multiply every scope profile at fixed absolute magnifications. 1.0 preserves the profile, values above 1.0 amplify it, and 0.0 disables that response. Values between points are interpolated.")
-    for _, section in ipairs(curve_sections) do
-        if ImGui.CollapsingHeader(section.label .. "##curve", ImGuiTreeNodeFlags.DefaultOpen) then
-            draw_curve(section)
-        end
+    ImGui.Separator()
+    ImGui.Spacing()
+
+    if not ImGui.BeginTable(
+        "pip_response_curve_layout",
+        2,
+        ImGuiTableFlags.BordersInnerV,
+        vector2():set(0, 0),
+        0) then
+        return
     end
+
+    ImGui.TableSetupColumn("Responses", ImGuiTableColumnFlags.WidthFixed, 190, 0)
+    ImGui.TableSetupColumn("Curve Editor", ImGuiTableColumnFlags.WidthStretch, 0, 0)
+    ImGui.TableNextRow(ImGuiTableRowFlags.None, 0)
+    ImGui.TableSetColumnIndex(0)
+    draw_curve_navigation()
+    ImGui.TableSetColumnIndex(1)
+    draw_curve(curve_sections[selected_curve] or curve_sections[1])
+    ImGui.EndTable()
 end
 
 local function draw_advanced()
@@ -393,4 +672,8 @@ if ImGui and ImGui.Groups and ImGui.Groups.Main and ImGui.Groups.Mods then
     ImGui.Groups.Mods.Widget(function()
         _, show_window = ImGui.MenuItem("Picture in Picture", nil, show_window, true)
     end)
+end
+
+function on_game_start()
+    RegisterScriptCallback("actor_on_update", actor_on_update)
 end

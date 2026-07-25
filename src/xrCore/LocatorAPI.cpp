@@ -822,7 +822,7 @@ void CLocatorAPI::_initialize(u32 flags, LPCSTR target_folder, LPCSTR fs_name)
 				//Old good fsltx
 				//replace root with predefined path
 				//xr_strcpy(root, fsRoot.generic_string().c_str());
-				FS_Path* P = new FS_Path(xr_strdup(fsRoot.generic_string().c_str()), nullptr, nullptr, nullptr, 0);
+				FS_Path* P = new FS_Path(fsRoot.generic_string().c_str(), nullptr, nullptr, nullptr, 0);
 				pathes.insert(std::make_pair(xr_strdup("$fs_root$"), P));
 				p_it = pathes.find(root);
 			}

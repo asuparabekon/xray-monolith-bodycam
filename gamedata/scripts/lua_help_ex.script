@@ -670,6 +670,7 @@
         bool fire_make_sense() // Engine fire-discipline gate for the current selected enemy: occlusion before target (pick_distance + ai_fire_range_extension), floor gap (ai_fire_max_height_diff), point-blank (ai_fire_min_dist), unseen enemy only within ai_fire_make_sense_interval and with an automatic weapon.
         bool affect_cover() // Returns true when the NPC considers itself in a tactically covered position (physically arrived at cover). Set by combat actions, reset on action transition. Use in BeforeHitCallback to detect hits in the open.
         void best_cover_invalidate() // Forces the NPC to re-evaluate its best cover point on the next tick. Call after affect_cover() returns false on a hit to make the NPC seek new cover.
+        void make_enemy_visible(game_object enemy) // Force-plant enemy as a VISIBLE-memory object on this stalker (CMemoryManager::make_object_visible_somewhen - the engine's own squad wounded-target distribution call). Enemy selection scores "currently seen" far above hit/sound memory, so a shooter injected only via hit memory never wins selection; this puts him in the seen class where the engine's nearest-seen logic takes over. Visibility then decays through normal memory rules. Stalker receiver, alive-entity argument, no-op with an error log otherwise.
         string rank_name() // Returns rank id string from CharacterInfo: "novice", "experienced", "veteran", "master", "expert". More reliable than rank() since raw integer thresholds vary per modpack.
         string get_current_smart_cover_name() // Returns cName() of the smart cover the NPC is currently occupying, or "" if none.
         string get_current_loophole_id() // Returns the loophole id within the current smart cover, or "" if none.
@@ -728,6 +729,9 @@
 
         function list_bones(bool bHud = false)
 
+		bool GetBulletCheckVisual()
+		void SetBulletCheckVisual(bool)
+
         // HUD item fire points/bones
         Fvector hud_fire_point()
         Fvector hud_fire_point2()
@@ -748,6 +752,9 @@
         void set_hud_fire_bone2(string bone_name)
         void set_hud_fire_bone_silencer(u16 id)
         void set_hud_fire_bone_silencer(string bone_name)
+        // HUD item inertia
+        bool set_hud_inertion_enabled()
+        void hud_inertion_enabled(bool value)
 
         // Torch
         function update_torch()
@@ -935,6 +942,8 @@
 
 		// Forcibly set the zoom type for the weapon
 		function ForceSetZoomType(float)
+
+        callbacks (see callbacks_gameobject.script): npc_on_weapon_reload_start, npc_on_weapon_reload_stop -- (npc, wpn), fired on a stalker's weapon entering/leaving the reload state; actor reloads fire actor_on_weapon_reload instead
     }
 
     class CWeaponKnife : CWeapon {
