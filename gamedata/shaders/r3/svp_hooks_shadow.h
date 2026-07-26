@@ -1,4 +1,6 @@
-// PIP_HOOK svp_hooks_shadow 20260719 physical-aperture extension
+// PIP_HOOK svp_hooks_shadow 20260715
+// true pip logic for the 3DSS shadow chunk, rides mod.db0, the compat patch includes it
+
 #ifndef SVP_HOOKS_SHADOW_H
 #define SVP_HOOKS_SHADOW_H
 
@@ -72,12 +74,9 @@ float svp_pupil_overlap(float separation, float exit_radius, float eye_radius)
 	return saturate(area / (3.14159265 * smaller * smaller));
 }
 
+// max field scale that keeps the exit and eye pupil discs overlapping
 float svp_pupil_field_scale(float exit_radius, float eye_radius)
 {
-	// Manufacturer FOV does not describe lateral pupil travel inside the optic.
-	// Keep field shear within the finite-overlap region instead: the corner ray
-	// may move half a pupil radius beyond the full-overlap boundary, but it may
-	// never separate the aligned pupil discs.
 	const float smaller = min(exit_radius, eye_radius);
 	const float full_overlap_limit = abs(exit_radius - eye_radius);
 	const float maximum_field_separation = full_overlap_limit + smaller * 0.5;
@@ -97,8 +96,8 @@ float svp_exit_pupil_transmission(float2 lens_tc)
 	if (eye_separation <= 0.0001)
 		return 1.0;
 
-	// Approximate field-dependent pupil decenter and compare finite pupil discs.
-	// Normalizing by the aligned overlap keeps a centered optic fully clear.
+	// approximate field pupil decenter then compare finite pupil discs
+	// normalize by the aligned overlap so a centered optic stays clear
 	const float2 field = (lens_tc - 0.5) * 2.0;
 	const float field_scale = min(
 		max(svp_pupil_model.x, 0.0),
@@ -108,21 +107,55 @@ float svp_exit_pupil_transmission(float2 lens_tc)
 		length(field_pupil_offset), exit_radius, eye_radius);
 	const float displaced_overlap = svp_pupil_overlap(
 		length(field_pupil_offset - eye_offset), exit_radius, eye_radius);
-	return saturate(displaced_overlap / max(aligned_overlap, 0.001));
+	// the ratio only means anything while the aligned baseline holds, past the
+	// design field it blends to the absolute overlap so the edge falls dark
+	const float normalized = saturate(displaced_overlap / max(aligned_overlap, 0.001));
+	return lerp(displaced_overlap, normalized, smoothstep(0.0, 0.25, aligned_overlap));
 }
 
+// union of two black shadow alphas
 float4 svp_merge_black_shadow(float4 persistent_shadow, float4 transient_shadow)
 {
 	const float alpha = 1.0 - (1.0 - persistent_shadow.a) * (1.0 - transient_shadow.a);
 	return float4(0.0, 0.0, 0.0, saturate(alpha));
 }
 
-// Existing thin-hook entry points remain intact for an unextended compatibility shader.
-float2 svp_shadow_swing(float2 offset)
+// the swing side slides the pupil center so the shadow enters from the side of the motion
+// and a symmetric ring cannot form at center
+float2 svp_shadow_swing(float2 off)
 {
 	if (shader_scope_params.w < -1.5)
-		offset += svp_exposure.zw;
-	return offset;
+		off += svp_exposure.zw;
+	return off;
+}
+
+// the parallax crescent rides the swing envelope, calm aim shows none and a hard weapon
+// swing sweeps in a dark crescent that fades back out quickly
+float4 svp_shadow_soften(float4 shadow)
+{
+	if (shader_scope_params.w < -1.5)
+	{
+		shadow.rgb = 0;
+		shadow.a *= saturate((svp_glass4.w - 0.3) / 0.35);
+	}
+	return shadow;
+}
+
+// the ocular field stop, a static rim vignette where the physical field ends
+// onset rides the capped pupil penumbra and the ramp completes at the rim
+float svp_field_stop_alpha(float2 lens_tc)
+{
+	if (shader_scope_params.w < -1.5)
+	{
+		float onset = svp_glass3.y;
+		float band = 1.0 - onset;
+		if (band > 0.001)
+		{
+			float r = length((lens_tc - 0.5) * 2.0);
+			return saturate((r - onset) / band);
+		}
+	}
+	return 0.0;
 }
 
 #endif

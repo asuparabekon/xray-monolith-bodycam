@@ -6,9 +6,56 @@
 #include "../xrEngine/CameraManager.h"
 #include "level.h"
 #include "player_hud.h"
+#include "../xrEngine/svp_gameplay_cvars.h"
 
 // pip weapon raise settled threshold, GetZRotatingFactor at or above this reads as fully aimed
 static const float SVP_SETTLED_ROT = 0.999f;
+
+static bool svp_config_matches_weapon(const CSecondVPParams::OpticConfig& config,
+	const CWeapon& weapon)
+{
+	if (!config.valid || xr_strcmp(config.weapon, weapon.cNameSect().c_str()) ||
+		config.weapon_id != weapon.ID() || config.zoom_type != weapon.GetZoomType())
+		return false;
+
+	shared_str active_scope;
+	if (weapon.IsScopeAttached())
+		active_scope = weapon.GetScopeName();
+	const LPCSTR scope = active_scope.c_str() ? active_scope.c_str() : "";
+	return xr_strcmp(config.scope, scope) == 0;
+}
+
+static float svp_configured_zero(const CWeapon& weapon, const CSecondVPParams& viewport,
+	CSecondVPParams::WeaponPoseSnapshot& pose)
+{
+	if (!svp_optic_api_active())
+	{
+		pose.optic_typed = false;
+		return g_svp_zero;
+	}
+
+	CSecondVPParams::OpticConfig config;
+	viewport.ReadOpticConfig(config);
+	pose.optic_typed = true;
+	pose.optic_config_valid = config.valid;
+	pose.optic_context_token = config.context_token;
+	pose.optic_config_generation = config.generation;
+	pose.optic_route_epoch = config.route_epoch;
+	return svp_config_matches_weapon(config, weapon) ? config.zero_m : 0.f;
+}
+
+static bool svp_same_optic_config(const CSecondVPParams::WeaponPoseSnapshot& pose,
+	const CSecondVPParams::SightSnapshot& sight)
+{
+	if (pose.optic_typed != sight.optic_typed)
+		return false;
+	if (!pose.optic_typed)
+		return true;
+	return pose.optic_config_valid && sight.optic_config_valid &&
+		pose.optic_context_token == sight.optic_context_token &&
+		pose.optic_config_generation == sight.optic_config_generation &&
+		pose.optic_route_epoch == sight.optic_route_epoch;
+}
 
 // pip hosts the swing envelope that drives the scope shadow crescent
 void CWeapon::ApplySvpSightAnchor(CActor* pActor, Fmatrix& trans)
@@ -92,6 +139,7 @@ void CWeapon::ApplySvpSightAnchor(CActor* pActor, Fmatrix& trans)
 
 void CWeapon::UpdateSecondVP()
 {
+	SyncSvpZoomSeedMode();
 	if (!(ParentIsActor() && (m_pInventory != NULL) && (m_pInventory->ActiveItem() == this)))
 		return;
 
@@ -103,29 +151,59 @@ void CWeapon::UpdateSecondVP()
 		return;
 	}
 
-	// pip true SVP, the scope_debug force-path still needs IsZoomed so a debug cvar can't drive it off-ADS
-	const bool svp_act = (scope_debug && IsSecondVPZoomPresent() && IsZoomed())
-		|| (m_zoomtype == 0 && pActor->cam_Active() == pActor->cam_FirstEye() && IsSecondVPZoomPresent() && IsZoomed());
-	// pip activation edge diag, every flip logs every term
+	const bool zoomed = IsZoomed();
+	const bool svp_present = IsSecondVPZoomPresent();
+	if (m_zoomtype == 0 && svp_present)
+	{
+		m_svpMainViewIdentity = SvpZoomIdentity();
+		m_svpMainViewValid = true;
+	}
+	const bool svp_act = (scope_debug && svp_present && zoomed)
+		|| (m_zoomtype == 0 && pActor->cam_Active() == pActor->cam_FirstEye()
+			&& svp_present && zoomed);
+	// pip activation and optic route changes log every term
 	{
 		auto& vp = Device.m_SecondViewport;
+		CSecondVPParams::SightSnapshot sight;
+		const bool sight_ok = vp.ReadSight(sight)
+			&& vp.SnapshotRecent(sight.frame, sight.session, Device.dwFrame);
+		CSecondVPParams::OpticConfig config;
+		const bool typed = scope_svp_enabled >= 2 && svp_optic_api_active();
+		const bool config_ok = !typed || (vp.ReadOpticConfig(config)
+			&& svp_config_matches_weapon(config, *this));
+		const u32 session = vp.GetSVPSession();
+		const u32 config_generation = typed ? config.generation : 0;
+		const u32 route_epoch = typed ? config.route_epoch : 0;
+		static const CWeapon* s_prev_weapon = nullptr;
 		static bool s_prev_act = false;
-		if (svp_act != s_prev_act)
+		static u32 s_prev_session = u32(-1);
+		static u32 s_prev_config_generation = u32(-1);
+		static u32 s_prev_route_epoch = u32(-1);
+		if (svp_act != s_prev_act || this != s_prev_weapon || session != s_prev_session
+			|| config_generation != s_prev_config_generation || route_epoch != s_prev_route_epoch)
 		{
+			s_prev_weapon = this;
 			s_prev_act = svp_act;
-			PipMsg("[SVP-ACT] %d zt=%d cam=%d zoomed=%d ok=%d lens_r=%.3f stale=%u zf=%.1f sec=%s",
-				(int)svp_act, m_zoomtype,
-				(int)(pActor->cam_Active() == pActor->cam_FirstEye()), (int)IsZoomed(),
-				(int)vp.svp_sight_ok, vp.svp_lens_r,
-				Device.dwFrame - vp.svp_sight_frame, GetZoomFactor(), cNameSect().c_str());
+			s_prev_session = session;
+			s_prev_config_generation = config_generation;
+			s_prev_route_epoch = route_epoch;
+			PipMsg("[SVP-ACT] %d session=%u zt=%d cam=%d zoomed=%d rot=%.3f fresh=%d ready=%d typed=%d config=%d lens_r=%.3f stale=%u zf=%.1f sec=%s",
+				(int)svp_act, session, m_zoomtype,
+				(int)(pActor->cam_Active() == pActor->cam_FirstEye()), (int)zoomed,
+				GetZRotatingFactor(),
+				(int)sight_ok, (int)svp_present, (int)typed, (int)config_ok,
+				sight.lens_radius,
+				sight.frame != u32(-1) ? Device.dwFrame - sight.frame : u32(-1),
+				GetZoomFactor(), cNameSect().c_str());
 		}
 	}
-	Device.m_SecondViewport.SetSVPActive(svp_act);
-	// Aim transitions retain normal eye tracking. Reloads and other pending weapon actions
-	// break the cheek weld, so the virtual eye must not follow the animated scope.
+	// aim transitions keep eye tracking, a reload or other pending action breaks the cheek weld
+	// so the virtual eye must not follow the animated scope
 	const u32 weapon_state = GetState();
 	const bool aim_transition = weapon_state == eAimStart || weapon_state == eAimEnd;
-	Device.m_SecondViewport.svp_eye_tracking_suspended = IsPending() && !aim_transition;
+	Device.m_SecondViewport.svp_eye_tracking_suspended.store(
+		IsPending() && !aim_transition, std::memory_order_release);
+	Device.m_SecondViewport.SetSVPActive(svp_act);
 	// the shadow swing envelope drains steadily, the charge site outruns it on real kicks
 	Device.m_SecondViewport.svp_shadow_gain += (0.f - Device.m_SecondViewport.svp_shadow_gain)
 		* (1.f - expf(-Device.fTimeDelta / 0.7f));
@@ -179,59 +257,90 @@ void CWeapon::UpdateSecondVP()
 		vp.svp_min_75base = m_zoom_params.m_bSvpAuthoredMin || SvpDetentBase();
 	}
 
-	// pip mirror the live ballistic ray + muzzle point for the [3DB] overlay, and range the zero:
-	// the shot converges where the sight line meets the aimed surface, capped at g_svp_zero
+	// pip mirror the live ballistic ray and range the authored zero
+	if (svp_act)
 	{
-		extern float g_svp_zero;
 		auto& vp = Device.m_SecondViewport;
+		CSecondVPParams::WeaponPoseSnapshot pose;
+		const float configured_zero = svp_configured_zero(*this, vp, pose);
+		CSecondVPParams::SightSnapshot sight;
+		const bool sight_ok = vp.ReadSight(sight)
+			&& vp.SnapshotRecent(sight.frame, sight.session, Device.dwFrame)
+			&& svp_same_optic_config(pose, sight);
 		// the pick remaps through the actor's real eye under demo_record (CHudItem::Ray)
 		const SPickParam& pp = GetPick();
-		vp.fire_ray_pos.set(pp.defs.start);
-		vp.fire_ray_dir.set(pp.defs.dir);
-		vp.muzzle_pos.set(get_LastFP());
+		pose.fire_ray_pos.set(pp.defs.start);
+		pose.fire_ray_dir.set(pp.defs.dir);
+		pose.muzzle_pos.set(get_LastFP());
 		// the actor's true eye, immune to the demo camera, the overlay's crosshair ray
-		vp.eye_ray_pos.set(pActor->cam_FirstEye()->vPosition);
-		vp.eye_ray_dir.set(pActor->cam_FirstEye()->vDirection);
-		float zero_eff = g_svp_zero;
-		if (g_svp_zero > 0.f && vp.IsSVPActive() && vp.svp_sight_ok)
+		pose.eye_ray_pos.set(pActor->cam_FirstEye()->vPosition);
+		pose.eye_ray_dir.set(pActor->cam_FirstEye()->vDirection);
+		float zero_eff = configured_zero;
+		if (configured_zero > 0.f && vp.IsSVPActive() && sight_ok)
 		{
 			// the published sight line, never the render scratch (zeroes at frame start mid tick)
-			Fvector so = vp.svp_sight_pos;
-			Fvector sd = vp.svp_sight_dir;
+			Fvector so = sight.position;
+			Fvector sd = sight.direction;
 			collide::rq_result RQ;
-			if (Level().ObjectSpace.RayPick(so, sd, g_svp_zero, collide::rqtBoth, RQ, H_Parent()))
+			if (Level().ObjectSpace.RayPick(so, sd, configured_zero, collide::rqtBoth, RQ, H_Parent()))
 				zero_eff = _max(RQ.range, 2.f);
 		}
-		vp.fire_ray_zero = zero_eff;
-		vp.fire_ray_frame = Device.dwFrame;
+		pose.fire_ray_zero = zero_eff;
+		pose.frame = Device.dwFrame;
+		pose.session = vp.GetSVPSession();
+		vp.PublishWeaponPose(pose);
 	}
+}
+
+bool CWeapon::OwnsSvpMainView() const
+{
+	return scope_svp_enabled >= 2 && m_zoomtype == 0 && m_svpMainViewValid
+		&& m_svpMainViewIdentity == SvpZoomIdentity();
 }
 
 // pip SVP readiness, true when a fresh captured lens exists, reads the stable sight publish
 bool CWeapon::GetSVPCameraMatrix()
 {
 	auto& vp = Device.m_SecondViewport;
-	return vp.svp_sight_ok && vp.svp_lens_r > EPS && Device.dwFrame - vp.svp_sight_frame < 8;
+	CSecondVPParams::SightSnapshot sight;
+	if (!vp.ReadSight(sight) || sight.lens_radius <= EPS
+		|| !vp.SnapshotRecent(sight.frame, sight.session, Device.dwFrame))
+		return false;
+	if (!scope_svp_enabled || !svp_optic_api_active())
+		return true;
+
+	CSecondVPParams::OpticConfig config;
+	return vp.ReadOpticConfig(config) && svp_config_matches_weapon(config, *this)
+		&& sight.optic_typed && sight.optic_config_valid
+		&& sight.optic_context_token == config.context_token
+		&& sight.optic_config_generation == config.generation
+		&& sight.optic_route_epoch == config.route_epoch;
 }
 
 // pip zeroing, the shot converges onto the sight line at the ranged zero, then the tracer
 // ring records the final departure ray, called from CActor::g_fireParams
 void svp_apply_zero_and_trace(const SPickParam& pp, Fvector& fire_pos, Fvector& fire_dir)
 {
-	// pip zeroing, the shot converges onto the sight line at the ranged zero (0 disables)
-	extern float g_svp_zero;
+	// pip zeroing converges onto the sight line at the ranged zero
 	auto& vp = Device.m_SecondViewport;
-	if (g_svp_zero > 0.f && Device.true_pip_on && vp.IsSVPActive() && vp.svp_sight_ok)
+	CSecondVPParams::WeaponPoseSnapshot pose;
+	CSecondVPParams::SightSnapshot sight;
+	const bool pose_ok = vp.ReadWeaponPose(pose)
+		&& vp.SnapshotRecent(pose.frame, pose.session, Device.dwFrame);
+	const bool sight_ok = vp.ReadSight(sight)
+		&& vp.SnapshotRecent(sight.frame, sight.session, Device.dwFrame)
+		&& svp_same_optic_config(pose, sight);
+	const float configured_zero = pose_ok ? pose.fire_ray_zero : 0.f;
+	if (configured_zero > 0.f && Device.true_pip_on && vp.IsSVPActive() && pose_ok && sight_ok)
 	{
-		const float zero_m = (vp.fire_ray_zero > 0.f) ? vp.fire_ray_zero : g_svp_zero;
 		// scoped shots depart the muzzle, the stock ray stays when the barrel is blocked
-		if (!pp.barrel_blocked && vp.muzzle_pos.square_magnitude() > EPS)
-			fire_pos.set(vp.muzzle_pos);
+		if (!pp.barrel_blocked && pose.muzzle_pos.square_magnitude() > EPS)
+			fire_pos.set(pose.muzzle_pos);
 		// the stable published sight line
-		Fvector so = vp.svp_sight_pos;
-		Fvector axis = vp.svp_sight_dir;
+		Fvector so = sight.position;
+		Fvector axis = sight.direction;
 		Fvector zero_pt;
-		zero_pt.mad(so, axis, zero_m);
+		zero_pt.mad(so, axis, configured_zero);
 		Fvector d;
 		d.sub(zero_pt, fire_pos);
 		if (d.magnitude() > 1.f)
@@ -243,10 +352,10 @@ void svp_apply_zero_and_trace(const SPickParam& pp, Fvector& fire_pos, Fvector& 
 
 	// pip [3DB] tracer ring, records the final departure ray of every shot for the fading overlay
 	{
-		auto& tr = vp.fire_traces[vp.fire_trace_head % 16];
+		CSecondVPParams::FireTrace tr;
 		tr.pos.set(fire_pos);
 		tr.dir.set(fire_dir);
 		tr.time_ms = Device.dwTimeGlobal;
-		vp.fire_trace_head++;
+		vp.AppendFireTrace(tr);
 	}
 }

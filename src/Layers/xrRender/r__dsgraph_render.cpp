@@ -17,6 +17,8 @@
 
 #include "../../xrEngine/xr_object.h"
 
+#include "../../Include/xrRender/ParticleCustom.h"
+
 using namespace R_dsgraph;
 
 extern float r_ssaDISCARD;
@@ -46,6 +48,79 @@ ICF float svp_ssa(float ssa) { return s_svp_lod_on ? ssa * s_svp_ssa_scale : ssa
 // pip SVP small-object cull, skips items below an ssa threshold pre-scaled for the SVP
 // coverage, 0 = off, armed only for the SVP gbuffer pass
 static float s_svp_ssa_cull = 0.f;
+
+// armed only around current frame objective HUD lists
+static bool s_svp_objective_suppress_wpnfx = false;
+static LPCSTR s_svp_objective_hud_bucket = nullptr;
+
+static bool svp_exact_hud_pose_window()
+{
+#if RENDER == R_R4
+	extern bool svp_objective_hud_current();
+	return svp_objective_hud_current() && Device.true_pip_on;
+#else
+	return false;
+#endif
+}
+
+static bool svp_mode2_hud_window()
+{
+#if RENDER == R_R4
+	extern int scope_svp_enabled;
+	auto& vp = Device.m_SecondViewport;
+	return scope_svp_enabled >= 2 && Device.true_pip_on && vp.IsSVPFrame();
+#else
+	return false;
+#endif
+}
+
+static bool svp_objective_hud_window()
+{
+#if RENDER == R_R4
+	auto& vp = Device.m_SecondViewport;
+	return svp_mode2_hud_window() && vp.svp_camera_frame == Device.dwFrame
+		&& vp.svp_camera_session == vp.GetSVPSession()
+		&& vp.svp_front_use_m > EPS;
+#else
+	return false;
+#endif
+}
+
+static bool svp_reject_hud_window()
+{
+	return svp_mode2_hud_window() && !svp_objective_hud_window();
+}
+
+struct SSvpHudPosePass
+{
+#if RENDER == R_R4
+	bool frozen;
+	bool history;
+#endif
+	SSvpHudPosePass(bool active, bool write_history)
+	{
+#if RENDER == R_R4
+		extern bool g_svp_hud_frozen_pass;
+		extern bool g_svp_hud_history_write;
+		frozen = g_svp_hud_frozen_pass;
+		history = g_svp_hud_history_write;
+		if (active)
+		{
+			g_svp_hud_frozen_pass = true;
+			g_svp_hud_history_write = write_history;
+		}
+#endif
+	}
+	~SSvpHudPosePass()
+	{
+#if RENDER == R_R4
+		extern bool g_svp_hud_frozen_pass;
+		extern bool g_svp_hud_history_write;
+		g_svp_hud_frozen_pass = frozen;
+		g_svp_hud_history_write = history;
+#endif
+	}
+};
 
 // pip lod for the SVP weapon drain, the inline lod helpers stay reachable from the drain's own TU
 float CDSGraphManager::svp_drain_lod(float ssa, float R) { return calcLOD(svp_ssa(ssa), R); }
@@ -79,6 +154,34 @@ void CDSGraphManager::r_dsgraph_render_graph_sorted(R_dsgraph::mapDSGraphItems<T
 		if (s_svp_ssa_cull > 0.f && !item.pMatrix && item.ssa < s_svp_ssa_cull) { if (ps_r__svp_stats) ++svp_stats_ssa_culled; if (!svp_ledger_ssa_culled) svp_ledger_ssa_culled = 1; continue; } // pip skip tiny STATIC clutter only (null matrix), never dynamic NPCs/items (matrix carriers)
 		dxRender_Visual* V = item.pVisual;
 		VERIFY(V && V->shader._get());
+		if (s_svp_objective_suppress_wpnfx)
+		{
+			SSvpHudAdmission admission;
+			svp_classify_objective_hud(V, item.pMatrix, item.hud_role, admission);
+			extern int ps_r__svp_cop_diag;
+			static u32 s_admission_diag_ms = 0;
+			if (admission.candidate && ps_r__svp_cop_diag
+				&& Device.dwTimeGlobal - s_admission_diag_ms > 3000)
+			{
+				s_admission_diag_ms = Device.dwTimeGlobal;
+				auto texture = V->GetTexture();
+				PipMsg("[SVP-ADMIT] %s queue=%s role=%u t=%.2f rad=%.1fcm R=%.1fcm reason=%s visual=%p root=%p lensVisual=%p lensRoot=%p %s",
+					admission.reject ? "SUPPRESS" : "retain",
+					s_svp_objective_hud_bucket ? s_svp_objective_hud_bucket : "sorted",
+					item.hud_role,
+					admission.objective > EPS ? admission.axial / admission.objective : 0.f,
+					admission.radial * 100.f, admission.radius * 100.f, admission.reason,
+					(void*)V, (void*)item.pMatrix,
+					Device.m_SecondViewport.svp_lens_visual,
+					Device.m_SecondViewport.svp_lens_root,
+					texture ? texture->cName.c_str() : "?");
+			}
+			if (admission.reject)
+				continue;
+			IParticleCustom* particle = V->dcast_ParticleCustom();
+			if (particle && particle->GetHudMode() && particle->GetWeaponFX())
+				continue;
+		}
 		RCache.set_Element(item.pSE);
 		// hud matrices resolve through the pose latch, everything else passes through untouched
 		RCache.set_xform_world(*svp_pose_of(item.pMatrix));
@@ -89,6 +192,13 @@ void CDSGraphManager::r_dsgraph_render_graph_sorted(R_dsgraph::mapDSGraphItems<T
 		//	//new feature
 		//}
 		V->Render(calcLOD(svp_ssa(item.ssa), V->vis.sphere.R));
+#if RENDER == R_R4
+		if (s_svp_objective_suppress_wpnfx)
+		{
+			extern void svp_objective_hud_note_draw(u8);
+			svp_objective_hud_note_draw(item.hud_role);
+		}
+#endif
 	}
 
 	if (_clear)
@@ -349,11 +459,27 @@ void CDSGraphManager::r_dsgraph_render_sorted_hud()
 			HW.pContext->CopyResource(dst, src);
 	}
 #endif
-	CHudInitializer initializer(true);
-
-	RImplementation.rmNear();
+	const bool clear_hud = svp_clear_shared_list(true);
+	if (svp_reject_hud_window())
+	{
+		if (clear_hud)
+			RGraph.mapHUDSorted.Sorted.clear();
+		return;
+	}
+	const bool objective_hud = svp_objective_hud_window();
+	const bool frozen_hud = svp_exact_hud_pose_window();
+	CHudInitializer initializer(!objective_hud);
+	SSvpHudPosePass pose(frozen_hud, true);
+	if (objective_hud)
+		RImplementation.rmNormal();
+	else
+		RImplementation.rmNear();
 	// combine order, main clears last so hud-sorted overlays survive the scope pass
-	r_dsgraph_render_graph_sorted(RGraph.mapHUDSorted.Sorted, svp_clear_shared_list(true));
+	s_svp_objective_suppress_wpnfx = objective_hud;
+	s_svp_objective_hud_bucket = objective_hud ? "sorted" : nullptr;
+	r_dsgraph_render_graph_sorted(RGraph.mapHUDSorted.Sorted, clear_hud);
+	s_svp_objective_suppress_wpnfx = false;
+	s_svp_objective_hud_bucket = nullptr;
 	RImplementation.rmNormal();
 }
 
@@ -365,15 +491,32 @@ void CDSGraphManager::r_dsgraph_render_emissive(bool clear, bool renderHUD)
 #if	RENDER!=R_R1
 	r_dsgraph_render_graph_sorted(RGraph.mapStaticSorted.Emissive, clear);
 	r_dsgraph_render_graph_sorted(RGraph.mapDynamicSorted.Emissive, clear);
+	if (svp_reject_hud_window())
+	{
+		if (clear)
+			RGraph.mapHUDSorted.Emissive.clear();
+		return;
+	}
 	
-	//	HACK: Calculate this only once
-	CHudInitializer initializer(true);
-
-	RImplementation.rmNear();
+	const bool objective_hud = svp_objective_hud_window();
+	const bool frozen_hud = svp_exact_hud_pose_window();
+	CHudInitializer initializer(!objective_hud);
+	SSvpHudPosePass pose(frozen_hud, true);
+	if (objective_hud)
+		RImplementation.rmNormal();
+	else
+		RImplementation.rmNear();
+	s_svp_objective_suppress_wpnfx = objective_hud;
+	s_svp_objective_hud_bucket = objective_hud ? "emissive" : nullptr;
 	r_dsgraph_render_graph_sorted(RGraph.mapHUDSorted.Emissive, clear);
 	
 	if (renderHUD)
+	{
+		s_svp_objective_hud_bucket = objective_hud ? "sorted" : nullptr;
 		r_dsgraph_render_graph_sorted(RGraph.mapHUDSorted.Sorted, false);
+	}
+	s_svp_objective_suppress_wpnfx = false;
+	s_svp_objective_hud_bucket = nullptr;
 
 	RImplementation.rmNormal();
 #endif
@@ -449,11 +592,25 @@ void CDSGraphManager::r_dsgraph_render_wmarks()
 	const bool clear_wmark = svp_clear_shared_list(false);
 	r_dsgraph_render_graph_sorted(RGraph.mapStaticSorted.Wmark, clear_wmark);
 	r_dsgraph_render_graph_sorted(RGraph.mapDynamicSorted.Wmark, clear_wmark);
-	//	HACK: Calculate this only once
-	CHudInitializer initalizer(true);
-
-	RImplementation.rmNear();
+	if (svp_reject_hud_window())
+	{
+		if (clear_wmark)
+			RGraph.mapHUDSorted.Wmark.clear();
+		return;
+	}
+	const bool objective_hud = svp_objective_hud_window();
+	const bool frozen_hud = svp_exact_hud_pose_window();
+	CHudInitializer initalizer(!objective_hud);
+	SSvpHudPosePass pose(frozen_hud, true);
+	if (objective_hud)
+		RImplementation.rmNormal();
+	else
+		RImplementation.rmNear();
+	s_svp_objective_suppress_wpnfx = objective_hud;
+	s_svp_objective_hud_bucket = objective_hud ? "wmark" : nullptr;
 	r_dsgraph_render_graph_sorted(RGraph.mapHUDSorted.Wmark, clear_wmark);
+	s_svp_objective_suppress_wpnfx = false;
+	s_svp_objective_hud_bucket = nullptr;
 	RImplementation.rmNormal();
 #endif
 }
@@ -472,11 +629,25 @@ void CDSGraphManager::r_dsgraph_render_distort()
 	// image, world distortion above stays, the hud layer is skipped
 	if (ps_r__svp_skip_hud_distort && Device.true_pip_on && Device.m_SecondViewport.m_render_pass_is_svp)
 		return;
-	//	HACK: Calculate this only once
-	CHudInitializer initalizer(true);
-
-	RImplementation.rmNear();
+	if (svp_reject_hud_window())
+	{
+		if (_clear)
+			RGraph.mapHUDSorted.Distort.clear();
+		return;
+	}
+	const bool objective_hud = svp_objective_hud_window();
+	const bool frozen_hud = svp_exact_hud_pose_window();
+	CHudInitializer initalizer(!objective_hud);
+	SSvpHudPosePass pose(frozen_hud, true);
+	if (objective_hud)
+		RImplementation.rmNormal();
+	else
+		RImplementation.rmNear();
+	s_svp_objective_suppress_wpnfx = objective_hud;
+	s_svp_objective_hud_bucket = objective_hud ? "distort" : nullptr;
 	r_dsgraph_render_graph_sorted(RGraph.mapHUDSorted.Distort, _clear);
+	s_svp_objective_suppress_wpnfx = false;
+	s_svp_objective_hud_bucket = nullptr;
 	RImplementation.rmNormal();
 }
 

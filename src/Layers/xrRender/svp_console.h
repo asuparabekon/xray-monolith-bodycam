@@ -5,7 +5,7 @@
 // true PiP second viewport (SVP) console vars, the complete extern set
 // definitions and registration live in svp_console.cpp
 
-extern ECORE_API int scope_svp_enabled; // true PiP scope mode (0 off, 1 eyepiece, 2 objective)
+extern ECORE_API int scope_svp_enabled; // true PiP scope mode with zero off and positive inputs objective
 extern ECORE_API int scope_debug; // scope debug overlay level
 extern ECORE_API int ps_r__3db_debug; // ballistics overlay level
 
@@ -21,12 +21,12 @@ extern ECORE_API u32 svp_stats_cull_reject; // svp off-cone frustum-reject tally
 extern ECORE_API u32 svp_stats_cull_reject_ident; // svp identity-matrix sorted world statics the cone rejects, incremented in svp_cull_reject
 extern ECORE_API u32 svp_stats_lights_mirrored; // svp lights the cone cull mirrors into the scope, incremented in lights_render
 extern ECORE_API u32 svp_stats_lights_skipped; // svp lights the cone cull drops, incremented in lights_render
-extern ECORE_API u32 svp_stats_taa_stamp; // svp taa sovereignty stamp fires read by the overlay, incremented in phase_ssfx_taa
+extern ECORE_API u32 svp_stats_taa_stamp; // successful raw taa skip mask draws read by the overlay
 extern ECORE_API u32 svp_stats_nvg_split; // svp nvg tube split fires read by the overlay, incremented in phase_combine
 extern ECORE_API u32 svp_stats_lod_scale; // svp lod scale armed frames read by the overlay, incremented in svp_set_lod_scale
 extern ECORE_API u32 svp_stats_hud_cull_reject; // svp hud drain cone rejects read by the overlay, incremented in svp_hud_latch
 extern ECORE_API u32 svp_stats_grass_cull_reject; // svp grass cone rejects read by the overlay, incremented in the detail manager
-extern ECORE_API u32 svp_stats_reflex_proxy; // svp reflex proxy draws read by the overlay, incremented in draw_reflex_proxy
+extern ECORE_API u32 svp_stats_reflex_capture; // svp hybrid reflex draws read by the overlay
 extern ECORE_API u32 svp_stats_distort_guard; // svp distort guard stamps read by the overlay, incremented in phase_combine
 extern ECORE_API u32 svp_stats_nvg_sky; // svp nvg sky lum remaps read by the overlay, incremented in phase_combine
 extern ECORE_API u32 svp_stats_disc_latch; // svp adaptive-res disc latch moves read by the overlay, incremented in phase_3DSSReticle
@@ -38,11 +38,8 @@ extern ECORE_API u32 svp_ledger_cull_reject_ident;
 extern ECORE_API u32 svp_ledger_lights_mirrored;
 extern ECORE_API u32 svp_ledger_lights_skipped;
 extern ECORE_API u32 svp_ledger_lod_scale;
-extern ECORE_API u32 svp_ledger_hud_cull_reject;
 extern ECORE_API u32 svp_ledger_grass_cull_reject;
-extern ECORE_API u32 svp_ledger_reflex_proxy;
 extern ECORE_API u32 svp_ledger_distort_guard;
-extern ECORE_API u32 svp_ledger_nvg_sky;
 extern ECORE_API u32 svp_ledger_disc_latch;
 extern ECORE_API u32 svp_ledger_fwd_keep;
 extern ECORE_API float ps_r__svp_adaptive_res;
@@ -71,17 +68,11 @@ extern ECORE_API float ps_r__svp_obj_size;
 extern ECORE_API int ps_r__svp_focal_derive;
 extern ECORE_API int ps_r__svp_glare_model;
 extern ECORE_API int ps_r__svp_photo_model;
-extern ECORE_API int ps_r__svp_drain_anchor;
-extern ECORE_API int ps_r__svp_settle_derive;
-extern ECORE_API int ps_r__svp_ratio_derive;
-extern ECORE_API int ps_r__svp_lens_reject;
-extern ECORE_API int ps_r__svp_recoil_hold;
 extern ECORE_API int ps_r__svp_roll_stabilize;
 extern ECORE_API int ps_r__svp_clean_optics;
 extern ECORE_API int ps_r__svp_distort_guard;
 extern ECORE_API int ps_r__svp_jitterfix;
 extern ECORE_API int ps_r__svp_taa_mask;
-extern ECORE_API int ps_r__svp_hud_fov_match;
 extern ECORE_API int ps_r__svp_bloom;
 extern ECORE_API int ps_r__svp_local_exposure;
 extern ECORE_API float ps_r__svp_exposure_bias;
@@ -101,6 +92,12 @@ extern ECORE_API int ps_r__svp_measured_optics; // measured lens geometry fills 
 extern ECORE_API float ps_s3ds_objective_mm;
 extern ECORE_API float ps_s3ds_middle_grey;
 extern ECORE_API float ps_s3ds_adapt_speed;
+
+// glass / reticle cosmetics
+extern ECORE_API int ps_r__svp_chroma;
+extern ECORE_API float ps_r__svp_reticle_washout;
+extern ECORE_API float ps_r__svp_field_curve;
+extern ECORE_API int ps_r__svp_field_stop;
 extern ECORE_API int ps_r__svp_aperture;
 extern ECORE_API float ps_s3ds_tunneling_parallax;
 extern ECORE_API float ps_s3ds_tunneling_min;
@@ -112,6 +109,7 @@ extern ECORE_API float ps_s3ds_eye_relief_low_mm;
 extern ECORE_API float ps_s3ds_eye_relief_high_mm;
 extern ECORE_API float ps_s3ds_exit_pupil_low_mm;
 extern ECORE_API float ps_s3ds_exit_pupil_high_mm;
+extern ECORE_API float ps_s3ds_pupil_parity;
 extern ECORE_API float ps_s3ds_pupil_field_low;
 extern ECORE_API float ps_s3ds_pupil_field_high;
 extern ECORE_API float ps_s3ds_transmission;
@@ -128,11 +126,6 @@ extern ECORE_API float ps_svp_tunnel_scale;
 extern ECORE_API float ps_svp_tunnel_offset;
 extern ECORE_API float ps_svp_dim_scale;
 extern ECORE_API float ps_svp_dim_offset;
-
-// glass / reticle cosmetics
-extern ECORE_API int ps_r__svp_chroma;
-extern ECORE_API float ps_r__svp_reticle_washout;
-extern ECORE_API float ps_r__svp_field_curve;
 extern ECORE_API int ps_r__svp_acog_fiber;
 extern ECORE_API float ps_r__svp_veiling_glare;
 extern ECORE_API float ps_r__svp_rain_optic;
@@ -148,7 +141,10 @@ extern ECORE_API float ps_r__svp_sharpen_falloff;
 extern ECORE_API float ps_r__svp_sharpen_inner;
 extern ECORE_API float ps_r__svp_nvg_bleach;
 extern ECORE_API float ps_r__svp_nvg_sensitivity;
-extern ECORE_API int ps_r__svp_hud_full;
+extern ECORE_API int ps_r__svp_nvg_objective;
+extern ECORE_API int ps_r__svp_weapon_continuity;
+extern ECORE_API int ps_r__svp_optic_body_suppress;
+extern ECORE_API int ps_r__svp_nearblur_scatter;
 
 // registers every svp console command, called once from xrRender_initconsole
 extern void svp_console_init();

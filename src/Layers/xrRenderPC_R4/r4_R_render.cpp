@@ -102,6 +102,53 @@ void CRender::render_menu()
 
 extern u32 g_r;
 
+void CRender::ResetSVPHistory()
+{
+	if (TargetMain)
+		TargetMain->m_taa_seed_history = true;
+	if (TargetSVP)
+		TargetSVP->m_taa_seed_history = true;
+	Device.m_SecondViewport.dlss_reset_next = true;
+
+	if (TargetSVP)
+	{
+		Device.matrices_previous[1] = Device.matrices[1];
+		TargetSVP->Matrix_current.set(Device.matrices[1].mProject);
+		TargetSVP->Matrix_previous.set(Device.matrices[1].mProject);
+		TargetSVP->Position_previous.set(Device.m_SecondViewport.svp_cam_pos);
+
+		// invalid depth rejects every old screen space sample
+		if (TargetSVP->rt_ssfx_prevPos)
+		{
+			FLOAT invalid_depth[4] = {0.f, 0.f, -0.001f, 0.f};
+			HW.pContext->ClearRenderTargetView(TargetSVP->rt_ssfx_prevPos->pRT, invalid_depth);
+		}
+		if (TargetSVP->rt_ssfx_ao)
+		{
+			FLOAT neutral_ao[4] = {1.f, 1.f, 1.f, 1.f};
+			HW.pContext->ClearRenderTargetView(TargetSVP->rt_ssfx_ao->pRT, neutral_ao);
+		}
+		if (TargetSVP->rt_ssfx_il)
+		{
+			FLOAT neutral_il[4] = {0.f, 0.f, 0.f, 1.f};
+			HW.pContext->ClearRenderTargetView(TargetSVP->rt_ssfx_il->pRT, neutral_il);
+		}
+		if (TargetSVP->rt_ssfx_ssr)
+		{
+			FLOAT neutral_ssr[4] = {0.f, 0.f, 0.f, 1.f};
+			HW.pContext->ClearRenderTargetView(TargetSVP->rt_ssfx_ssr->pRT, neutral_ssr);
+		}
+
+		if (TargetSVP->rt_ssfx_water && g_pGamePersistent
+			&& g_pGamePersistent->Environment().CurrentEnv)
+		{
+			const Fvector3& fc = g_pGamePersistent->Environment().CurrentEnv->fog_color;
+			FLOAT neutral_water[4] = {fc.x, fc.y, fc.z, 1.f};
+			HW.pContext->ClearRenderTargetView(TargetSVP->rt_ssfx_water->pRT, neutral_water);
+		}
+	}
+}
+
 void CRender::Render()
 {
 	PIX_EVENT(CRender_Render);
@@ -133,6 +180,10 @@ void CRender::Render()
 		m_bFirstFrameAfterReset = false;
 		return;
 	}
+
+	// lock one optic route for every scope consumer this frame
+	Device.m_SecondViewport.LatchOpticConfig(
+		Device.dwFrame, Device.m_SecondViewport.GetSVPSession());
 
 	// pip svp render-stats frame boundary, self-gates to nothing when r__svp_stats is 0
 	svp_stats::frame_begin();
@@ -217,21 +268,7 @@ void CRender::Render()
 	// pip the lens content swaps at the scope edges, both taa histories seed from the current
 	// frame so the stale scene never ghosts through the resolve
 	if (svp_edge)
-	{
-		if (TargetMain)
-			TargetMain->m_taa_seed_history = true;
-		if (TargetSVP)
-			TargetSVP->m_taa_seed_history = true;
-		// the svp water reflection accumulator still holds the last scope session and its
-		// blend converges too slowly for the raise, a horizon tint start hides the stale box
-		if (TargetSVP && TargetSVP->rt_ssfx_water && g_pGamePersistent
-			&& g_pGamePersistent->Environment().CurrentEnv)
-		{
-			const Fvector3& fc = g_pGamePersistent->Environment().CurrentEnv->fog_color;
-			FLOAT cc[4] = {fc.x, fc.y, fc.z, 1.f};
-			HW.pContext->ClearRenderTargetView(TargetSVP->rt_ssfx_water->pRT, cc);
-		}
-	}
+		ResetSVPHistory();
 	// creation can fail at VRAM exhaustion, fall back to the single stock pass this frame
 	if (svp && !TargetSVP)
 		svp = false;
@@ -278,8 +315,10 @@ void CRender::Render()
 	renderGBuffer(!svp); // keep the priority-0 graph when an SVP pass follows
 	svp_stats::section_end(svp_stats::SEC_MAIN_GBUFFER);
 	if (svp)
-	{
 		EnsureTargetSVP();
+	TargetMain->svp_objective_hud_prepare(svp);
+	if (svp)
+	{
 		// pip CPU-side cost probe for the SVP gbuffer, throttled log while r__svp_diag is on
 		CTimer svp_t; svp_t.Start();
 		const u32 calls0 = RCache.stat.calls;
@@ -298,8 +337,8 @@ void CRender::Render()
 					RCache.stat.calls - calls0, (RCache.stat.verts - verts0) / 1000);
 			}
 		}
-		// pip stencil the dead corners outside the eyepiece disc while the svp target is still bound,
-		// so the lighting and combine passes below skip them
+		TargetMain->svp_objective_hud_report();
+		// pip stencil the dead corners after the native scope draw
 		if (ps_r__svp_corner_mask && !RImplementation.o.dx10_msaa && TargetSVP)
 			TargetSVP->stamp_svp_corner_mask();
 		TargetMain->SetActive(); // shadow generation + main accumulation run on the main target
@@ -436,16 +475,24 @@ void CRender::renderGBuffer(bool clearGraph)
 		if (Target == TargetMain) // pip weapon HUD only in the main view, not the scope image
 		{
 			GMBase.r_dsgraph_capture_hud();
+			if (Device.true_pip_on)
+				GMBase.svp_latch_hud_poses();
 			// pip snapshot HUD geometry centers before render_hud clears the lists, so the geomscan (in
 			// deriveScopeLens, after the clear) can auto-derive the objective distance against the optical axis
 			if (scope_svp_enabled || scope_debug >= 2)
 				svp_snapshot_hud_geom();
-			// pip latch the hud poses this draw uses, logic rewrites the matrices mid render and the
-			// scope draws later in the frame must match the housing
-			if (Device.true_pip_on)
-				GMBase.svp_latch_hud_poses();
 			// keep the weapon list when an SVP pass follows, the scope image drains it second
+			extern bool g_svp_hud_frozen_pass;
+			extern bool g_svp_hud_history_write;
+			const bool frozen_was = g_svp_hud_frozen_pass;
+			const bool history_was = g_svp_hud_history_write;
+			const bool exact_pose = !clearGraph && scope_svp_enabled >= 2
+				&& ps_r__svp_weapon_continuity && Device.true_pip_on;
+			g_svp_hud_frozen_pass = exact_pose;
+			g_svp_hud_history_write = exact_pose;
 			GMBase.r_dsgraph_render_hud(clearGraph);
+			g_svp_hud_frozen_pass = frozen_was;
+			g_svp_hud_history_write = history_was;
 
 			// pip derive the scope lens then build the SVP camera (matrices[1]) while a PiP scope
 			// is aimed, zoom-0 tube sights have no zoom fov so ADS + a captured lens also qualifies
@@ -464,8 +511,9 @@ void CRender::renderGBuffer(bool clearGraph)
 						vp.objective.radius = vp.dbg_objective_r;
 					}
 				}
-				if (Device.m_SecondViewport.eyepiece.radius > EPS && TargetSVP)
-					svpCamera();
+				if (Device.m_SecondViewport.eyepiece.radius > EPS && TargetSVP
+					&& svpCamera())
+					ResetSVPHistory();
 			}
 			// pip [3DB] for aimed sights without a captured lens, reflex and irons keep 3d
 			// ballistics so the sight independent markers draw, the pip overlay owns the rest
@@ -482,13 +530,24 @@ void CRender::renderGBuffer(bool clearGraph)
 		{
 			extern float g_pip_scope_magnification;
 			auto& vp = Device.m_SecondViewport;
-			// the weapon drains through the same entrance-pupil camera as the world, the near
-			// plane hides everything behind the front lens
-			if (scope_svp_enabled >= 2 && vp.eyepiece.radius > EPS)
+			// the weapon drains through the same scope camera as the world
+			// the near plane hides everything behind the front lens
+			if (scope_svp_enabled >= 2 && vp.eyepiece.radius > EPS
+				&& vp.svp_front_use_m > EPS)
 			{
 				RCache.set_xform_view(Device.matrices[1].mView);
 				RCache.set_xform_project(Device.matrices[1].mProject);
+				extern bool g_svp_hud_frozen_pass;
+				extern bool g_svp_hud_history_write;
+				extern bool svp_objective_hud_current();
+				const bool frozen_was = g_svp_hud_frozen_pass;
+				const bool history_was = g_svp_hud_history_write;
+				const bool exact_pose = svp_objective_hud_current();
+				g_svp_hud_frozen_pass = exact_pose;
+				g_svp_hud_history_write = exact_pose;
 				GMBase.r_dsgraph_render_hud_svp();
+				g_svp_hud_frozen_pass = frozen_was;
+				g_svp_hud_history_write = history_was;
 			}
 			else
 				GMBase.RGraph.mapHUD.clear(); // consume the deferred main-pass clear
@@ -726,14 +785,20 @@ void CRender::renderSceneLighting(BOOL bSUN, bool svp)
 
 		TargetSVP->phase_svp_capture(); // SVP combined color -> rt_secondVP, ready for the main lens
 
-		// pip a hybrid magnifier draws the holo dot as a collimated proxy into the captured svp image
-		// so it magnifies and tracks, success gates the 1x main-view overlay suppression
-		Device.m_SecondViewport.svp_reflex_proxy_ok = false;
-		if (ps_r__svp_reflex_capture
-			&& !GMBase.RGraph.mapReflexHUDSorted.empty()
-			&& !GMBase.RGraph.mapScopeHUDSorted.empty())
+		// The real reflex mesh draws through the objective after SVP post processing
+		Device.m_SecondViewport.svp_reflex_capture_ok = false;
+		Device.m_SecondViewport.svp_reflex_capture_epoch = u32(-1);
+		Device.m_SecondViewport.svp_reflex_capture_session = 0;
+		if (ps_r__svp_reflex_capture)
 		{
-			Device.m_SecondViewport.svp_reflex_proxy_ok = TargetSVP->draw_reflex_proxy();
+			Device.m_SecondViewport.svp_reflex_capture_ok = TargetSVP->draw_hybrid_reflex();
+			if (Device.m_SecondViewport.svp_reflex_capture_ok)
+			{
+				Device.m_SecondViewport.svp_reflex_capture_epoch =
+					Device.m_SecondViewport.svp_optic_epoch;
+				Device.m_SecondViewport.svp_reflex_capture_session =
+					Device.m_SecondViewport.GetSVPSession();
+			}
 		}
 
 		TargetMain->SetActive();

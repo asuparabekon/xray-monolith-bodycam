@@ -10,7 +10,7 @@ void ReadPipRuntime(Bodycam::PipRuntimeState& runtime)
 {
 	auto& viewport = Device.m_SecondViewport;
 	runtime.true_pip_enabled = Device.true_pip_on;
-	runtime.geometry_ready = viewport.svp_lens_r > EPS || viewport.dbg_eyepiece_r > EPS;
+	runtime.geometry_ready = viewport.isCamReady;
 	runtime.viewport_active = viewport.IsSVPActive();
 	runtime.world_camera_effects = !!g_svp_world_cam_fx;
 	runtime.main_fov = g_fov;

@@ -1463,7 +1463,7 @@ void CInifile::DLTX_print(LPCSTR sec, LPCSTR line)
 	}
 	
 }
-LPCSTR CInifile::DLTX_getFilenameOfLine(LPCSTR sec, LPCSTR line)
+LPCSTR CInifile::DLTX_getFilenameOfLine(LPCSTR sec, LPCSTR line) const
 {
 	if (!sec) {
 		Msg("![DLTX_getFilenameOfLine] no section provided");

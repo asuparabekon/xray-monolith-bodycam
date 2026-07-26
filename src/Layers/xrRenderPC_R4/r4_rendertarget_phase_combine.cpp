@@ -151,7 +151,8 @@ void CRenderTarget::phase_combine()
 		extern Fvector4 ps_dev_param_8;
 		const bool svp_nvg_sky = Device.true_pip_on && Device.m_SecondViewport.m_render_pass_is_svp
 			&& ps_dev_param_8.x >= 1.f && RImplementation.TargetMain && this != RImplementation.TargetMain;
-		if (svp_nvg_sky) { if (ps_r__svp_stats) ++svp_stats_nvg_sky; svp_ledger_nvg_sky = 1; } // overlay + ledger proof the nvg sky lum remap fired
+		if (svp_nvg_sky && ps_r__svp_stats)
+			++svp_stats_nvg_sky;
 		if (svp_nvg_sky)
 			t_LUM_dest->surface_set(RImplementation.TargetMain->rt_LUM_pool[0]->pSurface);
 
@@ -576,9 +577,9 @@ void CRenderTarget::phase_combine()
 		phase_3DSSReticle(); // Redotix99 3D Shader Based Scopes / pip true-PiP lens composite
 	}
 
-	// Compute blur textures, pip run it for the SVP too so the scope lens is anti-aliased like the main
-	// view (its buffers are per-target), off keeps the stock !IsSVPFrame skip
-	if ((Device.true_pip_on && Device.m_SecondViewport.m_render_pass_is_svp && !svp_dlss_skip_aa) || !Device.m_SecondViewport.IsSVPFrame())
+	// Compute blur textures for the SVP post effects without changing the DLSS input
+	// Off keeps the stock IsSVPFrame skip
+	if ((Device.true_pip_on && Device.m_SecondViewport.m_render_pass_is_svp) || !Device.m_SecondViewport.IsSVPFrame())
 		phase_blur();
 
 	//Compute bloom (new)
@@ -607,7 +608,7 @@ void CRenderTarget::phase_combine()
 	if (!(svp_pass_now && ps_r__svp_skip_lut))
 		phase_lut();
 
-	// pip the eye-side overlays (gasmask, nvg, heatvision) apply once on the main pass
+	// pip the eye side overlays apply once on the main pass
 	if(ps_r2_mask_control.x > 0 && !svp_pass_now)
 	{
 		phase_gasmask_dudv();
@@ -617,80 +618,15 @@ void CRenderTarget::phase_combine()
 		}
 	}
 
-	if(ps_r2_nightvision > 0 && !svp_pass_now)
+	if (ps_r2_nightvision > 0)
 	{
-		// pip the offset nvg tube mask both draws the tube and clips the composited scope disc, a
-		// lens stencil stamp splits the post so the disc greens centered while the tube stays put
-		extern Fvector4 ps_dev_param_8;
-		const float nv_fr = ps_dev_param_8.x - floorf(ps_dev_param_8.x);
-		const bool nv_offset_tube = _abs(nv_fr - 0.11f) < 0.005f || _abs(nv_fr - 0.12f) < 0.005f;
-		const bool nv_split = Device.true_pip_on && Device.m_SecondViewport.IsSVPActive()
-			&& nv_offset_tube && !RImplementation.o.dx10_msaa
-			&& this == RImplementation.TargetMain
-			&& !RImplementation.GMBase.RGraph.mapScopeHUDSorted.empty();
-		if (!nv_split)
-			phase_nightvision();
-		else
+		if (svp_pass_now)
 		{
-			PIX_EVENT(svp_nvg_tube_split);
-			if (ps_r__svp_stats) ++svp_stats_nvg_split; // overlay proof the tube split fired
-			EnsureScopeShaders();
-			const u32 nv_c = color_rgba(0, 0, 0, 255);
-			const float nv_w = float(Device.dwWidth);
-			const float nv_h = float(Device.dwHeight);
-
-			// the stock dest plus the base depth-stencil, one surface carries the stamp and both passes
-			u_setrt(rt_Color, 0, 0, HW.pBaseZB);
-			RCache.set_CullMode(CULL_NONE);
-
-			auto nv_quad = [&]()
-			{
-				FVF::TL* pv = (FVF::TL*)RCache.Vertex.Lock(4, g_combine->vb_stride, Offset);
-				pv->set(0, nv_h, EPS_S, 1.f, nv_c, 0.f, 1.f); pv++;
-				pv->set(0, 0, EPS_S, 1.f, nv_c, 0.f, 0.f); pv++;
-				pv->set(nv_w, nv_h, EPS_S, 1.f, nv_c, 1.f, 1.f); pv++;
-				pv->set(nv_w, 0, EPS_S, 1.f, nv_c, 1.f, 0.f); pv++;
-				RCache.Vertex.Unlock(4, g_combine->vb_stride);
-				RCache.set_Geometry(g_combine);
-				RCache.Render(D3DPT_TRIANGLELIST, Offset, 0, 4, 0, 2);
-			};
-
-			// zero bit 0x80 screen wide first, the light maskers replace whole stencil bytes so
-			// stale marker garbage can sit in it
-			RCache.set_Element(s_nightvision->E[0]);
-			RCache.set_ColorWriteEnable(0);
-			RCache.set_Stencil(TRUE, D3DCMP_ALWAYS, 0x00, 0xff, 0x80,
-				D3DSTENCILOP_KEEP, D3DSTENCILOP_REPLACE, D3DSTENCILOP_KEEP);
-			nv_quad();
-
-			// stamp bit 0x80 over the lens footprint, the same draw the distort guard ships
-			draw_scope(s_svp_distort_stamp, []()
-			{
-				RCache.set_c("scope_phase", 0);
-				RCache.set_ColorWriteEnable(0);
-				RCache.set_Stencil(TRUE, D3DCMP_ALWAYS, 0x80, 0xff, 0x80,
-					D3DSTENCILOP_KEEP, D3DSTENCILOP_REPLACE, D3DSTENCILOP_KEEP);
-			});
-			RCache.set_ColorWriteEnable();
-
-			// disc pass, the flag routes the binder remap so the tube reads centered here only
-			Device.m_SecondViewport.svp_nvg_disc_pass = true;
-			RCache.set_Constants((R_constant_table*)nullptr); // the ctable cache would skip the loaders
-			RCache.set_Element(s_nightvision->E[ps_r2_nightvision]);
-			RCache.set_Stencil(TRUE, D3DCMP_EQUAL, 0x80, 0x80, 0x00);
-			nv_quad();
-
-			// periphery pass, honest offset value
-			Device.m_SecondViewport.svp_nvg_disc_pass = false;
-			RCache.set_Constants((R_constant_table*)nullptr);
-			RCache.set_Element(s_nightvision->E[ps_r2_nightvision]);
-			RCache.set_Stencil(TRUE, D3DCMP_EQUAL, 0x00, 0x80, 0x00);
-			nv_quad();
-
-			RCache.set_Stencil(FALSE);
-			// the stock terminal copy back into the shared color chain
-			HW.pContext->CopyResource(rt_Generic_0->pSurface, rt_Color->pSurface);
+			if (!svp_nvg_objective_pass())
+				phase_nightvision();
 		}
+		else if (!svp_nvg_pass())
+			phase_nightvision();
 	}
 
 	//--DSR-- HeatVision_start

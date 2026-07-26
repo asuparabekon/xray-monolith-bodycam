@@ -5154,6 +5154,9 @@
     <ClInclude Include="console_registrator.h">
       <Filter>AI\AScript\ScriptClasses\Console</Filter>
     </ClInclude>
+    <ClInclude Include="svp_optic_config_script.h">
+      <Filter>AI\AScript\ScriptClasses\Console</Filter>
+    </ClInclude>
     <ClInclude Include="base_client_classes.h">
       <Filter>AI\AScript\ScriptClasses\BaseClientClasses</Filter>
     </ClInclude>
@@ -8781,6 +8784,9 @@
       <Filter>AI\AScript\ScriptClasses\ScriptFS</Filter>
     </ClCompile>
     <ClCompile Include="console_registrator_script.cpp">
+      <Filter>AI\AScript\ScriptClasses\Console</Filter>
+    </ClCompile>
+    <ClCompile Include="svp_optic_config_script.cpp">
       <Filter>AI\AScript\ScriptClasses\Console</Filter>
     </ClCompile>
     <ClCompile Include="base_client_classes_script.cpp">

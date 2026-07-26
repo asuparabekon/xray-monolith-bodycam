@@ -19,7 +19,7 @@ extern u32 svp_stats_nvg_split;
 extern u32 svp_stats_lod_scale;
 extern u32 svp_stats_hud_cull_reject;
 extern u32 svp_stats_grass_cull_reject;
-extern u32 svp_stats_reflex_proxy;
+extern u32 svp_stats_reflex_capture;
 extern u32 svp_stats_distort_guard;
 extern u32 svp_stats_nvg_sky;
 extern u32 svp_stats_disc_latch;
@@ -55,7 +55,7 @@ namespace
 		u32 main_lights, main_shadowed, svp_blends, sun_passes, ssa_culled;
 		u32 cull_reject, cull_reject_ident, lights_mirrored, lights_skipped;
 		u32 taa_stamp, nvg_split;
-		u32 lod_scale, hud_cull_reject, grass_cull_reject, reflex_proxy;
+		u32 lod_scale, hud_cull_reject, grass_cull_reject, reflex_capture;
 		u32 distort_guard, nvg_sky, disc_latch, fwd_keep;
 		u32 svp_w, svp_h;
 		u32 svp_epoch, optic_resolve;
@@ -227,7 +227,7 @@ namespace svp_stats
 		svp_stats_lod_scale = 0;
 		svp_stats_hud_cull_reject = 0;
 		svp_stats_grass_cull_reject = 0;
-		svp_stats_reflex_proxy = 0;
+		svp_stats_reflex_capture = 0;
 		svp_stats_distort_guard = 0;
 		svp_stats_nvg_sky = 0;
 		svp_stats_disc_latch = 0;
@@ -319,7 +319,7 @@ namespace svp_stats
 		d.lod_scale = svp_stats_lod_scale;
 		d.hud_cull_reject = svp_stats_hud_cull_reject;
 		d.grass_cull_reject = svp_stats_grass_cull_reject;
-		d.reflex_proxy = svp_stats_reflex_proxy;
+		d.reflex_capture = svp_stats_reflex_capture;
 		d.distort_guard = svp_stats_distort_guard;
 		d.nvg_sky = svp_stats_nvg_sky;
 		d.disc_latch = svp_stats_disc_latch;
@@ -419,7 +419,7 @@ namespace svp_stats
 		if (full)
 		{
 			xr_sprintf(foot[nf++], "stamp taa %u nvg %u distort %u nvgsky %u", d.taa_stamp, d.nvg_split, d.distort_guard, d.nvg_sky);
-			xr_sprintf(foot[nf++], "fire lod %u reflex %u disc %u fwd %u", d.lod_scale, d.reflex_proxy, d.disc_latch, d.fwd_keep);
+			xr_sprintf(foot[nf++], "fire lod %u reflex %u disc %u fwd %u", d.lod_scale, d.reflex_capture, d.disc_latch, d.fwd_keep);
 		}
 
 		const u32 lines = 1u + (full ? 4u : 0u) + 7u + nf; // header + section gpu + fixed columns + footer

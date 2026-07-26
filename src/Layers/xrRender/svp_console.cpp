@@ -5,8 +5,10 @@
 
 #include	"../../xrEngine/xr_ioconsole.h"
 #include	"../../xrEngine/xr_ioc_cmd.h"
+#include	"../../xrEngine/device.h"
+#include	"../../xrEngine/svp_console_policy.h"
 
-int scope_svp_enabled = 0; // true PiP second viewport scope (0 off, 1 eyepiece, 2 objective)
+int scope_svp_enabled = 0; // true PiP scope mode with zero off and positive inputs objective
 float ps_r__svp_render_scale = 1.0f; // SVP render scale, 1.0 keeps the dwHeight/2 per side
 float ps_r__svp_supersample = 1.0f; // SVP supersample: render the SVP square larger so the eyepiece downsamples it (SSAA), 1.0 = off, 2.0 = 4x SVP pixels
 int ps_r__svp_diag = 0; // SVP perf diagnostics: throttled log of [SVP-RES] over-render ratio + [SVP-ALLOC] target size while scoped, 0 = off
@@ -18,12 +20,12 @@ u32 svp_stats_cull_reject = 0; // svp off-cone frustum-reject tally the overlay 
 u32 svp_stats_cull_reject_ident = 0; // svp identity-matrix sorted world statics the cone rejects, incremented in svp_cull_reject
 u32 svp_stats_lights_mirrored = 0; // svp lights the cone cull mirrors into the scope, incremented in lights_render
 u32 svp_stats_lights_skipped = 0; // svp lights the cone cull drops, incremented in lights_render
-u32 svp_stats_taa_stamp = 0; // svp taa sovereignty stamp fires the overlay reads, incremented in phase_ssfx_taa
+u32 svp_stats_taa_stamp = 0; // successful raw taa skip mask draws read by the overlay
 u32 svp_stats_nvg_split = 0; // svp nvg tube split fires the overlay reads, incremented in phase_combine
 u32 svp_stats_lod_scale = 0; // svp lod scale armed frames the overlay reads, incremented in svp_set_lod_scale
 u32 svp_stats_hud_cull_reject = 0; // svp hud drain cone rejects the overlay reads, incremented in svp_hud_latch
 u32 svp_stats_grass_cull_reject = 0; // svp grass cone rejects the overlay reads, incremented in the detail manager
-u32 svp_stats_reflex_proxy = 0; // svp reflex proxy draws the overlay reads, incremented in draw_reflex_proxy
+u32 svp_stats_reflex_capture = 0; // svp hybrid reflex draws the overlay reads
 u32 svp_stats_distort_guard = 0; // svp distort guard stamps the overlay reads, incremented in phase_combine
 u32 svp_stats_nvg_sky = 0; // svp nvg sky lum remaps the overlay reads, incremented in phase_combine
 u32 svp_stats_disc_latch = 0; // svp adaptive-res disc latch moves the overlay reads, incremented in phase_3DSSReticle
@@ -37,11 +39,8 @@ u32 svp_ledger_cull_reject_ident = 0;
 u32 svp_ledger_lights_mirrored = 0;
 u32 svp_ledger_lights_skipped = 0;
 u32 svp_ledger_lod_scale = 0;
-u32 svp_ledger_hud_cull_reject = 0;
 u32 svp_ledger_grass_cull_reject = 0;
-u32 svp_ledger_reflex_proxy = 0;
 u32 svp_ledger_distort_guard = 0;
-u32 svp_ledger_nvg_sky = 0;
 u32 svp_ledger_disc_latch = 0;
 u32 svp_ledger_fwd_keep = 0;
 int ps_r__3db_debug = 0; // 3db ballistics overlay, 1 = bone markers + fire axis + crosshair ray + sight line + mrad log, 2 = adds the zeroed ray, 3 = adds fading shot tracers
@@ -58,17 +57,18 @@ int ps_r__svp_focal_derive = 1;      // svpscope 2 focal anchors derive from eye
 int ps_r__svp_glare_model = 1;       // veiling glare falloff: 1 = Stiles-Holladay 1/theta^2 vs the scope's half fov, 0 = legacy pow6 cone
 int ps_r__svp_photo_model = 1;       // eye photometrics: 1 = Moon-Spencer pupil + squared relative brightness, 0 = legacy linear models
 int ps_r__svp_adaptive_grow = 0;     // 1 sizes the SVP up to the disc past the half-height base, costs up to 4x the pixels on large oculars (0 = shrink-only, stock cost)
-int ps_r__svp_drain_anchor = 1;      // the drain clip-on window widens to the authored front plane (0 = the fixed 1.4-2.6 window)
-int ps_r__svp_settle_derive = 1;     // eyebox settle + recoil windows derive from the weapon's authored timing (0 = flat 400/250/1000ms)
-int ps_r__svp_ratio_derive = 1;      // ratio latch band derives from the measured noise, never looser than the fixed band (0 = fixed 25%/2%)
-int ps_r__svp_lens_reject = 1;       // while aimed, reject an eyepiece pose that jumps far (a stale or exo-arm pose) and hold the last good one (0 = take every pose)
-int ps_r__svp_recoil_hold = 1;       // the scope optics derivation (fov reference + fit band) holds through the post-shot window (0 = live)
+// Retired commands remain registered so old user configs load cleanly
+static int s_svp_compat_drain_anchor = 1;
+static int s_svp_compat_settle_derive = 1;
+static int s_svp_compat_ratio_derive = 1;
+static int s_svp_compat_lens_reject = 0;
+static int s_svp_compat_recoil_hold = 1;
 int ps_r__svp_roll_stabilize = 0; // svp level the scope world on lean/cant (0 = realistic image tilts with the cant, default; 1 = leveled)
 int ps_r__svp_clean_optics = 1; // svp strip the 3DSS fake cosmetics (parallax shadow, chromatism, nvg blur, fisheye) for a clean scope (1 = stripped, default; 0 = full 3DSS look)
 int ps_r__svp_distort_guard = 1; // svp stamp the distort mask neutral over the composited lens so the combine warp is identity there (0 = let the lens warp with the main view)
 int ps_r__svp_jitterfix = 1; // svp lens edge jitter pre-pass, likely superseded by the sentinel jitter, 0 skips it for the a/b
 int ps_r__svp_taa_mask = 1; // svp stamp the taa mask over the composited lens so the main resolve keeps the svp viewport taa there (0 = let the main taa re-resolve the lens)
-int ps_r__svp_hud_fov_match = 2; // svp barrel mapping: 2 magnifies with the wheel, 1 fixed 1:1 window, 0 legacy
+static int s_svp_compat_hud_fov_match = 2;
 int ps_r__svp_bloom = 1; // svp bloom on the scope pass so magnified bright sources flare (0 = off)
 int ps_r__svp_local_exposure = 1; // svp scope-local eye adaptation, the image grades by the scope's own measured exposure (0 = main exposure)
 float ps_r__svp_exposure_bias = 0.0f; // svp local-exposure bias in stops
@@ -81,12 +81,16 @@ float ps_r__svp_near_blur = 1.0f; // svp near-field defocus strength on the scop
 int ps_r__svp_nearblur_scatter = 0; // svp near-blur composite, 0 = gather default look, 1 = scatter accumulator
 float ps_r__svp_focus_m = 100.0f; // svp parallax focus distance in meters, objects off this plane defocus by the thin lens law
 int ps_r__svp_authored_optics = 1; // svp use the authored per-scope scope_objective_lens_offset for the front plane + defocus aperture (0 = measured geometry only)
-int ps_r__svp_measured_optics = 0; // svp fill the objective offset + mm from mesh detection when authored ltx is absent (0 = authored/live only, byte-identical)
+int ps_r__svp_measured_optics = 1; // svp fill the objective offset + mm from mesh detection when authored ltx is absent
 float ps_r__svp_eyebox = 1.0f; // svp eyebox strength, console unregistered, 1.0 keeps the anchor bound publish alive
-int ps_r__svp_reflex_capture = 0; // svp reflex/holo dot path, 0 = legacy 1x main-view overlay, 1 = collimated proxy inside the magnifier viewport (default 0 until in-game confirms the proxy)
+int ps_r__svp_reflex_capture = 1; // svp hybrid reflex through the objective camera, 0 keeps the 1x fallback
 float ps_s3ds_objective_mm = 0.f; // per-scope objective clear aperture mm from spec sheets, pushed by zzz_extra_scope_features (0 = mesh-relative fallback)
 float ps_s3ds_middle_grey = 0.f; // per-scope SVP tonemap middle-grey override, pushed by zzz_extra_scope_features (0 = inherit main)
 float ps_s3ds_adapt_speed = 0.f; // per-scope SVP tonemap adaptation speed override (0 = inherit main)
+int ps_r__svp_chroma = 1; // svp keep the authored per-scope chromatic aberration on glass under true PiP, scaled by zoom (0 = stripped with clean optics)
+float ps_r__svp_reticle_washout = 0.0f; // svp illuminated reticle wash-out vs a bright background, glow only (0 = off)
+float ps_r__svp_field_curve = 1.0f; // svp field curvature edge softness, outer field blurs like a real non-flat-field scope (0 = flat)
+int ps_r__svp_field_stop = 1; // svp ocular field stop rim vignette from the capped pupil penumbra (0 = off)
 int ps_r__svp_aperture = 1; // stateless physical exit-pupil transmission for true PiP
 float ps_s3ds_tunneling_parallax = 0.035f; // maximum inner-tube shift in lens UV
 float ps_s3ds_tunneling_min = 0.04f; // tube visibility at the optic's minimum magnification
@@ -98,6 +102,7 @@ float ps_s3ds_eye_relief_low_mm = 80.0f;
 float ps_s3ds_eye_relief_high_mm = 80.0f;
 float ps_s3ds_exit_pupil_low_mm = 0.0f; // zero derives the endpoint from objective diameter
 float ps_s3ds_exit_pupil_high_mm = 0.0f;
+float ps_s3ds_pupil_parity = -1.0f; // signed exit to entrance pupil mapping
 float ps_s3ds_pupil_field_low = 0.55f;
 float ps_s3ds_pupil_field_high = 0.55f;
 float ps_s3ds_transmission = 1.0f;
@@ -114,14 +119,11 @@ float ps_svp_tunnel_scale = 1.f;
 float ps_svp_tunnel_offset = 0.f;
 float ps_svp_dim_scale = 1.f;
 float ps_svp_dim_offset = 0.f;
-int ps_r__svp_chroma = 1; // svp keep the authored per-scope chromatic aberration on glass under true PiP, scaled by zoom (0 = stripped with clean optics)
-float ps_r__svp_reticle_washout = 0.0f; // svp illuminated reticle wash-out vs a bright background, glow only (0 = off)
-float ps_r__svp_field_curve = 1.0f; // svp field curvature edge softness, outer field blurs like a real non-flat-field scope (0 = flat)
 int ps_r__svp_acog_fiber = 0; // svp ACOG fiber reticle brightness source, 1 = sun visibility (fiber gathers sunlight), 0 = scene luminance
 float ps_r__svp_veiling_glare = 0.0f; // svp veiling glare strength, off-axis sun scatter washes the image near the sun (0 = off)
 float ps_r__svp_rain_optic = 1.0f; // svp rain droplets on the objective glass, scaled by rain density (0 = off)
 float ps_r__svp_rain_debug = 0.0f; // svp forces the scope rain regardless of weather, the value stands in for rain density (0 = live weather)
-int ps_r__svp_uv_debug = 0; // svp debug: paint the scope by the sample-coord V (green top red bottom) to spot a flipped lens UV
+int ps_r__svp_uv_debug = 0; // svp sample coordinate display 0 off 1 V 2 U
 int ps_r__svp_autoflip = 1; // svp auto-correct a mesh-inverted lens (world upside down) by detecting the flipped sample-coord V (1 = on)
 int ps_r__svp_autoflip_reticle = 1; // svp auto-correct a mesh-inverted reticle to match the auto-flipped world (1 = on)
 float ps_r__svp_coating = 0.0f; // svp lens coating, typical multi-coated glass transmission loss + faint warm tint (0 = off, 1 = physical)
@@ -132,9 +134,13 @@ float ps_r__svp_sharpen_falloff = 0.0f; // svp sharpen radial falloff toward the
 float ps_r__svp_sharpen_inner = 0.0f; // svp sharpen inner crisp-zone radius before the falloff starts (0 = from center)
 float ps_r__svp_nvg_bleach = 0.0f; // svp NVG highlight bleach roll-off, replaces the hard clamp so bright sources compress not clip (0 = off, stock)
 float ps_r__svp_nvg_sensitivity = 1.0f; // svp NVG bleach onset sensitivity, higher rolls off dimmer sources
-int ps_r__svp_hud_full = 2; // svpscope 1 body skip only, mode 2 clips at the pupil camera near plane instead renders (default), 1 = full barrel from the eye + near-blur, 0 = objective clip with the body rendered
-int ps_r__svp_near_pupil = 0; // svp mode 2 push the scope near clip to the pupil front plane so behind-pupil barrel falls behind it (0 = main-view near plane)
-int ps_r__svp_drain_clip = 0; // svp clip the drained barrel wholly behind the authored objective plane, w2 near-blur dissolves the surviving sliver (0 = drain the whole barrel)
+int ps_r__svp_nvg_objective = 1; // svp keeps the NVG sensor response but removes the eyepiece mask inside the objective view
+static int s_svp_compat_hud_full = 2;
+int ps_r__svp_weapon_continuity = 1; // svp same frame weapon pose and entrance pupil camera
+static int s_svp_compat_ray_transfer = 2;
+int ps_r__svp_optic_body_suppress = 1; // svp omit the housing that contains the objective plane
+static int s_svp_compat_near_pupil = 0;
+static int s_svp_compat_drain_clip = 0;
 int ps_r__svp_cull = 1; // svp cull the scope geometry to the scope frustum, the SVP re-submits the whole main-frustum world otherwise (1 = on)
 int ps_r__svp_skip_motionblur = 0; // svp skip motion blur on the scope pass, magnified blur is an artifact and a small cost (0 = keep)
 int ps_r__svp_skip_hud_distort = 1; // svp skip hud-layer distortion on the scope pass, the muzzle heat billboard sits on the entrance pupil and warps the image (1 = skip)
@@ -152,13 +158,47 @@ int ps_r__svp_light_cull = 1; // svp cone-cull the mirrored light blends, skip a
 int ps_r__svp_corner_mask = 1; // svp stencil the dead corners outside the eyepiece disc so the lighting + combine passes skip them (1 = on)
 int scope_debug = 0;
 
+class CCC_SvpScopeMode final : public CCC_Integer
+{
+public:
+	CCC_SvpScopeMode(LPCSTR name, int* value, int minimum, int maximum)
+		: CCC_Integer(name, value, minimum, maximum)
+	{
+	}
+
+	void Execute(LPCSTR args) override
+	{
+		const int requested = atoi(args);
+		if (requested < min || requested > max)
+		{
+			InvalidSyntax();
+			return;
+		}
+
+		const int canonical = requested ? 2 : 0;
+		const int previous = *value;
+		if (canonical == previous)
+		{
+			if (requested != canonical)
+				Msg("[SVP-CONFIG] requested=%d mode=%d state=unchanged", requested, canonical);
+			return;
+		}
+
+		*value = canonical;
+		Device.m_SecondViewport.SetOpticScopeMode(static_cast<u8>(canonical));
+		Msg("[SVP-CONFIG] requested=%d mode=%d state=invalidated", requested, canonical);
+	}
+};
+
 void svp_console_init()
 {
 #if defined(USE_DX11)
-	// true PiP scope cvars are DX11-only, do not register them on the DX10/9/8 renderers (the backing
-	// vars keep their 0 defaults so the shared code still reads them as off)
-	CMD4(CCC_Integer, "r__svpscope", &scope_svp_enabled, 0, 2);
-	CMD4(CCC_Float, "r__svp_render_scale", &ps_r__svp_render_scale, 0.5f, 1.0f); // takes effect on vid_restart, floor matches the runtime clamp
+	// Keep the shared default off for other renderers
+	// DX11 starts in objective true PiP unless user config disables it
+	scope_svp_enabled = 2;
+	Device.m_SecondViewport.SetOpticScopeMode(2);
+	CMD4(CCC_SvpScopeMode, "r__svpscope", &scope_svp_enabled, 0, 2);
+	CMD4(CCC_SvpInternalFloat, "r__svp_render_scale", &ps_r__svp_render_scale, 0.5f, 1.0f);
 	CMD4(CCC_Float, "r__svp_supersample", &ps_r__svp_supersample, 1.0f, 2.0f); // SSAA the magnified scope image, 1.0 = off (4x SVP cost at 2.0)
 	CMD4(CCC_Integer, "r__svp_diag", &ps_r__svp_diag, 0, 1); // SVP perf diagnostics log (0 = off)
 	CMD4(CCC_Integer, "r__svp_cop_diag", &ps_r__svp_cop_diag, 0, 2); // svp optics log (1 = throttled, 2 = + per-frame [SVP-AIM])
@@ -168,97 +208,103 @@ void svp_console_init()
 	CMD4(CCC_Float, "r__svp_adaptive_res", &ps_r__svp_adaptive_res, 0.0f, 2.0f); // size SVP render to the eyepiece disc * margin (0 = off, 1.2 recommended)
 	CMD4(CCC_Float, "r__svp_lod", &ps_r__svp_lod, 0.0f, 1.0f); // SVP LOD reduction strength (0 = off)
 	CMD4(CCC_Float, "r__svp_cull_ssa", &ps_r__svp_cull_ssa, 0.0f, 8.0f); // SVP small-object cull strength (0 = off)
-	CMD4(CCC_Integer, "r__svp_dlss", &ps_r__svp_dlss, 0, 1); // SVP DLSS-SR scaffolding gate, 0 = stock
-	CMD4(CCC_Float, "r__svp_obj_dist", &ps_r__svp_obj_dist, 0.0f, 3.0f); // svpscope 2 objective: scale on the auto geomscan front distance
-	CMD4(CCC_Float, "r__svp_obj_size", &ps_r__svp_obj_size, 0.1f, 6.0f); // svpscope 2 geometric objective: objective radius (eyepiece radii)
-	CMD4(CCC_Integer, "r__svp_focal_derive", &ps_r__svp_focal_derive, 0, 1); // svpscope 2 focal anchors from eye relief + tube length (0 = 0.4/0.6 split)
-	CMD4(CCC_Integer, "r__svp_glare_model", &ps_r__svp_glare_model, 0, 1); // veiling glare falloff model (0 = legacy pow6)
-	CMD4(CCC_Integer, "r__svp_photo_model", &ps_r__svp_photo_model, 0, 1); // eye photometric models (0 = legacy linear)
+	CMD4(CCC_SvpInternalInteger, "r__svp_dlss", &ps_r__svp_dlss, 0, 1);
+	CMD4(CCC_SvpInternalFloat, "r__svp_obj_dist", &ps_r__svp_obj_dist, 0.0f, 3.0f);
+	CMD4(CCC_SvpInternalFloat, "r__svp_obj_size", &ps_r__svp_obj_size, 0.1f, 6.0f);
+	CMD4(CCC_SvpFixedInteger, "r__svp_focal_derive", &ps_r__svp_focal_derive, 0, 1);
+	CMD4(CCC_SvpFixedInteger, "r__svp_glare_model", &ps_r__svp_glare_model, 0, 1);
+	CMD4(CCC_SvpFixedInteger, "r__svp_photo_model", &ps_r__svp_photo_model, 0, 1);
 	CMD4(CCC_Integer, "r__svp_adaptive_grow", &ps_r__svp_adaptive_grow, 0, 1); // adaptive res grows to the disc (0 = shrink-only)
-	CMD4(CCC_Integer, "r__svp_drain_anchor", &ps_r__svp_drain_anchor, 0, 1); // drain clip-on window anchors on the authored front (0 = fixed window)
-	CMD4(CCC_Integer, "r__svp_settle_derive", &ps_r__svp_settle_derive, 0, 1); // eyebox windows from authored weapon timing (0 = flat ms)
-	CMD4(CCC_Integer, "r__svp_ratio_derive", &ps_r__svp_ratio_derive, 0, 1); // ratio latch band from measured noise (0 = fixed band)
-	CMD4(CCC_Integer, "r__svp_lens_reject", &ps_r__svp_lens_reject, 0, 1); // while aimed, reject a far-jumping eyepiece pose and hold the last good (0 = take every pose)
-	CMD4(CCC_Integer, "r__svp_recoil_hold", &ps_r__svp_recoil_hold, 0, 1); // scope optics derivation holds through the post-shot window (0 = live)
+	CMD4(CCC_SvpFixedInteger, "r__svp_drain_anchor", &s_svp_compat_drain_anchor, 0, 1);
+	CMD4(CCC_SvpFixedInteger, "r__svp_settle_derive", &s_svp_compat_settle_derive, 0, 1);
+	CMD4(CCC_SvpFixedInteger, "r__svp_ratio_derive", &s_svp_compat_ratio_derive, 0, 1);
+	CMD4(CCC_SvpFixedInteger, "r__svp_lens_reject", &s_svp_compat_lens_reject, 0, 1);
+	CMD4(CCC_SvpFixedInteger, "r__svp_recoil_hold", &s_svp_compat_recoil_hold, 0, 1);
 	CMD4(CCC_Integer, "r__svp_roll_stabilize", &ps_r__svp_roll_stabilize, 0, 1); // svp keep the scope world level on lean/cant (0 = realistic image-tilts-with-cant)
-	CMD4(CCC_Integer, "r__svp_clean_optics", &ps_r__svp_clean_optics, 0, 1); // strip 3DSS fake cosmetics (parallax shadow/chromatism/nvg blur/fisheye), 0 = full look
-	CMD4(CCC_Integer, "r__svp_distort_guard", &ps_r__svp_distort_guard, 0, 1); // stamp distort-mask neutral over the composited lens (0 = lens warps with main view)
-	CMD4(CCC_Integer, "r__svp_jitterfix", &ps_r__svp_jitterfix, 0, 1); // svp lens-edge jitter pre-pass (0 skips, superseded-by-sentinel a/b)
-	CMD4(CCC_Integer, "r__svp_taa_mask", &ps_r__svp_taa_mask, 0, 1); // stamp the taa mask over the composited lens (0 = let the main taa re-resolve it)
-	CMD4(CCC_Integer, "r__svp_hud_fov_match", &ps_r__svp_hud_fov_match, 0, 2); // svp barrel mapping: 2 magnified, 1 window, 0 legacy
+	CMD4(CCC_SvpFixedInteger, "r__svp_clean_optics", &ps_r__svp_clean_optics, 0, 1);
+	CMD4(CCC_SvpFixedInteger, "r__svp_distort_guard", &ps_r__svp_distort_guard, 0, 1);
+	CMD4(CCC_SvpInternalInteger, "r__svp_jitterfix", &ps_r__svp_jitterfix, 0, 1);
+	CMD4(CCC_SvpFixedInteger, "r__svp_taa_mask", &ps_r__svp_taa_mask, 0, 1);
+	CMD4(CCC_SvpFixedInteger, "r__svp_hud_fov_match", &s_svp_compat_hud_fov_match, 0, 2);
 	CMD4(CCC_Integer, "r__svp_bloom", &ps_r__svp_bloom, 0, 1); // svp bloom on the scope pass
 	CMD4(CCC_Integer, "r__svp_local_exposure", &ps_r__svp_local_exposure, 0, 1); // svp scope-local eye adaptation
-	CMD4(CCC_Float, "r__svp_exposure_bias", &ps_r__svp_exposure_bias, -3.0f, 3.0f); // svp local-exposure bias in stops
+	CMD4(CCC_SvpInternalFloat, "r__svp_exposure_bias", &ps_r__svp_exposure_bias, -3.0f, 3.0f);
 	CMD4(CCC_Integer, "r__svp_light_capture", &ps_r__svp_light_capture, 0, 1); // svp scope-cone light capture
-	CMD4(CCC_Integer, "r__svp_npc_detail", &ps_r__svp_npc_detail, 0, 1); // svp keep subpixel dynamic parts for the scope (0 = stock)
+	CMD4(CCC_SvpFixedInteger, "r__svp_npc_detail", &ps_r__svp_npc_detail, 0, 1);
 	CMD4(CCC_Integer, "r__svp_thermal_sim", &ps_r__svp_thermal_sim, 0, 1); // svp thermal digital-sensor sim (0 = clean)
 	CMD4(CCC_Float, "r__svp_twilight", &ps_r__svp_twilight, 0.0f, 1.0f); // svp exit-pupil twilight dimming strength (0 = off)
-	CMD4(CCC_Float, "r__svp_parallax", &ps_r__svp_parallax, 0.0f, 10.0f); // svp true-scale reticle parallax, 1 = physical sub-pixel (0 = pinned)
+	CMD4(CCC_SvpInternalFloat, "r__svp_parallax", &ps_r__svp_parallax, 0.0f, 10.0f);
 	CMD4(CCC_Float, "r__svp_near_blur", &ps_r__svp_near_blur, 0.0f, 3.0f); // svp near-field defocus strength (0 = off)
-	CMD4(CCC_Integer, "r__svp_nearblur_scatter", &ps_r__svp_nearblur_scatter, 0, 1); // svp near-blur composite (0 = gather default, 1 = scatter)
-	CMD4(CCC_Float, "r__svp_focus_m", &ps_r__svp_focus_m, 10.0f, 1000.0f); // svp parallax focus distance m (fixed-parallax scopes sit at 100)
-	CMD4(CCC_Integer, "r__svp_authored_optics", &ps_r__svp_authored_optics, 0, 1); // svp use authored per-scope objective offset for front plane + aperture (0 = measured only)
-		CMD4(CCC_Integer, "r__svp_measured_optics", &ps_r__svp_measured_optics, 0, 1); // measured lens geometry fills unauthored optics (0 = off, authored/live only)
-	CMD4(CCC_Integer, "r__svp_reflex_capture", &ps_r__svp_reflex_capture, 0, 1); // svp reflex/holo dot path (0 = legacy 1x main-view overlay, 1 = collimated proxy in the magnifier viewport)
-	CMD4(CCC_Float, "s3ds_objective_mm", &ps_s3ds_objective_mm, 0.0f, 200.0f); // per-scope objective clear aperture mm for the true exit pupil
-	CMD4(CCC_Float, "s3ds_middle_grey", &ps_s3ds_middle_grey, 0.0f, 2.0f); // per-scope SVP tonemap middle-grey (0 = inherit main)
-	CMD4(CCC_Float, "s3ds_adapt_speed", &ps_s3ds_adapt_speed, 0.0f, 20.0f); // per-scope SVP tonemap adaptation speed (0 = inherit main)
-	CMD4(CCC_Integer, "r__svp_aperture", &ps_r__svp_aperture, 0, 1); // physical exit-pupil transmission
-	CMD4(CCC_Float, "s3ds_tunneling_parallax", &ps_s3ds_tunneling_parallax, 0.0f, 0.15f);
-	CMD4(CCC_Float, "s3ds_tunneling_min", &ps_s3ds_tunneling_min, 0.0f, 1.0f);
-	CMD4(CCC_Float, "s3ds_tunneling_max", &ps_s3ds_tunneling_max, 0.0f, 1.0f);
-	CMD4(CCC_Float, "s3ds_eye_tracking_speed", &ps_s3ds_eye_tracking_speed, 0.1f, 30.0f);
-	CMD4(CCC_Float, "s3ds_eye_tracking_accel_mm_s2", &ps_s3ds_eye_tracking_accel_mm_s2, 1.0f, 500.0f);
-	CMD4(CCC_Float, "s3ds_eye_tracking_limit_mm", &ps_s3ds_eye_tracking_limit_mm, 0.0f, 20.0f);
-	CMD4(CCC_Float, "s3ds_eye_relief_low_mm", &ps_s3ds_eye_relief_low_mm, 20.0f, 150.0f);
-	CMD4(CCC_Float, "s3ds_eye_relief_high_mm", &ps_s3ds_eye_relief_high_mm, 20.0f, 150.0f);
-	CMD4(CCC_Float, "s3ds_exit_pupil_low_mm", &ps_s3ds_exit_pupil_low_mm, 0.0f, 100.0f);
-	CMD4(CCC_Float, "s3ds_exit_pupil_high_mm", &ps_s3ds_exit_pupil_high_mm, 0.0f, 100.0f);
-	CMD4(CCC_Float, "s3ds_pupil_field_low", &ps_s3ds_pupil_field_low, 0.0f, 6.0f);
-	CMD4(CCC_Float, "s3ds_pupil_field_high", &ps_s3ds_pupil_field_high, 0.0f, 6.0f);
-	CMD4(CCC_Float, "s3ds_transmission", &ps_s3ds_transmission, 0.0f, 1.0f);
-	CMD4(CCC_Float, "s3ds_twilight_strength", &ps_s3ds_twilight_strength, 0.0f, 1.0f);
+	CMD4(CCC_SvpInternalInteger, "r__svp_nearblur_scatter", &ps_r__svp_nearblur_scatter, 0, 1);
+	CMD4(CCC_SvpInternalFloat, "r__svp_focus_m", &ps_r__svp_focus_m, 10.0f, 1000.0f);
+	CMD4(CCC_SvpFixedInteger, "r__svp_authored_optics", &ps_r__svp_authored_optics, 0, 1);
+	CMD4(CCC_SvpFixedInteger, "r__svp_measured_optics", &ps_r__svp_measured_optics, 0, 1);
+	CMD4(CCC_Integer, "r__svp_reflex_capture", &ps_r__svp_reflex_capture, 0, 1); // svp hybrid reflex through the objective camera
+	CMD4(CCC_SvpProfileFloat, "s3ds_objective_mm", &ps_s3ds_objective_mm, 0.0f, 200.0f);
+	CMD4(CCC_SvpProfileFloat, "s3ds_middle_grey", &ps_s3ds_middle_grey, 0.0f, 2.0f);
+	CMD4(CCC_SvpProfileFloat, "s3ds_adapt_speed", &ps_s3ds_adapt_speed, 0.0f, 20.0f);
+	CMD4(CCC_Integer, "r__svp_chroma", &ps_r__svp_chroma, 0, 1); // svp keep authored chromatic aberration on glass, zoom scaled (0 = stripped)
+	CMD4(CCC_SvpInternalFloat, "r__svp_reticle_washout", &ps_r__svp_reticle_washout, 0.0f, 2.0f);
+	CMD4(CCC_SvpInternalFloat, "r__svp_field_curve", &ps_r__svp_field_curve, 0.0f, 3.0f);
+	CMD4(CCC_Integer, "r__svp_field_stop", &ps_r__svp_field_stop, 0, 1); // svp ocular field stop rim vignette (0 = off)
+	CMD4(CCC_SvpFixedInteger, "r__svp_aperture", &ps_r__svp_aperture, 0, 1);
+	CMD4(CCC_SvpProfileFloat, "s3ds_tunneling_parallax", &ps_s3ds_tunneling_parallax, 0.0f, 0.15f);
+	CMD4(CCC_SvpProfileFloat, "s3ds_tunneling_min", &ps_s3ds_tunneling_min, 0.0f, 1.0f);
+	CMD4(CCC_SvpProfileFloat, "s3ds_tunneling_max", &ps_s3ds_tunneling_max, 0.0f, 1.0f);
+	CMD4(CCC_SvpProfileFloat, "s3ds_eye_tracking_speed", &ps_s3ds_eye_tracking_speed, 0.1f, 30.0f);
+	CMD4(CCC_SvpProfileFloat, "s3ds_eye_tracking_accel_mm_s2", &ps_s3ds_eye_tracking_accel_mm_s2, 1.0f, 500.0f);
+	CMD4(CCC_SvpProfileFloat, "s3ds_eye_tracking_limit_mm", &ps_s3ds_eye_tracking_limit_mm, 0.0f, 20.0f);
+	CMD4(CCC_SvpProfileFloat, "s3ds_eye_relief_low_mm", &ps_s3ds_eye_relief_low_mm, 20.0f, 150.0f);
+	CMD4(CCC_SvpProfileFloat, "s3ds_eye_relief_high_mm", &ps_s3ds_eye_relief_high_mm, 20.0f, 150.0f);
+	CMD4(CCC_SvpProfileFloat, "s3ds_exit_pupil_low_mm", &ps_s3ds_exit_pupil_low_mm, 0.0f, 100.0f);
+	CMD4(CCC_SvpProfileFloat, "s3ds_exit_pupil_high_mm", &ps_s3ds_exit_pupil_high_mm, 0.0f, 100.0f);
+	CMD4(CCC_SvpProfileFloat, "s3ds_pupil_parity", &ps_s3ds_pupil_parity, -1.0f, 1.0f);
+	CMD4(CCC_SvpProfileFloat, "s3ds_pupil_field_low", &ps_s3ds_pupil_field_low, 0.0f, 6.0f);
+	CMD4(CCC_SvpProfileFloat, "s3ds_pupil_field_high", &ps_s3ds_pupil_field_high, 0.0f, 6.0f);
+	CMD4(CCC_SvpProfileFloat, "s3ds_transmission", &ps_s3ds_transmission, 0.0f, 1.0f);
+	CMD4(CCC_SvpProfileFloat, "s3ds_twilight_strength", &ps_s3ds_twilight_strength, 0.0f, 1.0f);
 	const Fvector4 curve_min = {0.f, 0.f, 0.f, 0.f};
 	const Fvector4 curve_max = {3.f, 3.f, 3.f, 3.f};
-	CMD4(CCC_Vector4, "r__svp_exit_curve_1_4", &ps_svp_exit_curve_low, curve_min, curve_max);
-	CMD4(CCC_Vector4, "r__svp_exit_curve_6_20", &ps_svp_exit_curve_high, curve_min, curve_max);
-	CMD4(CCC_Vector4, "r__svp_tunnel_curve_1_4", &ps_svp_tunnel_curve_low, curve_min, curve_max);
-	CMD4(CCC_Vector4, "r__svp_tunnel_curve_6_20", &ps_svp_tunnel_curve_high, curve_min, curve_max);
-	CMD4(CCC_Vector4, "r__svp_dim_curve_1_4", &ps_svp_dim_curve_low, curve_min, curve_max);
-	CMD4(CCC_Vector4, "r__svp_dim_curve_6_20", &ps_svp_dim_curve_high, curve_min, curve_max);
-	CMD4(CCC_Float, "r__svp_exit_scale", &ps_svp_exit_scale, 0.f, 3.f);
-	CMD4(CCC_Float, "r__svp_exit_offset", &ps_svp_exit_offset, -1.f, 1.f);
-	CMD4(CCC_Float, "r__svp_tunnel_scale", &ps_svp_tunnel_scale, 0.f, 3.f);
-	CMD4(CCC_Float, "r__svp_tunnel_offset", &ps_svp_tunnel_offset, -1.f, 1.f);
-	CMD4(CCC_Float, "r__svp_dim_scale", &ps_svp_dim_scale, 0.f, 3.f);
-	CMD4(CCC_Float, "r__svp_dim_offset", &ps_svp_dim_offset, -1.f, 1.f);
-	CMD4(CCC_Integer, "r__svp_chroma", &ps_r__svp_chroma, 0, 1); // svp keep authored chromatic aberration on glass, zoom scaled (0 = stripped)
-	CMD4(CCC_Float, "r__svp_reticle_washout", &ps_r__svp_reticle_washout, 0.0f, 2.0f); // svp illuminated reticle wash-out strength (0 = off)
-	CMD4(CCC_Float, "r__svp_field_curve", &ps_r__svp_field_curve, 0.0f, 3.0f); // svp field curvature edge softness (0 = flat field)
-	CMD4(CCC_Integer, "r__svp_acog_fiber", &ps_r__svp_acog_fiber, 0, 1); // svp ACOG fiber brightness source (1 = sun visibility, 0 = scene luminance)
-	CMD4(CCC_Float, "r__svp_veiling_glare", &ps_r__svp_veiling_glare, 0.0f, 3.0f); // svp veiling glare near the sun (0 = off)
+	CMD4(CCC_SvpInternalVector4, "r__svp_exit_curve_1_4", &ps_svp_exit_curve_low, curve_min, curve_max);
+	CMD4(CCC_SvpInternalVector4, "r__svp_exit_curve_6_20", &ps_svp_exit_curve_high, curve_min, curve_max);
+	CMD4(CCC_SvpInternalVector4, "r__svp_tunnel_curve_1_4", &ps_svp_tunnel_curve_low, curve_min, curve_max);
+	CMD4(CCC_SvpInternalVector4, "r__svp_tunnel_curve_6_20", &ps_svp_tunnel_curve_high, curve_min, curve_max);
+	CMD4(CCC_SvpInternalVector4, "r__svp_dim_curve_1_4", &ps_svp_dim_curve_low, curve_min, curve_max);
+	CMD4(CCC_SvpInternalVector4, "r__svp_dim_curve_6_20", &ps_svp_dim_curve_high, curve_min, curve_max);
+	CMD4(CCC_SvpInternalFloat, "r__svp_exit_scale", &ps_svp_exit_scale, 0.f, 3.f);
+	CMD4(CCC_SvpInternalFloat, "r__svp_exit_offset", &ps_svp_exit_offset, -1.f, 1.f);
+	CMD4(CCC_SvpInternalFloat, "r__svp_tunnel_scale", &ps_svp_tunnel_scale, 0.f, 3.f);
+	CMD4(CCC_SvpInternalFloat, "r__svp_tunnel_offset", &ps_svp_tunnel_offset, -1.f, 1.f);
+	CMD4(CCC_SvpInternalFloat, "r__svp_dim_scale", &ps_svp_dim_scale, 0.f, 3.f);
+	CMD4(CCC_SvpInternalFloat, "r__svp_dim_offset", &ps_svp_dim_offset, -1.f, 1.f);
+	CMD4(CCC_SvpInternalInteger, "r__svp_acog_fiber", &ps_r__svp_acog_fiber, 0, 1);
+	CMD4(CCC_SvpInternalFloat, "r__svp_veiling_glare", &ps_r__svp_veiling_glare, 0.0f, 3.0f);
 	CMD4(CCC_Float, "r__svp_rain_optic", &ps_r__svp_rain_optic, 0.0f, 3.0f); // svp rain droplets on the objective (0 = off)
 	CMD4(CCC_Float, "r__svp_rain_debug", &ps_r__svp_rain_debug, 0.0f, 3.0f); // svp force scope rain, value = density stand-in (0 = live weather)
-	CMD4(CCC_Integer, "r__svp_uv_debug", &ps_r__svp_uv_debug, 0, 1); // svp debug: paint sample-coord V to spot a flipped lens UV
-	CMD4(CCC_Integer, "r__svp_autoflip", &ps_r__svp_autoflip, 0, 1); // svp auto-correct a mesh-inverted lens (1 = on)
-	CMD4(CCC_Integer, "r__svp_autoflip_reticle", &ps_r__svp_autoflip_reticle, 0, 1); // svp auto-correct a mesh-inverted reticle (1 = on)
-	CMD4(CCC_Float, "r__svp_coating", &ps_r__svp_coating, 0.0f, 1.0f); // svp lens coating transmission loss + warm tint (0 = off, 1 = physical)
-	CMD4(CCC_Float, "r__svp_mirage", &ps_r__svp_mirage, 0.0f, 3.0f); // svp heat mirage on distant ground, sun + magnification driven (0 = off)
-	CMD4(CCC_Integer, "r__svp_flat_window", &ps_r__svp_flat_window, 0, 1); // svp flat-screen window subtense fov (1 = on)
+	CMD4(CCC_Integer, "r__svp_uv_debug", &ps_r__svp_uv_debug, 0, 2); // svp sample coordinate display
+	CMD4(CCC_SvpFixedInteger, "r__svp_autoflip", &ps_r__svp_autoflip, 0, 1);
+	CMD4(CCC_SvpFixedInteger, "r__svp_autoflip_reticle", &ps_r__svp_autoflip_reticle, 0, 1);
+	CMD4(CCC_SvpInternalFloat, "r__svp_coating", &ps_r__svp_coating, 0.0f, 1.0f);
+	CMD4(CCC_SvpInternalFloat, "r__svp_mirage", &ps_r__svp_mirage, 0.0f, 3.0f);
+	CMD4(CCC_SvpFixedInteger, "r__svp_flat_window", &ps_r__svp_flat_window, 0, 1);
 	CMD4(CCC_Float, "r__svp_sharpen", &ps_r__svp_sharpen, 0.0f, 1.0f); // svp contrast-adaptive sharpen (0 = off)
-	CMD4(CCC_Float, "r__svp_sharpen_falloff", &ps_r__svp_sharpen_falloff, 0.0f, 1.0f); // svp sharpen radial falloff (0 = uniform)
-	CMD4(CCC_Float, "r__svp_sharpen_inner", &ps_r__svp_sharpen_inner, 0.0f, 1.0f); // svp sharpen inner crisp radius (0 = from center)
-	CMD4(CCC_Float, "r__svp_nvg_bleach", &ps_r__svp_nvg_bleach, 0.0f, 1.0f); // svp NVG highlight bleach roll-off (0 = off, stock clamp)
-	CMD4(CCC_Float, "r__svp_nvg_sensitivity", &ps_r__svp_nvg_sensitivity, 0.1f, 4.0f); // svp NVG bleach onset sensitivity
-	CMD4(CCC_Integer, "r__svp_hud_full", &ps_r__svp_hud_full, 0, 2); // svp barrel: 2 front-plane clip (default), 1 full barrel from the eye, 0 objective clip + body
-	CMD4(CCC_Integer, "r__svp_near_pupil", &ps_r__svp_near_pupil, 0, 1); // svp mode 2 push the near clip to the pupil front plane (0 = main-view near)
-	CMD4(CCC_Integer, "r__svp_drain_clip", &ps_r__svp_drain_clip, 0, 1); // svp clip the drained barrel behind the authored objective plane (0 = whole barrel)
+	CMD4(CCC_SvpInternalFloat, "r__svp_sharpen_falloff", &ps_r__svp_sharpen_falloff, 0.0f, 1.0f);
+	CMD4(CCC_SvpInternalFloat, "r__svp_sharpen_inner", &ps_r__svp_sharpen_inner, 0.0f, 1.0f);
+	CMD4(CCC_SvpInternalFloat, "r__svp_nvg_bleach", &ps_r__svp_nvg_bleach, 0.0f, 1.0f);
+	CMD4(CCC_SvpInternalFloat, "r__svp_nvg_sensitivity", &ps_r__svp_nvg_sensitivity, 0.1f, 4.0f);
+	CMD4(CCC_SvpFixedInteger, "r__svp_nvg_objective", &ps_r__svp_nvg_objective, 0, 1);
+	CMD4(CCC_SvpFixedInteger, "r__svp_hud_full", &s_svp_compat_hud_full, 0, 2);
+	CMD4(CCC_SvpFixedInteger, "r__svp_weapon_continuity", &ps_r__svp_weapon_continuity, 0, 1);
+	CMD4(CCC_SvpFixedInteger, "r__svp_ray_transfer", &s_svp_compat_ray_transfer, 0, 2);
+	CMD4(CCC_SvpFixedInteger, "r__svp_optic_body_suppress", &ps_r__svp_optic_body_suppress, 0, 1);
+	CMD4(CCC_SvpFixedInteger, "r__svp_near_pupil", &s_svp_compat_near_pupil, 0, 1);
+	CMD4(CCC_SvpFixedInteger, "r__svp_drain_clip", &s_svp_compat_drain_clip, 0, 1);
 	CMD4(CCC_Integer, "r__svp_cull", &ps_r__svp_cull, 0, 1); // svp frustum cull the scope geometry (1 = on)
 	CMD4(CCC_Integer, "r__svp_skip_motionblur", &ps_r__svp_skip_motionblur, 0, 1); // svp skip motion blur on the scope
 	CMD4(CCC_Integer, "r__svp_skip_hud_distort", &ps_r__svp_skip_hud_distort, 0, 1); // svp skip hud-layer distortion on the scope
-	CMD4(CCC_Integer, "r__svp_skip_dof", &ps_r__svp_skip_dof, 0, 1); // svp scope-internal dof once-only gate
+	CMD4(CCC_SvpInternalInteger, "r__svp_skip_dof", &ps_r__svp_skip_dof, 0, 1);
 	CMD4(CCC_Integer, "r__svp_wpn_dof", &ps_r__svp_wpn_dof, 0, 1); // svp sss weapon dof while scoped
-	CMD4(CCC_Integer, "r__svp_skip_lut", &ps_r__svp_skip_lut, 0, 1); // svp scope-internal lut once-only gate
+	CMD4(CCC_SvpInternalInteger, "r__svp_skip_lut", &ps_r__svp_skip_lut, 0, 1);
 	CMD4(CCC_Integer, "r__svp_emissive", &ps_r__svp_emissive, 0, 1); // svp self-illum in the scope image
 	CMD4(CCC_Integer, "r__svp_skip_ssr", &ps_r__svp_skip_ssr, 0, 2); // svp scope reflections level (0 expensive, 1 regular, 2 cheapest)
 	CMD4(CCC_Integer, "r__svp_skip_volumetric", &ps_r__svp_skip_volumetric, 0, 1); // svp skip volumetric lights on the scope
@@ -266,13 +312,12 @@ void svp_console_init()
 	CMD4(CCC_Integer, "r__svp_sss_sun", &ps_r__svp_sss_sun, 0, 1); // svp SSS sun contact shadows on the scope
 	CMD4(CCC_Integer, "r__svp_cull_grass", &ps_r__svp_cull_grass, 0, 1); // svp cull grass to the scope cone
 	CMD4(CCC_Integer, "r__svp_light_cull", &ps_r__svp_light_cull, 0, 1); // svp cone-cull the mirrored light blends (1 = on)
-	CMD4(CCC_Integer, "r__svp_corner_mask", &ps_r__svp_corner_mask, 0, 1); // svp stencil-skip the dead disc corners (1 = on)
+	CMD4(CCC_SvpFixedInteger, "r__svp_corner_mask", &ps_r__svp_corner_mask, 0, 1);
 	CMD4(CCC_Integer, "r__scope_debug", &scope_debug, 0, 4);
 #endif
 }
 
-// [SVP-LEDGER] {counter, gate} table, only rows where a gate on means the counter should tick in
-// normal scoped play, the situational latches (hud drain, reflex proxy, nvg sky) stay out of it
+// Tracks paths expected during ordinary scoped play
 namespace
 {
 	struct svp_ledger_row

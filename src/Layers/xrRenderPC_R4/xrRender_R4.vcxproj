@@ -568,9 +568,8 @@
     <ClInclude Include="r4_rendertarget.h" />
     <ClInclude Include="svp_target.h" />
     <ClInclude Include="svp_camera.h" />
+    <ClInclude Include="svp_optics.h" />
     <ClInclude Include="svp_physical_optics.h" />
-    <ClInclude Include="svp_overlay_state.h" />
-    <ClInclude Include="svp_optics_runtime.h" />
     <ClInclude Include="svp_stats.h" />
     <ClInclude Include="r4_rendertarget_wallmarks.h" />
     <ClInclude Include="R_Backend_LOD.h" />
@@ -781,11 +780,11 @@
     <ClCompile Include="svp_target.cpp" />
     <ClCompile Include="svp_optics.cpp" />
     <ClCompile Include="svp_nearblur.cpp" />
+    <ClCompile Include="svp_nvg.cpp" />
     <ClCompile Include="svp_camera.cpp" />
     <ClCompile Include="svp_physical_optics.cpp">
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
     </ClCompile>
-    <ClCompile Include="svp_optics_runtime.cpp" />
     <ClCompile Include="svp_stats.cpp" />
     <ClCompile Include="r4_loader.cpp" />
     <ClCompile Include="r4_rendertarget.cpp" />

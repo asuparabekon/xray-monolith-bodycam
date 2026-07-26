@@ -13,6 +13,10 @@
 class CKinematics;
 class Fvisual;
 
+void svp_hud_bone_snapshot_begin();
+extern bool g_svp_hud_frozen_pass;
+extern bool g_svp_hud_history_write;
+
 //.#pragma pack(push,4)
 
 struct SEnumVerticesCallback;
@@ -50,7 +54,7 @@ protected:
 	};
 
 	void _Copy(CSkeletonX* V);
-	void _Render_soft(ref_geom& hGeom, u32 vCount, u32 iOffset, u32 pCount);
+	void _Render_soft(ref_geom& hGeom, u32 vCount, u32 iOffset, u32 pCount, CBoneInstance* bones);
 	void _Render(ref_geom& hGeom, u32 vCount, u32 iOffset, u32 pCount);
 	void _Load(const char* N, IReader* data, u32& dwVertCount);
 
@@ -102,6 +106,14 @@ public:
 	bool SVP_LensBoneXform(Fmatrix& out); // pip lens bone object-space skinning matrix for the SVP eyepiece
 	bool SVP_LensBoneVisible(); // pip lens bone visibility for the eyepiece pick
 	bool SVP_GetLensDetection(SLensDetection& out); // pip forward the owning kinematics measured lens fit for the render-side diag
+	bool SVP_CaptureBoneSnapshot();
+	bool SVP_BoneSnapshotReady() const; // pip exact main hud bone palette shared by both viewports
+	bool SVP_RigidBoneSnapshotXform(Fmatrix& out);
+	bool SVP_BoneSnapshotXform(Fmatrix& out);
+	bool SVP_BoneSnapshotXform(u16 bone, Fmatrix& out);
+	bool SVP_BoneSnapshotXform(const IKinematics* owner, u16 bone, Fmatrix& out);
+	bool SVP_BoneSnapshotVisible(BOOL& visible);
+	const void* SVP_SkeletonOwner() const { return Parent; }
 	// pip append each dedup bind-pose vertex, model space, with its global dominant bone id
 	void SVP_GatherVerts(xr_vector<Fvector>& positions, xr_vector<u16>& bones);
 

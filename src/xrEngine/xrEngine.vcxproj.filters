@@ -378,6 +378,9 @@
     <ClInclude Include="xr_ioc_cmd.h">
       <Filter>Engine\Console\commands</Filter>
     </ClInclude>
+    <ClInclude Include="svp_console_policy.h">
+      <Filter>Engine\Console\commands</Filter>
+    </ClInclude>
     <ClInclude Include="svp_gameplay_cvars.h">
       <Filter>Engine\Console\commands</Filter>
     </ClInclude>

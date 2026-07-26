@@ -1,4 +1,4 @@
-// svp_hooks_image 20260715 thinhook
+// svp_hooks_image 20260723 pupil
 // relocated true-PiP scope image effects, included by scope_custom_image.h after LCD_RES
 #ifndef SVP_HOOKS_IMAGE_INCLUDED
 #define SVP_HOOKS_IMAGE_INCLUDED
@@ -103,7 +103,7 @@ void svp_img_sensor_noise(inout float3 back, float2 scope_tc)
 
 void svp_img_thermal_veil(inout float3 back, gbuffer_data gbd)
 {
-		// front-lens veil retired, svp_optics.z is a dead lane, no-op kept for the compat patch call
+		// the chunked path keeps the legacy depth veil disabled
 }
 
 void svp_img_lcd_mask(inout float3 back)
@@ -146,11 +146,7 @@ void svp_image_glass_fx(inout float3 back, float2 scope_tc, Scope s)
 		}
 		// true PiP field curvature, the outer field softens like a real non-flat-field scope
 		// flat screens have no eyepiece field, the UV radius would draw an ellipse on the wide panel
-		// Independently profiled optics own their usable field and tunneling model.
-		// The legacy curvature blur samples the black border around the SVP target
-		// near the lens rim, which looks like a second, static scope shadow.
-		if (shader_scope_params.w < -1.5 && !svp_physical_optics_active()
-			&& svp_glass.y > 0.001 && RETICLE_TYPE != RT_FLAT_SCREEN)
+		if (shader_scope_params.w < -1.5 && !svp_physical_optics_active() && svp_glass.y > 0.001 && RETICLE_TYPE != RT_FLAT_SCREEN)
 		{
 			float soft = smoothstep(0.65, 1.0, length((s.tc0.xy - 0.5) * 2.0)) * svp_glass.y;
 			// skip the blur sample when the field curvature has no visible contribution
@@ -177,7 +173,7 @@ void svp_image_glass_fx(inout float3 back, float2 scope_tc, Scope s)
 		}
 		// true PiP scope-local eye adaptation, the capture is pre-tonemap and the main pass grades
 		// it with the MAIN exposure, rescale by the scope's own measured exposure
-		if (svp_physical_optics_active() && svp_exposure.x > 0)
+		if (shader_scope_params.w < -1.5 && svp_exposure.x > 0)
 		{
 			float lm = s_tonemap.Load(int3(0, 0, 0)).x;
 			float ls = s_tonemap_svp.Load(int3(0, 0, 0)).x;
@@ -187,7 +183,7 @@ void svp_image_glass_fx(inout float3 back, float2 scope_tc, Scope s)
 				back *= clamp(svp_exposure.x * ls / lm, 0.25, 4.0);
 		}
 		// true PiP exit-pupil twilight dimming, engine-bound (zoom shrinks the exit pupil below the dark-adapted eye)
-		if (svp_physical_optics_active() && svp_exposure.y > 0)
+		if (shader_scope_params.w < -1.5 && svp_exposure.y > 0)
 			back *= svp_exposure.y;
 		// true PiP veiling glare, off-axis sun scatters off the coatings and washes the image near the sun
 		if (shader_scope_params.w < -1.5 && svp_env.x > 0.001)
@@ -204,8 +200,10 @@ void svp_image_glass_fx(inout float3 back, float2 scope_tc, Scope s)
 			float ct = saturate(svp_glass2.x);
 			back *= lerp(float3(1.0, 1.0, 1.0), float3(0.93, 0.915, 0.888), ct);
 		}
-		// lens UV debug: green top / red bottom of the SVP sample coord, a flipped gradient = flipped lens V
-		if (shader_scope_params.w < -1.5 && svp_env.z > 0.5)
+		// mode 2 paints final U green to red and marks a negative local X derivative in blue
+		if (shader_scope_params.w < -1.5 && svp_env.z > 1.5)
+			back = float3(scope_tc.x, 1.0 - scope_tc.x, ddx(scope_tc.x) < 0.0 ? 1.0 : 0.0);
+		else if (shader_scope_params.w < -1.5 && svp_env.z > 0.5)
 			back = float3(scope_tc.y, 1.0 - scope_tc.y, 0.2);
 }
 

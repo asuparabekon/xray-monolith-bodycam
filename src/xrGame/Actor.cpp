@@ -1111,13 +1111,14 @@ float CActor::currentFOV(bool wantSVPFov)
 		(!pWeapon->ZoomTexture() || (!pWeapon->IsRotatingToZoom() && pWeapon->ZoomTexture()))
 	)
 	{
+		const bool svp_owns_main_view = Device.true_pip_on && pWeapon->OwnsSvpMainView();
 		if (pWeapon->GetZoomFactor() == 0)
 			return atan(tan(g_fov * (0.5 * PI / 180)) / g_ironsights_factor) / (0.5 * PI / 180);
 		// pip when the SVP renders the zoom, the main view stays wide (the zoom lives in the scope image),
 		// wantSVPFov asks for the real zoomed fov (svpCamera, mouse sensitivity)
-		else if (Device.true_pip_on && Device.m_SecondViewport.IsSVPActive() && !wantSVPFov)
+		else if (svp_owns_main_view && !wantSVPFov)
 			return g_fov;
-		else if (Device.true_pip_on && Device.m_SecondViewport.IsSVPActive() && wantSVPFov)
+		else if (svp_owns_main_view && wantSVPFov)
 			// pip the true through-scope fov, config factors ride the 75 base and rescale to the live fov
 			return pWeapon->GetZoomFactor() * 0.75f * (pWeapon->IsScriptedZoom() ? 1.f : g_fov / SVP_ZOOM_BASE_FOV);
 		else
@@ -1274,7 +1275,7 @@ void CActor::UpdateCL()
 			g_pGamePersistent->m_pGShaderConstants->m_blender_mode.set(0.f, 0.f, 0.f, 0.f);
 
 			// Turn off SecondVP
-			Device.m_SecondViewport.svp_eye_tracking_suspended = false;
+			Device.m_SecondViewport.svp_eye_tracking_suspended.store(false, std::memory_order_release);
 			Device.m_SecondViewport.SetSVPActive(false);			
 		}
 	}
@@ -3067,8 +3068,15 @@ void CActor::initFPCam()
 {
 	if (!m_FPCam) {
 		m_FPCam = xr_new<CFPCamEffector>();
+		m_FPCam->m_on_b_remove_callback = SBaseEffector::CB_ON_B_REMOVE(this, &CActor::OnFPCamReleased);
 		Cameras().AddCamEffector(m_FPCam);
 	}
+}
+
+// clears the dangling pointer when the effector self-removes during a smoothed release
+void CActor::OnFPCamReleased()
+{
+	m_FPCam = NULL;
 }
 
 void CActor::removeFPCam() 

@@ -3,14 +3,380 @@
 #include "../xrRender/SkeletonX.h" // pip lens bone latch compensation for the skinned lens draws
 #include "../../xrEngine/igame_persistent.h" // pip env-driven eye pupil for the exit-pupil twilight dimming
 #include "../../xrEngine/environment.h"
-#include "svp_optics_runtime.h"
-#include "svp_overlay_state.h"
+#include "../../xrEngine/svp_gameplay_cvars.h"
 #if defined(USE_DX11)
 #include "../../../gamedata/shaders/r3/scope_defines.h" // SCOPE_PHASE_* (kept in sync with the shader)
+#include "svp_physical_optics.h" // pip physical aperture math (exit pupil, virtual eye follower)
+#include "svp_optics.h"
 #endif
 
 #if defined(USE_DX11)	//  Redotix99: for 3D Shader Based Scopes 		(sorry for using the nightvision phase file)
-// pip load the scope glue shaders lazily on first PiP use, they ship in the PiP mod (gamedata/shaders/r3)
+struct SSvpObjectiveHudState
+{
+	u32 frame = u32(-1);
+	u32 session = 0;
+	u32 items = 0;
+	u32 skinned = 0;
+	u32 drawn = 0;
+	u32 roots_missing = 0;
+	u32 bones_missing = 0;
+	bool active = false;
+};
+
+static SSvpObjectiveHudState s_svp_objective_hud;
+
+static bool svp_objective_hud_role(u8 role)
+{
+	return role == IDSGraphManager::hud_hands
+		|| role == IDSGraphManager::hud_primary_item
+		|| role == IDSGraphManager::hud_offhand_item
+		|| role == IDSGraphManager::hud_optic;
+}
+
+bool svp_objective_hud_current()
+{
+	auto& vp = Device.m_SecondViewport;
+	return s_svp_objective_hud.active
+		&& s_svp_objective_hud.frame == Device.dwFrame
+		&& s_svp_objective_hud.session == vp.GetSVPSession()
+		&& vp.svp_camera_frame == Device.dwFrame
+		&& vp.svp_camera_session == s_svp_objective_hud.session;
+}
+
+void svp_objective_hud_note_draw(u8 role)
+{
+	if (svp_objective_hud_current() && svp_objective_hud_role(role))
+		++s_svp_objective_hud.drawn;
+}
+
+static void svp_objective_hud_bypass(LPCSTR reason)
+{
+	s_svp_objective_hud.active = false;
+	s_svp_objective_hud.frame = u32(-1);
+	extern int ps_r__svp_cop_diag;
+	static u32 s_bypass_diag_ms = 0;
+	if (ps_r__svp_cop_diag && Device.dwTimeGlobal - s_bypass_diag_ms > 1000)
+	{
+		s_bypass_diag_ms = Device.dwTimeGlobal;
+		PipMsg("[SVP-CONT] frame=%u path=native-objective pose=live pupil=centered reason=%s",
+			Device.dwFrame, reason);
+	}
+}
+
+// per-scope objective diameter in mm, resolved by the optics bus (spec cvar then authored w), 0 = none
+static float svp_objective_mm()
+{
+	return Device.m_SecondViewport.svp_opt_obj_mm;
+}
+
+// pip electronic overlay actually on screen, NV shows only with its overlay on (markswitch 0),
+// thermal shows until the overlay is dropped (markswitch < 2)
+static bool svp_overlay_active(float param3x, int markswitch)
+{
+	return (param3x >= 0.5f) && ((param3x < 1.5f) ? (markswitch == 0) : (markswitch < 2));
+}
+// pip thermal-typed optic with its overlay on, near-blur skips these so they keep full DoF
+static bool svp_thermal_active(float param3x, int markswitch)
+{
+	return (param3x >= 1.5f) && svp_overlay_active(param3x, markswitch);
+}
+
+// pip physical aperture cvars, registered in svp_console.cpp, drive the exit-pupil model at r__svp_aperture 1
+extern int ps_r__svp_aperture;
+extern int ps_r__svp_photo_model;
+extern int ps_r__svp_authored_optics;
+extern int ps_r__svp_diag;
+extern float ps_r__svp_eyebox;
+extern float ps_r__svp_twilight;
+extern float ps_s3ds_transmission;
+extern float ps_s3ds_twilight_strength;
+extern float ps_s3ds_eye_relief_low_mm, ps_s3ds_eye_relief_high_mm;
+extern float ps_s3ds_exit_pupil_low_mm, ps_s3ds_exit_pupil_high_mm;
+extern float ps_s3ds_pupil_field_low, ps_s3ds_pupil_field_high;
+extern float ps_s3ds_eye_tracking_speed, ps_s3ds_eye_tracking_accel_mm_s2, ps_s3ds_eye_tracking_limit_mm;
+extern float ps_s3ds_tunneling_parallax, ps_s3ds_tunneling_min, ps_s3ds_tunneling_max;
+extern float ps_svp_exit_scale, ps_svp_exit_offset, ps_svp_tunnel_scale, ps_svp_tunnel_offset, ps_svp_dim_scale, ps_svp_dim_offset;
+extern float g_pip_scope_magnification, g_pip_scope_min_mag, g_pip_scope_max_mag;
+extern Fvector4 ps_s3ds_param_1;
+extern Fvector4 ps_svp_exit_curve_low, ps_svp_exit_curve_high;
+extern Fvector4 ps_svp_tunnel_curve_low, ps_svp_tunnel_curve_high;
+extern Fvector4 ps_svp_dim_curve_low, ps_svp_dim_curve_high;
+
+// pip physical optics helpers, re-housed from the aperture model, the math matches the source lib
+static SvpPhysicalOptics::MagnificationResponse svp_make_response(const Fvector4& low, const Fvector4& high)
+{
+	SvpPhysicalOptics::MagnificationResponse response;
+	response.value[0] = low.x;
+	response.value[1] = low.y;
+	response.value[2] = low.z;
+	response.value[3] = low.w;
+	response.value[4] = high.x;
+	response.value[5] = high.y;
+	response.value[6] = high.z;
+	response.value[7] = high.w;
+	return response;
+}
+
+// interpolate a low/high profile endpoint across the optic's zoom range
+static float svp_interp_profile(float low, float high)
+{
+	return SvpPhysicalOptics::InterpolateMagnification(low, high, g_pip_scope_magnification,
+		g_pip_scope_min_mag, g_pip_scope_max_mag);
+}
+
+static float svp_eye_relief_mm()
+{
+	const auto& config = Device.m_SecondViewport.RenderOpticConfig();
+	const float low = config.typed_route ? config.eye_relief_low_mm : ps_s3ds_eye_relief_low_mm;
+	const float high = config.typed_route ? config.eye_relief_high_mm : ps_s3ds_eye_relief_high_mm;
+	return svp_interp_profile(low, high);
+}
+
+static float svp_pupil_field_scale()
+{
+	const auto& config = Device.m_SecondViewport.RenderOpticConfig();
+	const float low = config.typed_route ? config.pupil_field_low : ps_s3ds_pupil_field_low;
+	const float high = config.typed_route ? config.pupil_field_high : ps_s3ds_pupil_field_high;
+	return svp_interp_profile(low, high);
+}
+
+// exit pupil mm, authored low/high reciprocal-mag interp then objective/mag then the ocular-ratio proxy
+static float svp_calc_exit_pupil_mm(float objective_mm)
+{
+	if (g_pip_scope_magnification <= 0.01f)
+		return 0.f;
+
+	const auto& config = Device.m_SecondViewport.RenderOpticConfig();
+	float low = config.typed_route ? config.exit_pupil_low_mm : ps_s3ds_exit_pupil_low_mm;
+	float high = config.typed_route ? config.exit_pupil_high_mm : ps_s3ds_exit_pupil_high_mm;
+	if (objective_mm > 0.01f)
+	{
+		if (low <= 0.01f && g_pip_scope_min_mag > 0.01f)
+			low = objective_mm / g_pip_scope_min_mag;
+		if (high <= 0.01f && g_pip_scope_max_mag > 0.01f)
+			high = objective_mm / g_pip_scope_max_mag;
+	}
+	if (low > 0.01f || high > 0.01f)
+	{
+		if (low <= 0.01f)
+			low = high;
+		if (high <= 0.01f)
+			high = low;
+		return SvpPhysicalOptics::InterpolateReciprocalMagnification(low, high, g_pip_scope_magnification,
+			g_pip_scope_min_mag, g_pip_scope_max_mag);
+	}
+
+	const float authored_exit = ps_s3ds_param_1.z > 0.01f ? ps_s3ds_param_1.z : 0.5f;
+	const float minimum_mag = g_pip_scope_min_mag > 0.01f ? g_pip_scope_min_mag : g_pip_scope_magnification;
+	return authored_exit * Device.m_SecondViewport.eyepiece.radius * 2000.f *
+		(minimum_mag / g_pip_scope_magnification);
+}
+
+// aperture twilight dimming, exit-pupil transmission scaled by the per-mag dim curve, outer gate assumed
+static float svp_calc_twilight_dim(float pupil_mm, float environment_brightness)
+{
+	const float exit_pupil_mm = svp_calc_exit_pupil_mm(svp_objective_mm());
+	const float pupil_ratio = _min(exit_pupil_mm / pupil_mm, 1.f);
+	const float relative_brightness = ps_r__svp_photo_model ? pupil_ratio * pupil_ratio : pupil_ratio;
+	const auto& config = Device.m_SecondViewport.RenderOpticConfig();
+	const float authored_twilight = config.typed_route
+		? config.twilight_strength : ps_s3ds_twilight_strength;
+	const float authored_transmission = config.typed_route
+		? config.transmission : ps_s3ds_transmission;
+	const float twilight_strength = _min(ps_r__svp_twilight, 1.f) * clampr(authored_twilight, 0.f, 1.f);
+	float dimming = clampr(authored_transmission, 0.f, 1.f) *
+		(1.f + (_max(relative_brightness, 0.6f) - 1.f) * twilight_strength);
+	const float response = SvpPhysicalOptics::ApplyMagnificationResponse(
+		svp_make_response(ps_svp_dim_curve_low, ps_svp_dim_curve_high), g_pip_scope_magnification,
+		ps_svp_dim_scale, ps_svp_dim_offset);
+	dimming = 1.f - clampr((1.f - dimming) * response, 0.f, 1.f);
+
+	if (ps_r__svp_diag)
+	{
+		static u32 s_twl_ms = 0;
+		if (Device.dwTimeGlobal - s_twl_ms > 1000)
+		{
+			s_twl_ms = Device.dwTimeGlobal;
+			PipMsg("[SVP-TWL] ep %.1fmm pupil %.1fmm env %.2f dim %.2f", exit_pupil_mm,
+				pupil_mm, environment_brightness, dimming);
+		}
+	}
+	return dimming;
+}
+
+// aperture eyebox half angle, exit-pupil radius plus eye pupil over the interpolated eye relief
+static void svp_update_eyebox_limit(float pupil_mm)
+{
+	const float exit_pupil_mm = svp_calc_exit_pupil_mm(svp_objective_mm());
+	if (ps_r__svp_eyebox > 0.f && ps_r__svp_authored_optics && exit_pupil_mm > 0.01f &&
+		g_pip_scope_magnification > 0.01f && pupil_mm > EPS)
+	{
+		const float exit_radius = exit_pupil_mm * 0.0005f;
+		const float pupil_radius = pupil_mm * 0.0005f;
+		const float eye_relief = _max(svp_eye_relief_mm() * 0.001f, 0.05f);
+		Device.m_SecondViewport.svp_eyebox_rad = atanf((exit_radius + pupil_radius) / eye_relief);
+		return;
+	}
+
+	Device.m_SecondViewport.svp_eyebox_rad = 0.f;
+	if (ps_r__svp_eyebox > 0.f && ps_r__svp_diag)
+	{
+		static u32 s_ebg_ms = 0;
+		if (Device.dwTimeGlobal - s_ebg_ms > 1000)
+		{
+			s_ebg_ms = Device.dwTimeGlobal;
+			PipMsg("[SVP-EYEBOX] gated off, authored %d obj_w %.3f obj_mm %.1f mag %.2f pupil %.1f",
+				ps_r__svp_authored_optics, Device.m_SecondViewport.svp_opt_offset.w,
+				Device.m_SecondViewport.svp_opt_obj_mm,
+				g_pip_scope_magnification, pupil_mm);
+		}
+	}
+}
+
+SSvpEyeSample svp_update_eye_sample(const Fmatrix& eye_view)
+{
+	auto& viewport = Device.m_SecondViewport;
+	static SvpPhysicalOptics::EyeTrackingState tracking;
+	static SSvpEyeSample cached;
+	static u32 cached_frame = u32(-1);
+	static u32 cached_session = 0;
+
+	if (scope_svp_enabled < 2 || !viewport.IsSVPActive())
+		return {};
+
+	const u32 session = viewport.GetSVPSession();
+	if (cached_session != session)
+	{
+		tracking = {};
+		cached = {};
+		cached_frame = u32(-1);
+		cached_session = session;
+	}
+	if (cached_frame == Device.dwFrame)
+		return cached;
+
+	cached = {};
+	cached_frame = Device.dwFrame;
+	SSvpEyeSample& sample = cached;
+	const auto& eyepiece = viewport.eyepiece;
+	const auto& objective = viewport.objective;
+	if (eyepiece.radius <= EPS)
+		return sample;
+
+	Fvector lens_right = eyepiece.m_W.i;
+	Fvector lens_up = eyepiece.m_W.j;
+	Fvector optical_axis;
+	optical_axis.sub(objective.m_W.c, eyepiece.m_W.c);
+	if (objective.radius <= EPS || optical_axis.square_magnitude() <= EPS)
+		optical_axis.set(eyepiece.m_W.k);
+	lens_right.normalize_safe();
+	lens_up.normalize_safe();
+	optical_axis.normalize_safe();
+
+	Fvector lens_center_view, lens_right_view, lens_up_view, axis_view;
+	eye_view.transform_tiny(lens_center_view, eyepiece.m_W.c);
+	eye_view.transform_dir(lens_right_view, lens_right);
+	eye_view.transform_dir(lens_up_view, lens_up);
+	eye_view.transform_dir(axis_view, optical_axis);
+	lens_right_view.normalize_safe();
+	lens_up_view.normalize_safe();
+	axis_view.normalize_safe();
+
+	Fvector eye_ray = lens_center_view;
+	eye_ray.normalize_safe();
+	const float forward = eye_ray.dotproduct(axis_view);
+	if (_abs(forward) <= 0.001f)
+		return sample;
+
+	const float eye_relief_mm = svp_eye_relief_mm();
+	const float inverse_forward = 1.f / forward;
+	sample.raw_mm.set(-eye_ray.dotproduct(lens_right_view) * inverse_forward * eye_relief_mm,
+		-eye_ray.dotproduct(lens_up_view) * inverse_forward * eye_relief_mm);
+	sample.eye_relief_mm = eye_relief_mm;
+	const SvpPhysicalOptics::Vec2 raw = { sample.raw_mm.x, sample.raw_mm.y };
+	const auto& config = viewport.RenderOpticConfig();
+	const float tracking_limit = config.typed_route
+		? config.tracking_limit_mm : ps_s3ds_eye_tracking_limit_mm;
+	const float tracking_speed = config.typed_route
+		? config.tracking_speed : ps_s3ds_eye_tracking_speed;
+	const float tracking_accel = config.typed_route
+		? config.tracking_accel_mm_s2 : ps_s3ds_eye_tracking_accel_mm_s2;
+	const SvpPhysicalOptics::Vec2 target =
+		SvpPhysicalOptics::LimitEyeOffset(raw, tracking_limit);
+	SvpPhysicalOptics::UpdateEyeTracking(tracking, target,
+		viewport.svp_eye_tracking_suspended.load(std::memory_order_acquire),
+		viewport.svp_camera_epoch, Device.dwFrame, Device.fTimeDelta,
+		tracking_speed, tracking_accel);
+	sample.residual_mm.set(sample.raw_mm.x - tracking.offset.x, sample.raw_mm.y - tracking.offset.y);
+
+	const float objective_mm = svp_objective_mm();
+	const float exit_pupil_mm = svp_calc_exit_pupil_mm(objective_mm);
+	if (objective_mm > 0.01f && exit_pupil_mm > 0.01f)
+		sample.entrance_scale = objective_mm / exit_pupil_mm;
+	else
+		sample.entrance_scale = _max(g_pip_scope_magnification, 1.f);
+	sample.valid = _valid(sample.raw_mm.x) && _valid(sample.raw_mm.y)
+		&& _valid(sample.residual_mm.x) && _valid(sample.residual_mm.y)
+		&& _valid(sample.eye_relief_mm) && sample.eye_relief_mm > 0.01f
+		&& _valid(sample.entrance_scale) && sample.entrance_scale > 0.f;
+	return sample;
+}
+
+// physical aperture bind, always binds the aperture constants, x = 0 when the cvar is off
+static void svp_bind_aperture(float pupil_mm)
+{
+	const float minimum_mag = g_pip_scope_min_mag > 0.01f ? g_pip_scope_min_mag : g_pip_scope_magnification;
+	const float maximum_mag = g_pip_scope_max_mag > minimum_mag ? g_pip_scope_max_mag : minimum_mag;
+	const float exit_pupil_mm = svp_calc_exit_pupil_mm(svp_objective_mm());
+	auto& viewport = Device.m_SecondViewport;
+	const auto& eyepiece = viewport.eyepiece;
+	Fvector lens_right = eyepiece.m_W.i;
+	Fvector lens_up = eyepiece.m_W.j;
+	lens_right.normalize_safe();
+	lens_up.normalize_safe();
+
+	const SSvpEyeSample eye = svp_update_eye_sample(Device.matrices[0].mView);
+	const Fvector2 raw_eye_offset_mm = eye.raw_mm;
+	// Objective projection uses the raw offset in svp_camera. Aperture loss follows
+	// the tracked eye so it can recenter independently of the render-camera domain.
+	const Fvector2 aperture_eye_offset_mm = eye.residual_mm;
+	const float inverse_lens_diameter = eyepiece.radius > EPS ? 0.5f / eyepiece.radius : 0.f;
+
+	RCache.set_c("svp_aperture", ps_r__svp_aperture ? 1.f : 0.f, g_pip_scope_magnification, minimum_mag, maximum_mag);
+	RCache.set_c("svp_eyebox", aperture_eye_offset_mm.x, aperture_eye_offset_mm.y,
+		exit_pupil_mm * 0.5f, pupil_mm * 0.5f);
+	const float exit_response = SvpPhysicalOptics::ApplyMagnificationResponse(
+		svp_make_response(ps_svp_exit_curve_low, ps_svp_exit_curve_high), g_pip_scope_magnification,
+		ps_svp_exit_scale, ps_svp_exit_offset);
+	const float tunnel_response = SvpPhysicalOptics::ApplyMagnificationResponse(
+		svp_make_response(ps_svp_tunnel_curve_low, ps_svp_tunnel_curve_high), g_pip_scope_magnification,
+		ps_svp_tunnel_scale, 0.f);
+	const auto& config = viewport.RenderOpticConfig();
+	const float tunnel_parallax = config.typed_route
+		? config.tunneling_parallax : ps_s3ds_tunneling_parallax;
+	const float tunnel_min = config.typed_route
+		? config.tunneling_min : ps_s3ds_tunneling_min;
+	const float tunnel_max = config.typed_route
+		? config.tunneling_max : ps_s3ds_tunneling_max;
+	RCache.set_c("svp_optic_profile", tunnel_parallax, tunnel_min, tunnel_max, tunnel_response);
+	RCache.set_c("svp_pupil_model", svp_pupil_field_scale(), exit_response, ps_svp_tunnel_offset, 0.f);
+	RCache.set_c("svp_lens_center", eyepiece.m_W.c.x, eyepiece.m_W.c.y, eyepiece.m_W.c.z, inverse_lens_diameter);
+	RCache.set_c("svp_lens_right", lens_right.x, lens_right.y, lens_right.z, 0.f);
+	RCache.set_c("svp_lens_up", lens_up.x, lens_up.y, lens_up.z, 0.f);
+
+	if (ps_r__svp_diag)
+	{
+		static u32 s_apert_ms = 0;
+		if (Device.dwTimeGlobal - s_apert_ms > 1000)
+		{
+			s_apert_ms = Device.dwTimeGlobal;
+			PipMsg("[SVP-APERT] raw %.2f,%.2fmm applied %.2f,%.2fmm exit_r %.2fmm pupil_r %.2fmm",
+				raw_eye_offset_mm.x, raw_eye_offset_mm.y,
+				aperture_eye_offset_mm.x, aperture_eye_offset_mm.y,
+				exit_pupil_mm * 0.5f, pupil_mm * 0.5f);
+		}
+	}
+}
 
 void CRenderTarget::EnsureScopeShaders()
 {
@@ -183,6 +549,114 @@ void CRenderTarget::EvalSVP_DLSS(const SvpDlssInputs& in)
 	HW.pContext->CopyResource(rt_secondVP->pSurface, rt_Generic_0->pSurface);
 }
 
+void CRenderTarget::svp_objective_hud_prepare(bool svp_follows)
+{
+	s_svp_objective_hud = SSvpObjectiveHudState();
+
+	extern int ps_r__svp_weapon_continuity;
+	extern int scope_svp_enabled;
+	auto& vp = Device.m_SecondViewport;
+	if (!svp_follows || scope_svp_enabled < 2 || !Device.true_pip_on || !vp.IsSVPActive())
+		return;
+	if (!ps_r__svp_weapon_continuity)
+	{
+		svp_objective_hud_bypass("continuity-off");
+		return;
+	}
+	if (this != RImplementation.TargetMain)
+	{
+		svp_objective_hud_bypass("target-owner");
+		return;
+	}
+	if (vp.svp_camera_frame != Device.dwFrame)
+	{
+		svp_objective_hud_bypass("camera-frame");
+		return;
+	}
+	const u32 session = vp.GetSVPSession();
+	if (vp.svp_camera_session != session)
+	{
+		svp_objective_hud_bypass("camera-session");
+		return;
+	}
+	if (vp.eyepiece.radius <= EPS)
+	{
+		svp_objective_hud_bypass("eyepiece");
+		return;
+	}
+	if (vp.svp_front_use_m <= EPS)
+	{
+		svp_objective_hud_bypass("objective-camera");
+		return;
+	}
+
+	u32 queued = 0;
+	auto inspect = [&](auto& graph)
+	{
+		queued += (u32)graph.size();
+		for (auto& item : graph)
+		{
+			if (!svp_objective_hud_role(item.hud_role))
+				continue;
+			if (!item.pVisual || !item.pMatrix || !item.pSE)
+			{
+				++s_svp_objective_hud.roots_missing;
+				continue;
+			}
+			if (RImplementation.GMBase.svp_pose_of(item.pMatrix) == item.pMatrix)
+				++s_svp_objective_hud.roots_missing;
+			++s_svp_objective_hud.items;
+			CSkeletonX* skeleton = fast_dynamic_cast<CSkeletonX*>(item.pVisual);
+			if (skeleton)
+			{
+				++s_svp_objective_hud.skinned;
+				if (!skeleton->SVP_BoneSnapshotReady())
+					++s_svp_objective_hud.bones_missing;
+			}
+		}
+	};
+	auto& graph = RImplementation.GMBase.RGraph;
+	inspect(graph.mapHUD);
+	inspect(graph.mapHUDSorted.Sorted);
+	inspect(graph.mapHUDSorted.Wmark);
+	inspect(graph.mapHUDSorted.Emissive);
+	inspect(graph.mapHUDSorted.Distort);
+	if (!queued)
+	{
+		svp_objective_hud_bypass("hud-empty");
+		return;
+	}
+	if (!s_svp_objective_hud.items)
+	{
+		svp_objective_hud_bypass("weapon-empty");
+		return;
+	}
+
+	s_svp_objective_hud.frame = Device.dwFrame;
+	s_svp_objective_hud.session = session;
+	s_svp_objective_hud.active = true;
+}
+
+void CRenderTarget::svp_objective_hud_report()
+{
+	if (!svp_objective_hud_current())
+		return;
+	extern int ps_r__svp_cop_diag;
+	static u32 s_diag_ms = 0;
+	if (ps_r__svp_cop_diag && Device.dwTimeGlobal - s_diag_ms > 1000)
+	{
+		s_diag_ms = Device.dwTimeGlobal;
+		const bool exact = !s_svp_objective_hud.roots_missing
+			&& !s_svp_objective_hud.bones_missing;
+		PipMsg("[SVP-CONT] frame=%u path=native-objective pose=%s capture=entrance-pupil mapping=geometry depth=shared items=%u skinned=%u drawn=%u missing=%u/%u near=%.2fcm",
+			Device.dwFrame, exact ? "same-frame" : "partial",
+			s_svp_objective_hud.items, s_svp_objective_hud.skinned,
+			s_svp_objective_hud.drawn, s_svp_objective_hud.roots_missing,
+			s_svp_objective_hud.bones_missing,
+			Device.m_SecondViewport.svp_near * 100.f);
+	}
+}
+
 // pip render the captured lens meshes with shader se, the bind callback sets the scope_phase
 // (IMAGE/RETICLE/SHADOW/LENS) that scope_color_write composites into the lens
 void CRenderTarget::draw_scope(ref_shader se, std::function<void()> bind)
@@ -232,13 +706,15 @@ void CRenderTarget::draw_scope(ref_shader se, std::function<void()> bind)
 		}
 
 		RCache.set_Element(elem);
-		// the housing pose from the main hud pass, the live matrix may hold a newer logic write by now
+		// reuse the main HUD root for every late lens phase
 		Fmatrix lensW = *RImplementation.GMBase.svp_pose_of(N.pMatrix);
+		CSkeletonX* sk = fast_dynamic_cast<CSkeletonX*>(V);
+		const bool frozen_lens = svp_objective_hud_current() && sk && sk->SVP_BoneSnapshotReady();
 		// the quad skins from the live bone palette, folding latched bone x live inverse into the
 		// world cancels any bone step since the housing draw (the lens glass rides one bone)
+		if (!frozen_lens)
 		{
 			Fmatrix bL, bNow;
-			CSkeletonX* sk = fast_dynamic_cast<CSkeletonX*>(V);
 			if (sk && RImplementation.GMBase.svp_lens_bone_of(V, bL) && sk->SVP_LensBoneXform(bNow))
 			{
 				Fmatrix inv;
@@ -278,12 +754,146 @@ void CRenderTarget::draw_scope(ref_shader se, std::function<void()> bind)
 				const float hfov = deg2rad(_max(Device.fFOV, 1.f));
 				par = ps_r__svp_parallax * 0.00075f * kg * eff_mag / hfov;
 			}
-			// z dead lane, no shader reads it. w = eyepiece-fit ratio for the shader optical mag
+			// z stays clear for legacy depth effects and w carries the eyepiece fit ratio
 			RCache.set_c("svp_optics", kg, par, 0.f, _max(g_pip_scope_ratio, 1.f));
 		}
-		const float shadow_g = Device.m_SecondViewport.svp_shadow_gain;
-		SvpOpticsRuntime::BindPhysicalOptics();
-
+		// pip scope-local exposure, x = 0 off else 2^bias
+		{
+			extern int ps_r__svp_local_exposure;
+			extern float ps_r__svp_exposure_bias;
+			// y = exit-pupil twilight dimming, exit pupil (ocular*ratio shrunk by zoom) vs the
+			// env-adapted eye pupil squared, electronic sights exempt
+			extern float ps_r__svp_twilight;
+			extern Fvector4 ps_s3ds_param_1;
+			extern Fvector4 ps_s3ds_param_3;
+			extern float g_pip_scope_magnification;
+			extern float g_pip_scope_min_mag;
+			// nvg on = the tube gain owns the scope brightness, our exposure lifts stand down
+			extern Fvector4 ps_dev_param_8;
+			const bool nvg_on = ps_dev_param_8.x >= 1.f;
+			// env-adapted eye pupil (mm), shared by the twilight dimming and the eyebox
+			float envb = 0.f, pupil_mm = 0.f;
+			extern int ps_r__svp_photo_model;
+			if (g_pGamePersistent)
+			{
+				CEnvDescriptor& E = *g_pGamePersistent->Environment().CurrentEnv;
+				envb = 0.299f * E.sun_color.x + 0.587f * E.sun_color.y + 0.114f * E.sun_color.z
+					+ 0.5f * (0.299f * E.hemi_color.x + 0.587f * E.hemi_color.y + 0.114f * E.hemi_color.z);
+				if (ps_r__svp_photo_model)
+				{
+					// Moon-Spencer pupil response, luminance anchored so envb 1 reads as an
+					// overcast day (~2500 cd/m2) and envb 0.01 as moonlight (~0.25)
+					const float L = 2500.f * envb * envb;
+					pupil_mm = 4.9f - 3.f * tanhf(0.4f * log10f(_max(L, 1e-4f)));
+					clamp(pupil_mm, 2.f, 8.f);
+				}
+				else
+					pupil_mm = 6.f - 3.5f * _min(envb / 0.25f, 1.f);
+			}
+			float dim = 0.f;
+			extern int ps_markswitch_current;
+			// twilight dims passive optics, NV/thermal are exempt only while their overlay is actually
+			// active (markswitch 0 for NV, < 2 for thermal), else the scope shows a plain image
+			const bool overlay_active = svp_overlay_active(ps_s3ds_param_3.x, ps_markswitch_current);
+			if (ps_r__svp_twilight > 0.f && !overlay_active && g_pip_scope_magnification > 0.01f && pupil_mm > EPS)
+			{
+				// aperture uses the exit-pupil transmission + dim curve, else our current twilight
+				if (ps_r__svp_aperture)
+					dim = svp_calc_twilight_dim(pupil_mm, envb);
+				else
+				{
+				const float mn = (g_pip_scope_min_mag > 0.01f) ? g_pip_scope_min_mag : g_pip_scope_magnification;
+				// exit pupil = objective diameter / magnification, real per-scope objective when
+				// known, else the ocular-ratio proxy
+				const float omm = svp_objective_mm();
+				float ep_mm;
+				if (omm > 0.01f)
+					ep_mm = omm / g_pip_scope_magnification;
+				else
+				{
+					const float xp = (ps_s3ds_param_1.z > 0.01f) ? ps_s3ds_param_1.z : 0.5f;
+					ep_mm = xp * Device.m_SecondViewport.eyepiece.radius * 2000.f * (mn / g_pip_scope_magnification);
+				}
+				// relative brightness is the pupil ratio squared, the legacy model used it linearly
+				const float dr = _min(ep_mm / pupil_mm, 1.f);
+				const float d = ps_r__svp_photo_model ? dr * dr : dr;
+				dim = 1.f + (_max(d, 0.6f) - 1.f) * _min(ps_r__svp_twilight, 1.f);
+				extern int ps_r__svp_diag;
+				if (ps_r__svp_diag)
+				{
+					static u32 s_twl_ms = 0;
+					if (Device.dwTimeGlobal - s_twl_ms > 1000)
+					{
+						s_twl_ms = Device.dwTimeGlobal;
+						PipMsg("[SVP-TWL] ep %.1fmm pupil %.1fmm env %.2f dim %.2f", ep_mm, pupil_mm, envb, dim);
+					}
+				}
+				}
+			}
+			// pip eyebox half angle from the real exit pupil, the sight anchor bound reads it
+			{
+				// aperture uses the exit-pupil radius + interpolated eye relief, else our current eyebox
+				if (ps_r__svp_aperture)
+					svp_update_eyebox_limit(pupil_mm);
+				else
+				{
+				extern float ps_r__svp_eyebox;
+				extern int ps_r__svp_authored_optics;
+				extern float g_pip_scope_magnification;
+				extern int ps_r__svp_diag;
+				const float eb_omm = svp_objective_mm();
+				if (ps_r__svp_eyebox > 0.f && ps_r__svp_authored_optics && eb_omm > 0.01f && g_pip_scope_magnification > 0.01f && pupil_mm > EPS)
+				{
+					const float ep_r = eb_omm * 0.0005f / g_pip_scope_magnification;
+					const float p_r = pupil_mm * 0.0005f;
+					// full-blackout half angle for the sight anchor bound, arm = authored eye relief
+					const float eb_arm = _max(ps_s3ds_param_1.y * 0.01f, 0.05f);
+					Device.m_SecondViewport.svp_eyebox_rad = atanf((ep_r + p_r) / eb_arm);
+				}
+				else
+				{
+					// no authored bound on this optic, drop the previous scope's so the anchor
+					// falls back to its own default instead of a stale narrow eyebox
+					Device.m_SecondViewport.svp_eyebox_rad = 0.f;
+					if (ps_r__svp_eyebox > 0.f && ps_r__svp_diag)
+					{
+						static u32 s_ebg_ms = 0;
+						if (Device.dwTimeGlobal - s_ebg_ms > 1000)
+						{
+							s_ebg_ms = Device.dwTimeGlobal;
+							PipMsg("[SVP-EYEBOX] gated off, authored %d obj_w %.3f obj_mm %.1f mag %.2f pupil %.1f",
+								ps_r__svp_authored_optics, Device.m_SecondViewport.svp_opt_offset.w,
+								Device.m_SecondViewport.svp_opt_obj_mm,
+								g_pip_scope_magnification, pupil_mm);
+						}
+					}
+				}
+				}
+			}
+			// crescent drive, exposure zw carries the latched swing side, the tangent offset is
+			// scaled by pupil over eye relief so the bite depth reads the same on every scope
+			float st = 0.f;
+			float sw_k = 0.f;
+			const float shadow_g = Device.m_SecondViewport.svp_shadow_gain;
+			{
+				extern float g_pip_scope_magnification;
+				extern Fvector4 ps_s3ds_param_1;
+				st = (g_pip_scope_magnification > 0.01f) ? (g_pip_scope_magnification - 1.f) / 7.f : 0.f;
+				clamp(st, 0.f, 1.f);
+				Device.m_SecondViewport.svp_mag = _max(g_pip_scope_magnification, 0.f);
+				const float snug = 1.3f + (0.55f - 1.3f) * st;
+				float gp = shadow_g * 4.f;
+				clamp(gp, 0.f, 1.f);
+				float z_eff = ps_s3ds_param_1.z * (3.0f + (snug - 3.0f) * gp);
+				if (z_eff < 0.08f) z_eff = 0.08f;
+				sw_k = 0.4f * z_eff / _max(ps_s3ds_param_1.y, 0.05f);
+			}
+			RCache.set_c("svp_exposure", (ps_r__svp_local_exposure && !nvg_on) ? powf(2.f, ps_r__svp_exposure_bias) : 0.f,
+				nvg_on ? 0.f : dim,
+				Device.m_SecondViewport.svp_swing_x * shadow_g * sw_k,
+				Device.m_SecondViewport.svp_swing_y * shadow_g * sw_k);
+			// pip physical aperture, exit-pupil transmission + virtual-eye eyebox, x = 0 when disabled
+			svp_bind_aperture(pupil_mm);
 			// pip glass2: x = lens coating strength, y = heat mirage (sun elevation + magnification)
 			{
 				extern float ps_r__svp_coating;
@@ -317,17 +927,56 @@ void CRenderTarget::draw_scope(ref_shader se, std::function<void()> bind)
 						/ Device.m_SecondViewport.svp_panel_aspect;
 				RCache.set_c("svp_glass2", ps_r__svp_coating, mirage, 0.f, vcrop);
 				Device.m_SecondViewport.svp_panel_vcrop = vcrop; // pip binocular bracket mapping reads it
-				// pip glass3: x = sharpen amount, y = free, z = sharpen radial falloff, w = sharpen inner crisp radius
+				// pip glass3: x = sharpen amount, y = field-stop onset, z = sharpen radial falloff, w = sharpen inner crisp radius
 				extern float ps_r__svp_sharpen, ps_r__svp_sharpen_falloff, ps_r__svp_sharpen_inner;
-				RCache.set_c("svp_glass3", ps_r__svp_sharpen, 0.f, ps_r__svp_sharpen_falloff, ps_r__svp_sharpen_inner);
+				// pip field-stop onset, a stop at the field edge blurred by the viewing aperture
+				// which is the exit pupil capped by the eye pupil, 1 = off
+				float fs_onset = 1.f;
+				{
+					extern int ps_r__svp_field_stop;
+					extern float g_pip_scope_magnification;
+					extern Fvector4 ps_s3ds_param_1;
+					const float fs_omm = svp_objective_mm();
+					const float fs_fov = Device.m_SecondViewport.svp_fov;
+					if (ps_r__svp_field_stop && fs_omm > 0.01f && g_pip_scope_magnification > 0.01f && fs_fov > 0.01f && pupil_mm > EPS)
+					{
+						const float ep_r = fs_omm * 0.0005f / g_pip_scope_magnification;
+						const float ap_r = _min(ep_r, pupil_mm * 0.0005f);
+						const float er = _max(ps_s3ds_param_1.y * 0.01f, 0.05f);
+						const float app_half = g_pip_scope_magnification * fs_fov * 0.5f;
+						const float penumbra = _min(atanf(ap_r / er) / app_half, 1.f);
+						fs_onset = 1.f - 0.5f * penumbra;
+						extern int ps_r__svp_diag;
+						if (ps_r__svp_diag)
+						{
+							static u32 s_fs_ms = 0;
+							if (Device.dwTimeGlobal - s_fs_ms > 1000)
+							{
+								s_fs_ms = Device.dwTimeGlobal;
+								PipMsg("[SVP-FSTOP] ep %.1fmm pupil %.1fmm onset %.3f", ep_r * 2000.f, pupil_mm, fs_onset);
+							}
+						}
+					}
+				}
+				RCache.set_c("svp_glass3", ps_r__svp_sharpen, fs_onset, ps_r__svp_sharpen_falloff, ps_r__svp_sharpen_inner);
 				// pip glass4: x = nvg bleach roll-off, y = nvg auto-gain, w = shadow swing envelope
 				extern float ps_r__svp_nvg_bleach, ps_r__svp_nvg_sensitivity;
 				RCache.set_c("svp_glass4", ps_r__svp_nvg_bleach, ps_r__svp_nvg_sensitivity, 0.f,
 					shadow_g);
 			}
+		}
 
 		bind();
+		const bool frozen_was = g_svp_hud_frozen_pass;
+		const bool history_was = g_svp_hud_history_write;
+		if (frozen_lens)
+		{
+			g_svp_hud_frozen_pass = true;
+			g_svp_hud_history_write = false;
+		}
 		V->Render(0);
+		g_svp_hud_frozen_pass = frozen_was;
+		g_svp_hud_history_write = history_was;
 	}
 
 	RImplementation.rmNormal();
@@ -335,16 +984,15 @@ void CRenderTarget::draw_scope(ref_shader se, std::function<void()> bind)
 	RCache.set_xform_project(Device.mProject);
 }
 
-// pip render reflex-sight lenses (iScopeLense==10) with their own shaders, no-op for an eyepiece-only scope
-// svp draws them through the entrance-pupil camera so a hybrid holo dot magnifies and tracks with the world
-void CRenderTarget::draw_reflex(bool svp)
+// Draw captured reflex materials with their own shaders
+u32 CRenderTarget::draw_reflex(bool svp)
 {
 	PIX_EVENT_F("RENDER_REFLEX_SIGHTS x%u", (u32)RImplementation.GMBase.RGraph.mapReflexHUDSorted.size());
 
 	Fmatrix FTold = Device.mFullTransform;
 	if (svp)
 	{
-		// the svp camera is already active, keep it so the dot lands in the magnified scene
+		// Match the objective world and weapon projection
 		Device.mFullTransform.mul(Device.matrices[1].mProject, Device.matrices[1].mView);
 		RCache.set_xform_view(Device.matrices[1].mView);
 		RCache.set_xform_project(Device.matrices[1].mProject);
@@ -356,16 +1004,158 @@ void CRenderTarget::draw_reflex(bool svp)
 	}
 	RImplementation.rmNear();
 
-	for (auto& N : RImplementation.GMBase.RGraph.mapReflexHUDSorted)
+	extern int ps_r__svp_diag;
+	static u32 s_node_diag_ms = 0;
+	const bool node_diag = svp && ps_r__svp_diag
+		&& Device.dwTimeGlobal - s_node_diag_ms > 1000;
+	if (node_diag)
+		s_node_diag_ms = Device.dwTimeGlobal;
+
+	auto& nodes = RImplementation.GMBase.RGraph.mapReflexHUDSorted;
+	u32 selected_index = u32(-1);
+	Fmatrix selected_world = {};
+	bool selected_frozen = false;
+	float selected_score = flt_max;
+	if (svp)
 	{
-		if (!N.pVisual || !N.pSE || !N.pMatrix)
+		auto& vp = Device.m_SecondViewport;
+		Fvector objective_axis = vp.objective.m_W.k;
+		if (_valid(objective_axis) && objective_axis.square_magnitude() > EPS)
+			objective_axis.normalize();
+		else
+			objective_axis.set(Device.matrices[1].mView._13,
+				Device.matrices[1].mView._23, Device.matrices[1].mView._33);
+
+		for (u32 index = 0; index < nodes.size(); ++index)
+		{
+			auto& N = nodes[index];
+			if (!N.pVisual || !N.pSE || !N.pMatrix)
+				continue;
+
+			CSkeletonX* sk = fast_dynamic_cast<CSkeletonX*>(N.pVisual);
+			BOOL snapshot_visible = TRUE;
+			const bool bone_visible = !sk
+				|| (sk->SVP_BoneSnapshotVisible(snapshot_visible)
+					? !!snapshot_visible : sk->SVP_LensBoneVisible());
+			const void* owner = sk ? sk->SVP_SkeletonOwner() : nullptr;
+			const bool root_match = !vp.svp_lens_root || N.pMatrix == vp.svp_lens_root;
+			const bool owner_match = vp.svp_lens_owner && owner
+				&& owner == vp.svp_lens_owner;
+			const bool related = root_match || owner_match;
+
+			Fmatrix refW = *RImplementation.GMBase.svp_pose_of(N.pMatrix);
+			Fmatrix boundsW = refW;
+			Fmatrix latched_bone;
+			const bool has_latched_bone = sk
+				&& RImplementation.GMBase.svp_lens_bone_of(N.pVisual, latched_bone);
+			if (has_latched_bone)
+				boundsW.mulB_43(latched_bone);
+			const bool frozen_reflex = svp_objective_hud_current()
+				&& sk && sk->SVP_BoneSnapshotReady();
+			if (!frozen_reflex)
+			{
+				Fmatrix live_bone;
+				if (has_latched_bone && sk->SVP_LensBoneXform(live_bone))
+				{
+					Fmatrix inv;
+					inv.invert(live_bone);
+					refW.mulB_43(latched_bone);
+					refW.mulB_43(inv);
+				}
+			}
+
+			const auto& vis = N.pVisual->getVisData();
+			Fvector world_center;
+			boundsW.transform_tiny(world_center, vis.sphere.P);
+			Fvector view_center;
+			Device.matrices[1].mView.transform_tiny(view_center, world_center);
+			const float world_scale = _max(boundsW.i.magnitude(),
+				_max(boundsW.j.magnitude(), boundsW.k.magnitude()));
+			const float world_radius = vis.sphere.R * world_scale;
+			const float near_plane = _max(vp.svp_near, EPS);
+			const float far_plane = _max(vp.svp_far, near_plane + EPS);
+
+			Fvector axis_delta;
+			axis_delta.sub(world_center, vp.objective.m_W.c);
+			const float axis_depth = axis_delta.dotproduct(objective_axis);
+			Fvector radial;
+			radial.mad(axis_delta, objective_axis, -axis_depth);
+			const float axis_offset = radial.magnitude();
+
+			bool visible = bone_visible && related
+				&& _valid(view_center) && _valid(world_radius) && world_radius > EPS
+				&& _valid(axis_depth) && _valid(axis_offset)
+				&& axis_depth + world_radius > -EPS
+				&& view_center.z + world_radius > near_plane
+				&& view_center.z - world_radius < far_plane;
+			float ndc_x = 0.f;
+			float ndc_y = 0.f;
+			if (visible && view_center.z > EPS)
+			{
+				const Fmatrix& P = Device.matrices[1].mProject;
+				const float clip_x = view_center.x * P._11 + view_center.y * P._21
+					+ view_center.z * P._31 + P._41;
+				const float clip_y = view_center.x * P._12 + view_center.y * P._22
+					+ view_center.z * P._32 + P._42;
+				const float clip_w = view_center.x * P._14 + view_center.y * P._24
+					+ view_center.z * P._34 + P._44;
+				const float inv_w = _abs(clip_w) > EPS_S ? 1.f / clip_w : 0.f;
+				ndc_x = clip_x * inv_w;
+				ndc_y = clip_y * inv_w;
+				const float depth = _max(view_center.z - world_radius, near_plane);
+				const float radius_x = _abs(P._11) * world_radius / depth;
+				const float radius_y = _abs(P._22) * world_radius / depth;
+				visible = clip_w > EPS
+					&& ndc_x + radius_x > -1.f && ndc_x - radius_x < 1.f
+					&& ndc_y + radius_y > -1.f && ndc_y - radius_y < 1.f;
+			}
+
+			const float score = axis_offset
+				/ _max(_max(axis_depth, world_radius), EPS);
+			if (node_diag)
+			{
+				auto tx = N.pVisual->GetTexture();
+				PipMsg("[SVP-HYBRID] candidate=%u tex=%s view=(%.4f %.4f %.4f) ndc=(%.3f %.3f) r=%.2fcm axis=(%.2f %.2f) score=%.4f visible=%d bone=%d related=%d role=%u frozen=%d owner=%p",
+					index, tx ? tx->cName.c_str() : "?", view_center.x, view_center.y,
+					view_center.z, ndc_x, ndc_y, world_radius * 100.f,
+					axis_depth * 100.f, axis_offset * 100.f, score,
+					visible ? 1 : 0, bone_visible ? 1 : 0, related ? 1 : 0,
+					N.hud_role, frozen_reflex ? 1 : 0, owner);
+			}
+			if (visible && score < selected_score)
+			{
+				selected_index = index;
+				selected_world = refW;
+				selected_frozen = frozen_reflex;
+				selected_score = score;
+			}
+		}
+	}
+
+	u32 drawn = 0;
+	u32 node_index = 0;
+	for (auto& N : nodes)
+	{
+		if (svp && node_index != selected_index)
+		{
+			node_index++;
 			continue;
+		}
+		if (!N.pVisual || !N.pSE || !N.pMatrix)
+		{
+			node_index++;
+			continue;
+		}
 		RCache.set_Element(N.pSE);
-		Fmatrix refW = *RImplementation.GMBase.svp_pose_of(N.pMatrix);
-		// same bone step cancel as draw_scope, the reflex mesh rides one bone too
+		Fmatrix refW = svp ? selected_world
+			: *RImplementation.GMBase.svp_pose_of(N.pMatrix);
+		CSkeletonX* sk = fast_dynamic_cast<CSkeletonX*>(N.pVisual);
+		const bool frozen_reflex = svp ? selected_frozen
+			: svp_objective_hud_current() && sk && sk->SVP_BoneSnapshotReady();
+		// Match the objective pass bone pose
+		if (!svp && !frozen_reflex)
 		{
 			Fmatrix bL, bNow;
-			CSkeletonX* sk = fast_dynamic_cast<CSkeletonX*>(N.pVisual);
 			if (sk && RImplementation.GMBase.svp_lens_bone_of(N.pVisual, bL) && sk->SVP_LensBoneXform(bNow))
 			{
 				Fmatrix inv;
@@ -374,10 +1164,28 @@ void CRenderTarget::draw_reflex(bool svp)
 				refW.mulB_43(inv);
 			}
 		}
+		if (node_diag)
+		{
+			auto tx = N.pVisual->GetTexture();
+			PipMsg("[SVP-HYBRID] selected=%u tex=%s score=%.4f frozen=%d owner=%p",
+				node_index, tx ? tx->cName.c_str() : "?", selected_score,
+				frozen_reflex ? 1 : 0, sk ? sk->SVP_SkeletonOwner() : nullptr);
+		}
 		RCache.set_xform_world(refW);
 		RImplementation.apply_object(N.pObject);
 		RImplementation.apply_lmaterial();
+		const bool frozen_was = g_svp_hud_frozen_pass;
+		const bool history_was = g_svp_hud_history_write;
+		if (frozen_reflex)
+		{
+			g_svp_hud_frozen_pass = true;
+			g_svp_hud_history_write = false;
+		}
 		N.pVisual->Render(0);
+		g_svp_hud_frozen_pass = frozen_was;
+		g_svp_hud_history_write = history_was;
+		drawn++;
+		node_index++;
 	}
 
 	RImplementation.rmNormal();
@@ -385,173 +1193,139 @@ void CRenderTarget::draw_reflex(bool svp)
 	if (svp)
 		RCache.set_xform_view(Device.mView);
 	RCache.set_xform_project(Device.mProject);
+	return drawn;
 }
 
-// pip collimated reflex proxy, place a scaled copy of the reflex mesh at a virtual distance on the
-// boresight and draw it into the captured svp image so the magnifier carries it, sharp and tracking
-bool CRenderTarget::draw_reflex_proxy()
+// Render an engaged hybrid through the objective camera
+bool CRenderTarget::draw_hybrid_reflex()
 {
 	extern Fvector4 ps_s3ds_param_3;
 	extern int ps_markswitch_current;
-	// thermal image is pixelated and carries its own reticle, keep the proxy out of it
-	if (SvpThermalOverlayActive(ps_s3ds_param_3.x, ps_markswitch_current))
-		return false;
-
 	auto& G = RImplementation.GMBase.RGraph;
 	auto& vp = Device.m_SecondViewport;
+	constexpr int mark_magnifier_type = 12;
+	const float reticle_value = ps_s3ds_param_3.y;
+	const bool reticle_valid = _valid(reticle_value)
+		&& reticle_value >= 0.f && reticle_value <= float(u8(-1))
+		&& floorf(reticle_value) == reticle_value;
+	const int reticle_type = reticle_valid ? static_cast<int>(reticle_value) : -1;
+	const bool camera_current = vp.svp_camera_frame == Device.dwFrame
+		&& vp.svp_camera_session == vp.GetSVPSession();
+	const bool lens_current = vp.svp_lens_frame == Device.dwFrame
+		&& vp.svp_lens_root != nullptr && vp.svp_lens_visual != nullptr
+		&& vp.eyepiece.radius > EPS;
+	const bool target_current = RImplementation.TargetSVP == this
+		&& RImplementation.Target == this;
+	const auto& optic = vp.RenderOpticConfig();
+	const bool identity_current = optic.typed_route && optic.valid
+		&& optic.frame == Device.dwFrame
+			&& optic.session == vp.GetSVPSession()
+			&& (optic.scope[0] || optic.diagnostic_scope[0]);
+	const bool type_current = identity_current
+		&& optic.reticle_type == reticle_type;
+	const bool legacy_hybrid = !optic.has_hybrid_reflex
+		&& optic.reticle_type == mark_magnifier_type;
+	const bool hybrid_eligible = type_current
+		&& (optic.hybrid_reflex || legacy_hybrid);
 
-	// bone-folded world pose of a reflex node, same bone step cancel draw_reflex uses so the proxy
-	// matches the legacy 1x dot
-	auto pose_of = [&](auto& N) -> Fmatrix {
-		Fmatrix W = *RImplementation.GMBase.svp_pose_of(N.pMatrix);
-		Fmatrix bL, bNow;
-		CSkeletonX* sk = fast_dynamic_cast<CSkeletonX*>(N.pVisual);
-		if (sk && RImplementation.GMBase.svp_lens_bone_of(N.pVisual, bL) && sk->SVP_LensBoneXform(bNow))
-		{
-			Fmatrix inv; inv.invert(bNow);
-			W.mulB_43(bL);
-			W.mulB_43(inv);
-		}
-		return W;
+	enum class HybridState : u32
+	{
+		Inactive,
+		WrongDomain,
+		NotHybrid,
+		Thermal,
+		StaleCamera,
+		StaleLens,
+		StaleIdentity,
+		StaleType,
+		Empty,
+		NoDraw,
+		Drawn
 	};
 
-	// primary node, measure boresight + subtense from the first valid reflex mesh
-	bool have_prim = false;
-	Fmatrix refW0; Fvector C0 = {}; float r0 = 0.f;
-	for (auto& N : G.mapReflexHUDSorted)
-	{
-		if (!N.pVisual || !N.pSE || !N.pMatrix)
-			continue;
-		refW0 = pose_of(N);
-		auto& V = N.pVisual->getVisData();
-		Fvector lc; V.box.getcenter(lc);
-		refW0.transform_tiny(C0, lc);
-		r0 = V.sphere.R;
-		have_prim = true;
-		break;
-	}
-	if (!have_prim)
-		return false;
-
-	// classify by aperture overlap, a coaxial hybrid (magnifier + holo) sits close enough that the
-	// reflex glass overlaps the eyepiece aperture, a stacked secondary (rmr) sits beyond both
-	{
-		auto& ep = Device.m_SecondViewport.eyepiece;
-		bool coax = ep.radius > EPS;
-		float lateral = 0.f;
-		if (coax)
-		{
-			Fvector eax; eax.set(ep.m_W.k); eax.normalize();
-			Fvector rel; rel.sub(C0, ep.m_W.c);
-			Fvector proj; proj.mad(ep.m_W.c, eax, rel.dotproduct(eax));
-			lateral = C0.distance_to(proj);
-			// r0 is the measured reflex glass radius, ep.radius the eyepiece, overlap when the
-			// lateral gap is under their radii summed
-			if (lateral > ep.radius + r0)
-				coax = false;
-		}
-		const char* cls = !(ep.radius > EPS) ? "legacy" : (coax ? "coax" : "stacked");
-		extern int ps_r__svp_diag;
-		static u32 s_cls_ms = 0;
-		if (ps_r__svp_diag && Device.dwTimeGlobal - s_cls_ms > 1000)
-		{
-			s_cls_ms = Device.dwTimeGlobal;
-			PipMsg("[SVP-RET] proxy class=%s lat=%.2fcm eye_r=%.2fcm", cls, lateral * 100.f, ep.radius * 100.f);
-		}
-		if (!coax)
-			return false; // stacked or no eyepiece, the real top sight draws via the 1x overlay
-	}
-
-	const float eye_dist = C0.distance_to(Device.vCameraPosition);
-	if (!(eye_dist > 0.02f)) // false for NaN too
-		return false;
-
-	// boresight, the reflex mesh normal is the real collimated axis, the stable sight line is fallback
-	Fvector b; b.set(refW0.k);
-	if (b.magnitude() < EPS)
-	{
-		if (vp.svp_sight_ok && (Device.dwFrame - vp.svp_sight_frame) < 8)
-			b.set(vp.svp_sight_dir);
-		else
-			return false;
-	}
-	b.normalize_safe();
-	if (b.magnitude() < 0.5f)
-		return false;
-
-	const float D = 10.0f; // virtual distance past the svp near plane, the projected size is D invariant
-	// the scale draws the reticle at the reflex glass angular size r0/eye_dist, the physical aperture
-	// bound, a collimated reticle cannot appear larger than its own window so no extra cap is applied
-	const float s = D / eye_dist;
-	Fvector target0; target0.mad(vp.svp_cam_pos, b, D);
-
-	// in-front + in-frame test against the svp camera, a wildly off-axis reflex is degenerate
-	Fmatrix FT; FT.mul(Device.matrices[1].mProject, Device.matrices[1].mView);
-	const float cx = target0.x*FT._11 + target0.y*FT._21 + target0.z*FT._31 + FT._41;
-	const float cy = target0.x*FT._12 + target0.y*FT._22 + target0.z*FT._32 + FT._42;
-	const float cw = target0.x*FT._14 + target0.y*FT._24 + target0.z*FT._34 + FT._44;
-	const bool front_ok = b.dotproduct(vp.svp_fwd) > 0.f;
-	const bool inframe = (cw > 0.f) && (_abs(cx) < 2.f*cw) && (_abs(cy) < 2.f*cw);
-	if (!front_ok || !inframe)
-		return false;
-
-	// bind the captured svp color with no depth so the additive dot always lands on top
-	u_setrt(Width, Height, rt_secondVP->pRT, nullptr, nullptr, nullptr);
-	RCache.set_CullMode(CULL_CCW);
-	RCache.set_Stencil(FALSE);
-	RCache.set_ColorWriteEnable();
-
-	Fmatrix FTold = Device.mFullTransform;
-	Device.mFullTransform.mul(Device.matrices[1].mProject, Device.matrices[1].mView);
-	RCache.set_xform_view(Device.matrices[1].mView);
-	RCache.set_xform_project(Device.matrices[1].mProject);
-	RImplementation.rmNormal();
-
+	HybridState state = HybridState::Inactive;
 	u32 drawn = 0;
-	for (auto& N : G.mapReflexHUDSorted)
+	if (!Device.true_pip_on || !vp.IsSVPActive())
+		state = HybridState::Inactive;
+	else if (vp.svp_camera_domain != CSecondVPParams::camera_objective
+		|| vp.svp_front_use_m <= EPS || vp.objective.radius <= EPS)
+		state = HybridState::WrongDomain;
+	else if (!reticle_valid)
+		state = HybridState::StaleType;
+	else if (svp_thermal_active(ps_s3ds_param_3.x, ps_markswitch_current))
+		state = HybridState::Thermal;
+	else if (!camera_current || !target_current)
+		state = HybridState::StaleCamera;
+	else if (!lens_current)
+		state = HybridState::StaleLens;
+	else if (!identity_current)
+		state = HybridState::StaleIdentity;
+	else if (!type_current)
+		state = HybridState::StaleType;
+	else if (!hybrid_eligible)
+		state = HybridState::NotHybrid;
+	else if (G.mapScopeHUDSorted.empty() || G.mapReflexHUDSorted.empty())
+		state = HybridState::Empty;
+	else
 	{
-		if (!N.pVisual || !N.pSE || !N.pMatrix)
-			continue;
-		Fmatrix refW = pose_of(N);
-		auto& V = N.pVisual->getVisData();
-		Fvector lc; V.box.getcenter(lc);
-		Fvector Cn; refW.transform_tiny(Cn, lc);
-
-		// scale the mesh uniformly and anchor its box center on the boresight, extra meshes keep
-		// their scaled offset from the primary so a multi-element reticle stays rigid
-		Fmatrix proxyW = refW;
-		proxyW.i.mul(s); proxyW.j.mul(s); proxyW.k.mul(s);
-		Fvector off; proxyW.transform_dir(off, lc);
-		Fvector rel; rel.sub(Cn, C0); rel.mul(s);
-		proxyW.c.add(target0, rel);
-		proxyW.c.sub(off);
-
-		RCache.set_Element(N.pSE);
-		RCache.set_xform_world(proxyW);
-		RImplementation.apply_object(N.pObject);
-		RImplementation.apply_lmaterial();
-		N.pVisual->Render(0);
-		drawn++;
+		// Post processed color stays intact while the optical reticle remains sharp
+		u_setrt(Width, Height, rt_secondVP->pRT, nullptr, nullptr, nullptr);
+		RCache.set_CullMode(CULL_CCW);
+		RCache.set_Stencil(FALSE);
+		RCache.set_ColorWriteEnable();
+		drawn = draw_reflex(true);
+		state = drawn ? HybridState::Drawn : HybridState::NoDraw;
 	}
 
-	RImplementation.rmNormal();
-	Device.mFullTransform = FTold;
-	RCache.set_xform_view(Device.mView);
-	RCache.set_xform_project(Device.mProject);
-
+	extern int ps_r__svp_diag;
+	static u32 s_diag_ms = 0;
+	static u32 s_last_state = u32(-1);
+	static int s_last_type = -2;
+	static int s_last_mark = -2;
+	static u32 s_last_epoch = u32(-1);
+	const u32 state_value = static_cast<u32>(state);
+	const bool changed = state_value != s_last_state || reticle_type != s_last_type
+		|| ps_markswitch_current != s_last_mark || vp.svp_optic_epoch != s_last_epoch;
+	if (ps_r__svp_diag && (changed || Device.dwTimeGlobal - s_diag_ms > 1000))
 	{
-		extern int ps_r__svp_diag;
-		static u32 s_prox_ms = 0;
-		if (ps_r__svp_diag && Device.dwTimeGlobal - s_prox_ms > 1000)
-		{
-			s_prox_ms = Device.dwTimeGlobal;
-			PipMsg("[SVP-RET] proxy drew=%u eye=%.1fcm theta=%.2fmrad s=%.2f front=%d in=%d",
-				drawn, eye_dist * 100.f, (r0 / eye_dist) * 1000.f, s, (int)front_ok, (int)inframe);
-		}
+		s_diag_ms = Device.dwTimeGlobal;
+		s_last_state = state_value;
+		s_last_type = reticle_type;
+		s_last_mark = ps_markswitch_current;
+		s_last_epoch = vp.svp_optic_epoch;
+		const char* state_name = state == HybridState::Drawn ? "drawn"
+			: state == HybridState::NoDraw ? "no_draw"
+			: state == HybridState::Empty ? "empty"
+			: state == HybridState::StaleType ? "stale_type"
+			: state == HybridState::StaleIdentity ? "stale_identity"
+			: state == HybridState::StaleLens ? "stale_lens"
+			: state == HybridState::StaleCamera ? "stale_camera"
+			: state == HybridState::Thermal ? "thermal"
+			: state == HybridState::NotHybrid ? "not_hybrid"
+			: state == HybridState::WrongDomain ? "wrong_domain"
+			: "inactive";
+		LPCSTR optic_name = optic.scope[0] ? optic.scope
+			: (optic.diagnostic_scope[0] ? optic.diagnostic_scope : "legacy");
+		PipMsg("[SVP-HYBRID] state=%s path=objective-mesh target=secondvp projection=scene rtype=%d config_type=%u authored=%d hybrid=%d legacy=%d eligible=%d image=%.0f mark=%d mag=%.2f scope=%u reflex=%u camera=%d lens=%d target_ok=%d typed=%d identity=%d type_ok=%d optic=%s spec=%s gen=%u drawn=%u session=%u epoch=%u frame=%u",
+			state_name, reticle_type, optic.reticle_type,
+			optic.has_hybrid_reflex ? 1 : 0, optic.hybrid_reflex ? 1 : 0,
+			legacy_hybrid ? 1 : 0,
+			hybrid_eligible ? 1 : 0, ps_s3ds_param_3.x, ps_markswitch_current,
+			vp.svp_mag, (u32)G.mapScopeHUDSorted.size(), (u32)G.mapReflexHUDSorted.size(),
+			camera_current ? 1 : 0, lens_current ? 1 : 0, target_current ? 1 : 0,
+			optic.typed_route ? 1 : 0, identity_current ? 1 : 0,
+			type_current ? 1 : 0,
+			optic_name, optic.spec[0] ? optic.spec : "none", optic.generation, drawn,
+			vp.GetSVPSession(), vp.svp_optic_epoch, Device.dwFrame);
 	}
 
-	if (drawn > 0) { if (ps_r__svp_stats) ++svp_stats_reflex_proxy; svp_ledger_reflex_proxy = 1; } // overlay + ledger proof the collimated proxy drew
-	return drawn > 0;
+	if (state == HybridState::Drawn)
+	{
+		if (ps_r__svp_stats)
+			++svp_stats_reflex_capture;
+		return true;
+	}
+	return false;
 }
 
 void CRenderTarget::phase_3DSSReticle()
@@ -612,9 +1386,13 @@ void CRenderTarget::phase_3DSSReticle()
 
 		// a hybrid magnifier drew the holo dot inside the svp already, skip the 1x main-view overlay
 		extern int ps_r__svp_reflex_capture;
-		// suppress the 1x overlay only when the collimated proxy actually drew this frame, never blank the dot
+		// Suppress the fallback only for the captured optic identity
 		const bool reflex_in_svp = ps_r__svp_reflex_capture && svp
-			&& Device.m_SecondViewport.svp_reflex_proxy_ok;
+			&& Device.m_SecondViewport.svp_reflex_capture_ok
+			&& Device.m_SecondViewport.svp_reflex_capture_epoch
+				== Device.m_SecondViewport.svp_optic_epoch
+			&& Device.m_SecondViewport.svp_reflex_capture_session
+				== Device.m_SecondViewport.GetSVPSession();
 
 		// the scope shader reads generic2 as the gbuffer position for the holepunch/depth
 		HW.pContext->CopyResource(rt_Generic_2->pTexture->surface_get(), RImplementation.Target->rt_Position->pTexture->surface_get());
@@ -627,71 +1405,61 @@ void CRenderTarget::phase_3DSSReticle()
 		if (!reflex_in_svp)
 			draw_reflex(); // reflex / red dot, both 1x and magnifier
 
-		// composite the eyepiece lens when magnified or a 1x eyepiece was captured, magnified samples
-		// the SVP image, 1x / fake-PiP samples a main-frame copy, a pure reflex optic captures no ==3
+		// composite the captured eyepiece, inactive true PiP keeps clear glass over the main scene
 		if (svp || (!RImplementation.GMBase.RGraph.mapScopeHUDSorted.empty() && Device.m_SecondViewport.eyepiece.radius > EPS))
 		{
-			// fake-PiP, off-SVP the lens reads a copy of the finished main frame (magnified already filled rt_secondVP)
-			if (!svp)
-				HW.pContext->CopyResource(M->rt_secondVP->pSurface, M->rt_Generic_0->pSurface);
-
 			// JITTERFIX, cancel the TAA jitter in the VS so the lens edge has no ring, cvar 0 skips for the a/b
 			extern int ps_r__svp_jitterfix;
-			if (ps_r__svp_jitterfix)
+			if (svp && ps_r__svp_jitterfix)
 			{ PIX_EVENT(SCOPE_PHASE_JITTERFIX); draw_scope(s_scope_color_write, []() { RCache.set_c("scope_phase", SCOPE_PHASE_JITTERFIX); }); }
 
-			// point the stock-named textures at this viewport's RTs, the SVP image when magnified else
-			// the main-frame copy + the main gbuffer (rt_Generic_2 already holds the copied position)
-			auto remap = [](LPCSTR name, ref_rt& target) {
-				ref_texture t;
-				t.create(name);
-				// raw pSurface, surface_get would AddRef a reference nobody releases (per-frame leak)
-				t->surface_set(target->pSurface);
-			};
-			remap(r2_RT_secondVP, svp ? S->rt_secondVP : M->rt_secondVP);
-			remap(r2_RT_generic2, svp ? S->rt_Position : M->rt_Generic_2);
-			remap(r2_RT_heat,     svp ? S->rt_Heat : M->rt_Heat);
-			// pip the scope's own measured exposure for the local-exposure image grade
+			if (svp)
 			{
-				ref_texture t;
-				t.create("$user$svp_tonemap");
-				ID3DBaseTexture* s = (svp ? S : M)->t_LUM_dest->surface_get();
-				t->surface_set(s);
-				_RELEASE(s);
-			}
-			// invalidate so the IMAGE pass picks up the remapped surfaces (the bind cache keys on CTexture identity)
-			RCache.Invalidate();
+				// point the stock named textures at the active SVP targets
+				auto remap = [](LPCSTR name, ref_rt& target) {
+					ref_texture t;
+					t.create(name);
+					t->surface_set(target->pSurface);
+				};
+				remap(r2_RT_secondVP, S->rt_secondVP);
+				remap(r2_RT_generic2, S->rt_Position);
+				remap(r2_RT_heat, S->rt_Heat);
+				{
+					ref_texture t;
+					t.create("$user$svp_tonemap");
+					ID3DBaseTexture* s = S->t_LUM_dest->surface_get();
+					t->surface_set(s);
+					_RELEASE(s);
+				}
+				RCache.Invalidate();
 
-			u_setrt(M->rt_Generic_0, nullptr, M->rt_Position, M->baseZB);
-			RCache.set_CullMode(CULL_CCW);
-			RCache.set_Stencil(FALSE);
-			RCache.set_ColorWriteEnable();
+				u_setrt(M->rt_Generic_0, nullptr, M->rt_Position, M->baseZB);
+				RCache.set_CullMode(CULL_CCW);
+				RCache.set_Stencil(FALSE);
+				RCache.set_ColorWriteEnable();
 
-			// IMAGE, the magnified SVP scene (or the main frame under fake-PiP)
-			{ PIX_EVENT(SCOPE_PHASE_IMAGE);
-			draw_scope(s_scope_color_write, [svp]() {
-				RCache.set_c("scope_phase", SCOPE_PHASE_IMAGE);
-				auto ts = svp ? RImplementation.TargetSVP : RImplementation.TargetMain;
-				Fvector4 sr; sr.set((float)ts->Width, (float)ts->Height, 1.0f / (float)ts->Width, 1.0f / (float)ts->Height);
-				RCache.set_c("screen_res", sr);
-				auto tm = RImplementation.TargetMain;
-				Fvector4 outr; outr.set((float)tm->Width, (float)tm->Height, 1.0f / (float)tm->Width, 1.0f / (float)tm->Height);
-				RCache.set_c("output_res", outr);
-				// lens roll, project the objective up-vector to screen so the reticle stays upright
-				Fvector up = {0, 1, 0};
-				Device.m_SecondViewport.objective.m_W.transform_dir(up);
-				Device.mView.transform_dir(up);
-				up.z = 0.0f;
-				up.normalize();
-				float angle = acosf(up.dotproduct({0, 1, 0})) * (up.x > 0 ? 1.0f : -1.0f);
-				RCache.set_c("hack_tex_angle", angle);
-			});
-			}
-
+				{ PIX_EVENT(SCOPE_PHASE_IMAGE);
+				draw_scope(s_scope_color_write, []() {
+					RCache.set_c("scope_phase", SCOPE_PHASE_IMAGE);
+					auto ts = RImplementation.TargetSVP;
+					Fvector4 sr; sr.set((float)ts->Width, (float)ts->Height, 1.0f / (float)ts->Width, 1.0f / (float)ts->Height);
+					RCache.set_c("screen_res", sr);
+					auto tm = RImplementation.TargetMain;
+					Fvector4 outr; outr.set((float)tm->Width, (float)tm->Height, 1.0f / (float)tm->Width, 1.0f / (float)tm->Height);
+					RCache.set_c("output_res", outr);
+					Fvector up = {0, 1, 0};
+					Device.m_SecondViewport.objective.m_W.transform_dir(up);
+					Device.mView.transform_dir(up);
+					up.z = 0.0f;
+					up.normalize();
+					float angle = acosf(up.dotproduct({0, 1, 0})) * (up.x > 0 ? 1.0f : -1.0f);
+					RCache.set_c("hack_tex_angle", angle);
+				});
+				}
 
 				// latch the on-screen eyepiece disc px for adaptive SVP resolution, learn only the
 				// settled aimed disc so a raise transient or quick peek never freezes a partial value
-				if (svp && RImplementation.TargetSVP && Device.m_SecondViewport.eyepiece.radius > EPS)
+				if (RImplementation.TargetSVP && Device.m_SecondViewport.eyepiece.radius > EPS)
 				{
 					auto& vpd = Device.m_SecondViewport;
 					const Fmatrix& MH = Device.mFullTransformHud;
@@ -737,6 +1505,7 @@ void CRenderTarget::phase_3DSSReticle()
 							g_pip_scope_magnification, sres, sres, disc, vpd.svp_disc_px, ps_r__svp_adaptive_res, lin, lin*lin);
 					}
 				}
+			}
 
 
 			// restore the stock textures for the reticle/shadow/lens draws
@@ -750,13 +1519,15 @@ void CRenderTarget::phase_3DSSReticle()
 			{ PIX_EVENT(SCOPE_PHASE_SHADOW);  draw_scope(s_scope_color_write, []() { RCache.set_c("scope_phase", SCOPE_PHASE_SHADOW); }); }
 			{ PIX_EVENT(SCOPE_PHASE_LENS);    draw_scope(s_scope_color_write, []() { RCache.set_c("scope_phase", SCOPE_PHASE_LENS); }); }
 
-			// CUSTOM_DEPTH, let the scope override depth so DOF focuses on the lens image
-			{ PIX_EVENT(SCOPE_PHASE_CUSTOM_DEPTH);
-			u_setrt(RImplementation.Target->rt_Position, 0, 0, 0, RImplementation.Target->baseZB);
-			draw_scope(s_scope_depth_write, []() {
-				RCache.set_c("scope_phase", SCOPE_PHASE_DEPTHWRITE | SCOPE_PHASE_CUSTOM_DEPTH);
-				RCache.set_c("scope_depth_value", 1.0f);
-			});
+			// The focus depth belongs only to a real SVP image
+			if (svp)
+			{
+				PIX_EVENT(SCOPE_PHASE_CUSTOM_DEPTH);
+				u_setrt(RImplementation.Target->rt_Position, 0, 0, 0, RImplementation.Target->baseZB);
+				draw_scope(s_scope_depth_write, []() {
+					RCache.set_c("scope_phase", SCOPE_PHASE_DEPTHWRITE | SCOPE_PHASE_CUSTOM_DEPTH);
+					RCache.set_c("scope_depth_value", 1.0f);
+				});
 			}
 
 			// re-draw the reflex over the composited lens at the main-view position, the hybrid

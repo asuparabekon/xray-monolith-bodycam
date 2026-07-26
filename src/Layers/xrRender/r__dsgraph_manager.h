@@ -106,27 +106,40 @@ public:
 	void r_dsgraph_capture_hud();
 	void r_dsgraph_render_hud(bool _clear = true);
 	void r_dsgraph_render_hud_svp();
-	// pip hud pose latch, logic rewrites the hud matrices mid render, the SVP drain and the
-	// late scope draws reuse the exact pose the housing drew with
-	struct
+	// pip one hud pose sample feeds the housing and every late scope draw
+	struct SSvpPoseLatch
 	{
-		Fmatrix* src[8];
-		Fmatrix val[8];
-		u32 count{};
-		u32 frame{u32(-1)};
-	} m_svp_pose;
+		Fmatrix* source = nullptr;
+		Fmatrix value;
+	};
+	xr_vector<SSvpPoseLatch> m_svp_pose;
+	u32 m_svp_pose_frame{u32(-1)};
 	void svp_latch_hud_poses();
 	Fmatrix* svp_pose_of(Fmatrix* p);
-	// pip lens bone latch, skinned lens bones recompute on the logic thread mid render, the camera
-	// derivation and the late lens draws reuse the bone sampled at the housing draw
-	struct
+	// pip one lens bone sample feeds camera derivation and late lens draws
+	struct SSvpBoneLatch
 	{
-		dxRender_Visual* vis[4];
-		Fmatrix bone[4];
-		u32 count{};
-		u32 frame{u32(-1)};
-	} m_svp_bone;
+		dxRender_Visual* visual = nullptr;
+		Fmatrix value;
+	};
+	xr_vector<SSvpBoneLatch> m_svp_bone;
+	u32 m_svp_bone_frame{u32(-1)};
 	bool svp_lens_bone_of(dxRender_Visual* v, Fmatrix& out);
+	struct SSvpHudAdmission
+	{
+		float axial = 0.f;
+		float radial = -1.f;
+		float radius = 0.f;
+		float axial_lo = 0.f;
+		float axial_hi = 0.f;
+		float objective = 0.f;
+		LPCSTR reason = "inactive";
+		bool candidate = false;
+		bool reject = false;
+		bool forward = false;
+	};
+	void svp_classify_objective_hud(dxRender_Visual* visual, Fmatrix* matrix, u8 role,
+		SSvpHudAdmission& admission);
 	void r_dsgraph_render_hud_ui();
 	void r_dsgraph_render_lods(bool _setup_zb, bool _clear);
 	void r_dsgraph_render_sorted(bool render_hud = true);

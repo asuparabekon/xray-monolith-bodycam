@@ -14,15 +14,13 @@ end
 local _full = page {
 	{ id = "pip" },
 
-	list_enum {
+	list {
 		id = "r__svpscope",
 		content = {
-			"OFF",
-			"Eyepiece",
-			"Objective"
+			{"0", "OFF"},
+			{"2", "ON"}
 		},
 	},
-	list_bool { id = "r__svp_aperture" },
 	track {
 		id = "g_zoom_smooth",
 		def = 12,
@@ -37,28 +35,6 @@ local _full = page {
 		max = 200,
 		step = 5,
 	},
-
-	line {},
-
-	track {
-		id = "r__svp_render_scale",
-		def = 1.0,
-		min = 0.4,
-		max = 1.0,
-		step = 0.05,
-	},
-	list_bool { id = "r__svp_dlss" },
-
-	line {},
-
-	track {
-		id = "r__scope_debug",
-		def = 0,
-		min = 0,
-		max = 4,
-		step = 1,
-	},
-
 }
 
 -- expose the controls only on a matched PiP engine; otherwise an empty page so the menu never reads the missing cvars

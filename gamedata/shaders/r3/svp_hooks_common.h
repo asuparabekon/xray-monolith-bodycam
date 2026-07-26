@@ -1,4 +1,4 @@
-// svp_hooks_common 20260715 thinhook
+// svp_hooks_common 20260723 pupil
 // shared SVP uniform + texture decls for the hook headers and monolith scopes, no shader_scope_params here
 #ifndef SVP_HOOKS_COMMON_INCLUDED
 #define SVP_HOOKS_COMMON_INCLUDED
@@ -35,11 +35,19 @@ uniform float4 svp_lens_up;
 #endif
 #ifndef SVP_OPTICS_DECLARED
 #define SVP_OPTICS_DECLARED
-uniform float4 svp_optics; // x = 2*ocular_radius/eye_distance, y = true-scale parallax, z = dead lane
+uniform float4 svp_optics; // x lens geometry, y reticle parallax, z legacy depth, w optical ratio
 #endif
 #ifndef SVP_CONTROL_DECLARED
 #define SVP_CONTROL_DECLARED
 uniform float4 svp_control; // engine intent, x/y/z = strip parallax shadow/chromatism/nvg blur under true PiP
+#endif
+#ifndef SVP_MAS_DECLARED
+#define SVP_MAS_DECLARED
+uniform float4 svp_mas; // x effective scale, y override active, z authored scale, w packed source
+float svp_effective_mas(float authored)
+{
+	return shader_scope_params.w < -1.5 && svp_mas.y > 0.5 ? svp_mas.x : authored;
+}
 #endif
 #ifndef SVP_GLASS_DECLARED
 #define SVP_GLASS_DECLARED
@@ -55,7 +63,7 @@ uniform float4 svp_glass2; // engine glass optics 2, x = coating, y = heat mirag
 #endif
 #ifndef SVP_GLASS3_DECLARED
 #define SVP_GLASS3_DECLARED
-uniform float4 svp_glass3; // engine glass optics 3, x = sharpen amount, y = free, z = sharpen radial falloff, w = sharpen inner crisp radius
+uniform float4 svp_glass3; // engine glass optics 3, x = sharpen amount, y = field-stop onset, z = sharpen radial falloff, w = sharpen inner crisp radius
 #endif
 #ifndef SVP_GLASS4_DECLARED
 #define SVP_GLASS4_DECLARED

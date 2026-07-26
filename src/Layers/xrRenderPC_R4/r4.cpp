@@ -124,6 +124,22 @@ static class cl_pos_decompress_params : public R_constant_setup
 {
 	virtual void setup(R_constant* C)
 	{
+		const Fmatrix& projection = Device.mProject;
+		const bool svp_projection = Device.true_pip_on
+			&& Device.m_SecondViewport.m_render_pass_is_svp;
+		if (svp_projection && _valid(projection._11) && _valid(projection._22)
+			&& _abs(projection._11) > EPS && _abs(projection._22) > EPS)
+		{
+			const float inv_x = 1.f / projection._11;
+			const float inv_y = 1.f / projection._22;
+			RCache.set_c(C,
+				(1.f + projection._31) * inv_x,
+				(projection._32 - 1.f) * inv_y,
+				2.f * inv_x / (float)Device.dwWidth,
+				-2.f * inv_y / (float)Device.dwHeight);
+			return;
+		}
+
 		float VertTan = -1.0f * tanf(deg2rad(Device.fFOV / 2.0f));
 		float HorzTan = - VertTan / Device.fASPECT;
 

@@ -36,8 +36,24 @@ static bool resolve_from_section(LPCSTR sect, float zoom_multiple, svp_mags_data
 	float min_mag = 0.f, max_mag = 0.f;
 	bool authored = false, dyn = false, stepped = false;
 
-	LPCSTR raw = READ_IF_EXISTS(pSettings, r_string, sect, "magnifications", NULL);
+	LPCSTR source_key = nullptr;
+	LPCSTR raw = READ_IF_EXISTS(pSettings, r_string, sect, "svp_magnifications", NULL);
+	if (raw && raw[0])
+		source_key = "svp_magnifications";
+	else
+	{
+		raw = READ_IF_EXISTS(pSettings, r_string, sect, "magnifications", NULL);
+		if (raw && raw[0])
+			source_key = "magnifications";
+	}
 	svp_mag_mode mode = parse_svp_magnifications(raw, min_mag, max_mag);
+	if (raw && raw[0] && mode == svp_mag_none)
+	{
+		LPCSTR source = pSettings->DLTX_getFilenameOfLine(sect, source_key);
+		PipMsg("[SVP-MAGS] %s key=%s value='%s' src=%s malformed, legacy retained",
+			sect, source_key, raw, source ? source : "?");
+		return true;
+	}
 	if (mode != svp_mag_none)
 	{
 		authored = true;
@@ -46,36 +62,61 @@ static bool resolve_from_section(LPCSTR sect, float zoom_multiple, svp_mags_data
 	}
 	else if (pSettings->line_exist(sect, "magnification"))
 	{
-		// singular tier, magnification is the top, min from min_magnification (default 1x) when dynamic
-		max_mag = pSettings->r_float(sect, "magnification");
-		const bool dzoom = READ_IF_EXISTS(pSettings, r_bool, sect, "scope_dynamic_zoom", false);
-		min_mag = dzoom ? READ_IF_EXISTS(pSettings, r_float, sect, "min_magnification", 1.f) : max_mag;
-		raw = "magnification";
+		raw = pSettings->r_string(sect, "magnification");
+		source_key = "magnification";
+		mode = parse_svp_magnifications(raw, min_mag, max_mag);
+		if (mode == svp_mag_none)
+		{
+			LPCSTR source = pSettings->DLTX_getFilenameOfLine(sect, source_key);
+			PipMsg("[SVP-MAGS] %s key=%s value='%s' src=%s malformed, legacy retained",
+				sect, source_key, raw ? raw : "", source ? source : "?");
+			return true;
+		}
 		authored = true;
-		dyn = dzoom;
+		dyn = (mode != svp_mag_fixed);
+		stepped = (mode == svp_mag_stepped);
+		if (mode == svp_mag_fixed)
+		{
+			dyn = READ_IF_EXISTS(pSettings, r_bool, sect, "scope_dynamic_zoom", false);
+			if (dyn)
+				min_mag = READ_IF_EXISTS(pSettings, r_float, sect, "min_magnification", 1.f);
+		}
 	}
 
 	if (!authored)
 		return false;
 
-	const float svp_mag_base = SVP_ZOOM_BASE_FOV / 0.75f; // 100, mag = base / f
-	// physical band, 0.5x floor mirrors the 200 default min factor (100/200), 100x holds the top factor >= 1
-	clamp(min_mag, svp_mag_base / 200.f, svp_mag_base);
-	clamp(max_mag, svp_mag_base / 200.f, svp_mag_base);
+	const float svp_mag_base = SVP_ZOOM_BASE_FOV / 0.75f;
+	const float min_supported_mag = svp_mag_base / 200.f;
+	const float max_supported_mag = svp_mag_base;
+	if (!_valid(min_mag) || !_valid(max_mag) || min_mag < min_supported_mag
+		|| max_mag > max_supported_mag || min_mag > max_mag
+		|| !_valid(zoom_multiple) || zoom_multiple <= EPS)
+	{
+		LPCSTR source = pSettings->DLTX_getFilenameOfLine(sect, source_key);
+		PipMsg("[SVP-MAGS] %s key=%s value='%s' src=%s malformed, legacy retained",
+			sect, source_key, raw ? raw : "", source ? source : "?");
+		return true;
+	}
+
+	// 0.5x mirrors the 200 default min factor and 100x keeps the top factor positive
 	const float f_top = svp_mag_base / max_mag / zoom_multiple;
 	const float f_floor = svp_mag_base / min_mag;
 	// dynamic detents need an ordered range and the top factor under the base fov (NewGetZoomData VERIFY)
-	if (min_mag > max_mag || (dyn && f_top >= SVP_ZOOM_BASE_FOV))
+	if (!_valid(f_top) || !_valid(f_floor) || (dyn && f_top >= SVP_ZOOM_BASE_FOV))
 	{
-		PipMsg("[SVP-MAGS] %s '%s' malformed, legacy retained", sect, raw ? raw : "");
+		LPCSTR source = pSettings->DLTX_getFilenameOfLine(sect, source_key);
+		PipMsg("[SVP-MAGS] %s key=%s value='%s' src=%s malformed, legacy retained",
+			sect, source_key, raw ? raw : "", source ? source : "?");
 		return true;
 	}
 
 	out.mode = dyn ? (stepped ? svp_mag_stepped : svp_mag_dynamic) : svp_mag_fixed;
 	out.f_top = f_top;
 	out.f_floor = f_floor;
-	PipMsg("[SVP-MAGS] %s '%s' mag=[%.2f..%.2f] f=[%.1f..%.1f]",
-		sect, raw ? raw : "", min_mag, max_mag, f_floor, f_top);
+	LPCSTR source = pSettings->DLTX_getFilenameOfLine(sect, source_key);
+	PipMsg("[SVP-MAGS] %s key=%s value='%s' src=%s mag=[%.2f..%.2f] f=[%.1f..%.1f]",
+		sect, source_key, raw ? raw : "", source ? source : "?", min_mag, max_mag, f_floor, f_top);
 	return true;
 }
 

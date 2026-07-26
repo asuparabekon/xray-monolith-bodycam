@@ -425,6 +425,7 @@ public:
 	virtual void Render();
 	void renderGBuffer(bool clearGraph); // pip per-viewport gbuffer fill, clearGraph false keeps the graph for the SVP pass
 	void renderSceneLighting(BOOL bSUN, bool svp); // pip shared lighting, generate shadows once, accumulate per viewport
+	void ResetSVPHistory(); // pip reset temporal resources after an SVP camera domain change
 	void share_main_smaps(); // pip: re-point the shadow atlas textures at the main maps for the SVP accumulate
 	void deriveScopeLens(); // pip extract the eyepiece/objective lens from the captured scope meshes
 	virtual void Screenshot(ScreenshotMode mode = SM_NORMAL, LPCSTR name = 0);

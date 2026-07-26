@@ -443,20 +443,8 @@ static class s3ds_param_2 : public R_constant_setup
 {
 	virtual void setup(R_constant* C)
 	{
-		// r__svp_clean_optics normalizes the mas_scale fractional to neutral 1.0 while the svp renders,
-		// hip fire keeps the authored payload, zoom_factor + see-through scopes stay bit-exact
-		float w = ps_s3ds_param_2.w;
-		const bool see_through = (int(ps_s3ds_param_4.w) & (1 << 2)) != 0;
-		if (ps_r__svp_clean_optics && Device.true_pip_on && Device.m_SecondViewport.IsSVPActive()
-			&& ps_s3ds_param_3.x <= 1.5f && !see_through)
-		{
-			// only a genuine mas payload renormalizes, a clean zoom factor stays bit-exact for
-			// third-party shaders that threshold or cast this value
-			const float frac = fmodf(w, 0.01f);
-			if (frac > 0.0005f && frac < 0.0095f)
-				w = w - frac + 0.001f;
-		}
-		RCache.set_c(C, ps_s3ds_param_2.x, ps_s3ds_param_2.y, ps_s3ds_param_2.z, w);
+		RCache.set_c(C, ps_s3ds_param_2.x, ps_s3ds_param_2.y,
+			ps_s3ds_param_2.z, ps_s3ds_param_2.w);
 	}
 }    s3ds_param_2;
 
@@ -911,17 +899,7 @@ static class dev_param_8 : public R_constant_setup
 {
 	virtual void setup(R_constant* C)
 	{
-		float x = ps_dev_param_8.x;
-		// beefs nvg packs the tube layout in the x fraction, the disc pass and the svp render
-		// pass both read an offset single tube as centered so encode and decode agree on the disc
-		if (Device.m_SecondViewport.svp_nvg_disc_pass
-			|| (Device.true_pip_on && Device.m_SecondViewport.m_render_pass_is_svp))
-		{
-			const float fr = x - floorf(x);
-			if (_abs(fr - 0.11f) < 0.005f || _abs(fr - 0.12f) < 0.005f)
-				x = floorf(x) + 0.10f;
-		}
-		RCache.set_c(C, x, ps_dev_param_8.y, ps_dev_param_8.z, ps_dev_param_8.w);
+		RCache.set_c(C, ps_dev_param_8.x, ps_dev_param_8.y, ps_dev_param_8.z, ps_dev_param_8.w);
 	}
 }    dev_param_8;
 

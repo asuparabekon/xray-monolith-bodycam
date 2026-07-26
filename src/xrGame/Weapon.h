@@ -300,11 +300,15 @@ public:
 	//äëÿ îòîáðîàæåíèÿ èêîíîê àïãðåéäîâ â èíòåðôåéñå
 	int GetScopeX()
 	{
+		if (!HasValidScopeIndex())
+			return 0;
 		return pSettings->r_s32(m_scopes[m_cur_scope], "scope_x");
 	}
 
 	int GetScopeY()
 	{
+		if (!HasValidScopeIndex())
+			return 0;
 		return pSettings->r_s32(m_scopes[m_cur_scope], "scope_y");
 	}
 
@@ -335,7 +339,7 @@ public:
 
 	const shared_str GetScopeName() const
 	{
-		if (m_scopes.size() < 1)
+		if (!HasValidScopeIndex())
 		{
 			return {};
 		}
@@ -410,6 +414,9 @@ protected:
 		BOOL m_bUseDynamicZoom_Primary;
 		BOOL m_bUseDynamicZoom_Alt;
 		BOOL m_bUseDynamicZoom_GL;
+		BOOL m_bSvpDynamicZoom_Primary;
+		BOOL m_bSvpDynamicZoom_Alt;
+		BOOL m_bSvpDynamicZoom_GL;
 		shared_str m_sUseZoomPostprocess;
 		shared_str m_sUseBinocularVision;
 		CBinocularsVision* m_pVision;
@@ -418,6 +425,16 @@ protected:
 
 	float m_fRTZoomFactor; //run-time zoom factor
 	CUIWindow* m_UIScope;
+	shared_str m_svpZoomSeedIdentity;
+	bool m_svpZoomSeedValid;
+	xr_map<shared_str, float> m_svpZoomFactors;
+	int m_svpZoomSeedMode;
+	shared_str m_svpMainViewIdentity;
+	bool m_svpMainViewValid;
+	shared_str SvpZoomIdentity() const;
+	void InvalidateSvpZoomSeed();
+	void CaptureSvpZoomSeed();
+	void SyncSvpZoomSeedMode();
 
 private:
 	bool firstZoomDone;
@@ -452,6 +469,7 @@ public:
 	}
 
 	IC bool IsScriptedZoom() const { return m_zoom_params.m_bScriptedZoom; }
+	bool OwnsSvpMainView() const;
 
 	// the lua binding reads this, scripts see the commanded detent while the fov keeps easing
 	float GetZoomFactorScript() const;
@@ -1048,7 +1066,7 @@ public:
 	virtual void SetZoomRotateTime(float val) { m_zoom_params.m_fZoomRotateTime = val; }
 
     // verdatim
-    virtual void ForceSetZoomType(float val) { m_zoomtype = val; }
+    virtual void ForceSetZoomType(float val);
 
 protected:
 	int iAmmoElapsed; // ammo in magazine, currently
@@ -1067,6 +1085,9 @@ public:
 	DEFINE_VECTOR(shared_str, SCOPES_VECTOR, SCOPES_VECTOR_IT);
 	SCOPES_VECTOR m_scopes;
 	u8 m_cur_scope;
+	bool HasValidScopeIndex() const { return m_cur_scope < m_scopes.size(); }
+	bool SetCurrentScopeIndex(u8 index, LPCSTR source);
+	bool ValidateModularScopeState(LPCSTR source, bool rebuild_item);
 
 	bool m_altAimPos;
 	u8 m_zoomtype;

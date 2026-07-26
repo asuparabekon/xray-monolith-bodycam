@@ -897,6 +897,9 @@ bool getCamEffectorTransformData(::luabind::object& t, LPCSTR animationFile)
 // demonized: Set custom camera position and direction with movement smoothing (for cutscenes, etc)
 void set_cam_position_direction(Fvector& position, Fvector& direction, unsigned int smoothing, bool hudEnabled, bool hudAffect)
 {
+	if (!g_pGameLevel || !Actor())
+		return;
+
 	CActor* actor = Actor();
 	actor->initFPCam();
 	actor->m_FPCam->m_HPB.set(direction);
@@ -904,6 +907,7 @@ void set_cam_position_direction(Fvector& position, Fvector& direction, unsigned 
 	actor->m_FPCam->m_customSmoothing = _max(1, smoothing);
 	actor->m_FPCam->hudEnabled = hudEnabled;
 	actor->m_FPCam->SetHudAffect(hudAffect);
+	actor->m_FPCam->m_releasing = false;
 }
 
 void set_cam_position_direction(Fvector& position, Fvector& direction)
@@ -923,8 +927,108 @@ void set_cam_position_direction(Fvector& position, Fvector& direction, unsigned 
 
 void remove_cam_position_direction() 
 {
+	if (!g_pGameLevel || !Actor())
+		return;
+
 	CActor* actor = Actor();
 	actor->removeFPCam();
+}
+
+// Smoothed release, hands the camera back to the base pose over smoothing ema steps then self-removes
+void remove_cam_position_direction(float smoothing)
+{
+	if (!g_pGameLevel || !Actor())
+		return;
+
+	CActor* actor = Actor();
+	if (!actor->m_FPCam)
+		return;
+
+	actor->m_FPCam->m_customSmoothing = _max(1, (unsigned int)smoothing);
+	actor->m_FPCam->m_releasing = true;
+}
+
+// fov clamp bounds match the fov console command, console_commands.cpp line 2664
+const float g_cam_custom_fov_min = 5.0f;
+const float g_cam_custom_fov_max = 180.0f;
+
+// Override fov on the active FPCam effector, <=0 clears it
+void set_cam_custom_fov(float fov)
+{
+	CActor* actor = Actor();
+	if (!actor || !actor->m_FPCam)
+		return;
+
+	if (fov <= 0.0f)
+	{
+		actor->m_FPCam->SetFov(-1.0f);
+		return;
+	}
+
+	clamp(fov, g_cam_custom_fov_min, g_cam_custom_fov_max);
+	actor->m_FPCam->SetFov(fov);
+}
+
+void remove_cam_custom_fov()
+{
+	CActor* actor = Actor();
+	if (!actor || !actor->m_FPCam)
+		return;
+
+	actor->m_FPCam->SetFov(-1.0f);
+}
+
+bool is_cam_custom_active()
+{
+	CActor* actor = Actor();
+	return actor && actor->m_FPCam;
+}
+
+// Toggle exclusive positioning, when it flips on a live effector reposition it in the manager list
+void set_cam_custom_exclusive(bool exclusive)
+{
+	if (!g_pGameLevel || !Actor())
+		return;
+
+	CActor* actor = Actor();
+	if (!actor->m_FPCam || actor->m_FPCam->m_exclusive == exclusive)
+		return;
+
+	actor->m_FPCam->m_exclusive = exclusive;
+	actor->Cameras().RepositionCamEffector(actor->m_FPCam);
+}
+
+// Current FPCam target position, symmetric with the setter, zero vector when inactive
+Fvector get_cam_custom_position()
+{
+	CActor* actor = Actor();
+	if (!actor || !actor->m_FPCam)
+		return Fvector().set(0, 0, 0);
+
+	return actor->m_FPCam->m_Position;
+}
+
+// Current FPCam target head/pitch/roll, symmetric with the setter, zero vector when inactive
+Fvector get_cam_custom_direction()
+{
+	CActor* actor = Actor();
+	if (!actor || !actor->m_FPCam)
+		return Fvector().set(0, 0, 0);
+
+	return actor->m_FPCam->m_HPB;
+}
+
+// Pin freezes the viewmodel anchor at the base pose captured on enable, pin wins over hud affect motion
+// disabling clears the capture so a later enable snapshots fresh, no-op without an active FPCam
+void set_cam_custom_hud_pin(bool enable)
+{
+	CActor* actor = Actor();
+	if (!actor || !actor->m_FPCam)
+		return;
+
+	actor->m_FPCam->m_hud_pin = enable;
+	if (!enable)
+		actor->m_FPCam->m_hud_pin_captured = false;
 }
 
 void remove_cam_effector(int id)
@@ -2665,7 +2769,17 @@ void CLevel::script_register(lua_State* L)
 			def("set_cam_custom_position_direction", ((void (*)(Fvector&, Fvector&, unsigned int, bool))&set_cam_position_direction)),
 			def("set_cam_custom_position_direction", ((void (*)(Fvector&, Fvector&, unsigned int))&set_cam_position_direction)),
 			def("set_cam_custom_position_direction", ((void (*)(Fvector&, Fvector&))&set_cam_position_direction)),
-			def("remove_cam_custom_position_direction", &remove_cam_position_direction),
+			def("remove_cam_custom_position_direction", ((void (*)())&remove_cam_position_direction)),
+			def("remove_cam_custom_position_direction", ((void (*)(float))&remove_cam_position_direction)),
+
+			// Override fov on the active FPCam effector, <=0 clears it
+			def("set_cam_custom_fov", &set_cam_custom_fov),
+			def("remove_cam_custom_fov", &remove_cam_custom_fov),
+			def("is_cam_custom_active", &is_cam_custom_active),
+			def("set_cam_custom_exclusive", &set_cam_custom_exclusive),
+			def("get_cam_custom_position", &get_cam_custom_position),
+			def("get_cam_custom_direction", &get_cam_custom_direction),
+			def("set_cam_custom_hud_pin", &set_cam_custom_hud_pin),
 
 			def("remove_cam_effector", &remove_cam_effector),
 			def("set_cam_effector_factor", &set_cam_effector_factor),

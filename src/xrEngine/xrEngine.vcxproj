@@ -1008,6 +1008,7 @@
     <ClInclude Include="xr_input_xinput.h" />
     <ClInclude Include="XR_IOConsole.h" />
     <ClInclude Include="xr_ioc_cmd.h" />
+    <ClInclude Include="svp_console_policy.h" />
     <ClInclude Include="svp_gameplay_cvars.h" />
     <ClInclude Include="svp_crash_context.h" />
     <ClInclude Include="xr_object.h" />

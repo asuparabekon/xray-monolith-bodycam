@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="utf-8"?>
+﻿<?xml version="1.0" encoding="utf-8"?>
 <Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup>
     <Filter Include="Kernel">
@@ -402,13 +402,10 @@
     <ClInclude Include="svp_camera.h">
       <Filter>Core</Filter>
     </ClInclude>
+    <ClInclude Include="svp_optics.h">
+      <Filter>Core_Target</Filter>
+    </ClInclude>
     <ClInclude Include="svp_physical_optics.h">
-      <Filter>Core_Target</Filter>
-    </ClInclude>
-    <ClInclude Include="svp_overlay_state.h">
-      <Filter>Core_Target</Filter>
-    </ClInclude>
-    <ClInclude Include="svp_optics_runtime.h">
       <Filter>Core_Target</Filter>
     </ClInclude>
     <ClInclude Include="svp_stats.h">
@@ -858,13 +855,13 @@
     <ClCompile Include="svp_nearblur.cpp">
       <Filter>Core_Target</Filter>
     </ClCompile>
+    <ClCompile Include="svp_nvg.cpp">
+      <Filter>Core_Target</Filter>
+    </ClCompile>
     <ClCompile Include="svp_camera.cpp">
       <Filter>Core</Filter>
     </ClCompile>
     <ClCompile Include="svp_physical_optics.cpp">
-      <Filter>Core_Target</Filter>
-    </ClCompile>
-    <ClCompile Include="svp_optics_runtime.cpp">
       <Filter>Core_Target</Filter>
     </ClCompile>
     <ClCompile Include="svp_stats.cpp">

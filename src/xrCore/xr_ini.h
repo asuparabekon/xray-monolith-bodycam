@@ -123,7 +123,7 @@ public:
 
 	// DLTX
 	void DLTX_print(LPCSTR sec, LPCSTR line);
-	LPCSTR DLTX_getFilenameOfLine(LPCSTR sec, LPCSTR line);
+	LPCSTR DLTX_getFilenameOfLine(LPCSTR sec, LPCSTR line) const;
 	bool DLTX_isOverride(LPCSTR sec, LPCSTR line);
 	
 private:

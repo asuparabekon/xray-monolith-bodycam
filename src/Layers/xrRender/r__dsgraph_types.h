@@ -78,11 +78,12 @@ namespace R_dsgraph
 		Fmatrix* pMatrix = nullptr;
 		ShaderElement* pSE = nullptr;
 		bool b_hud_mode = false;
+		u8 hud_role = 0;
 
         DSGraphItem(T key, float _ssa, IRenderable* obj, dxRender_Visual* vis,
-            Fmatrix* mat, ShaderElement* se, bool hud)
+            Fmatrix* mat, ShaderElement* se, bool hud, u8 role = 0)
             : sortKey(key), ssa(_ssa), pObject(obj), pVisual(vis),
-            pMatrix(mat), pSE(se), b_hud_mode(hud) {
+            pMatrix(mat), pSE(se), b_hud_mode(hud), hud_role(role) {
         }
 
         bool operator<(const DSGraphItem& other) const noexcept

@@ -22,9 +22,10 @@ float svp_reticle_acog_fiber(float lum)
 // same slope plus a true-scale parallax term (svp_optics.y, ~0.15 mrad at full eye deflection)
 float2 svp_reticle_t_field(Scope S, float2 V_tangent)
 {
-	float2 t_field = V_tangent.xy * mas_scale();
+	float mas = svp_effective_mas(mas_scale());
+	float2 t_field = V_tangent.xy * mas;
 	if (shader_scope_params.w < -1.5)
-		t_field = -(S.tc0 - 0.5) * (mas_scale() * svp_optics.x) + V_tangent.xy * (mas_scale() * svp_optics.y);
+		t_field = -(S.tc0 - 0.5) * (mas * svp_optics.x) + V_tangent.xy * (mas * svp_optics.y);
 	return t_field;
 }
 

@@ -68,6 +68,43 @@ Vec2 LimitEyeOffset(const Vec2& offset, float limit_mm)
 	return limited;
 }
 
+ObjectiveRegistration MapObjectiveAxisToEyepiece(const Vec3& eye_local,
+	const Vec3& objective_local, const Vec2& lens_radius)
+{
+	ObjectiveRegistration registration;
+	if (!std::isfinite(eye_local.x) || !std::isfinite(eye_local.y)
+		|| !std::isfinite(eye_local.z) || !std::isfinite(objective_local.x)
+		|| !std::isfinite(objective_local.y) || !std::isfinite(objective_local.z)
+		|| !std::isfinite(lens_radius.x) || lens_radius.x <= 0.00001f
+		|| !std::isfinite(lens_radius.y) || lens_radius.y <= 0.00001f
+		|| eye_local.z >= -0.00001f || objective_local.z <= 0.00001f)
+		return registration;
+
+	const float span = objective_local.z - eye_local.z;
+	if (!std::isfinite(span) || span <= 0.00001f)
+		return registration;
+
+	registration.fraction = -eye_local.z / span;
+	if (!std::isfinite(registration.fraction)
+		|| registration.fraction < 0.f || registration.fraction > 1.f)
+		return registration;
+
+	registration.hit.x = eye_local.x
+		+ (objective_local.x - eye_local.x) * registration.fraction;
+	registration.hit.y = eye_local.y
+		+ (objective_local.y - eye_local.y) * registration.fraction;
+	registration.principal.x = registration.hit.x / lens_radius.x;
+	registration.principal.y = registration.hit.y / lens_radius.y;
+	registration.valid = std::isfinite(registration.hit.x)
+		&& std::isfinite(registration.hit.y)
+		&& std::isfinite(registration.principal.x)
+		&& std::isfinite(registration.principal.y);
+	registration.inside_aperture = registration.valid
+		&& registration.principal.x * registration.principal.x
+			+ registration.principal.y * registration.principal.y <= 1.f;
+	return registration;
+}
+
 void AccelerateEye(Vec2& velocity, const Vec2& desired_velocity, float max_delta)
 {
 	max_delta = std::max(max_delta, 0.f);

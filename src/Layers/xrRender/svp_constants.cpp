@@ -11,6 +11,26 @@
 #include "dxRenderDeviceRender.h"
 
 #include "svp_constants.h"
+#include "svp_console.h"
+
+extern Fvector4 ps_dev_param_8;
+extern Fvector4 ps_s3ds_param_2;
+extern Fvector4 ps_s3ds_param_3;
+extern Fvector4 ps_s3ds_param_4;
+
+static constexpr int S3DS_SEE_THROUGH_BIT = 1 << 2;
+
+static class svp_nvg_view_binder : public R_constant_setup
+{
+	virtual void setup(R_constant* C)
+	{
+		const bool active = ps_dev_param_8.x >= 1.f;
+		const bool objective = active && ps_r__svp_nvg_objective && Device.true_pip_on
+			&& (Device.m_SecondViewport.m_render_pass_is_svp
+				|| Device.m_SecondViewport.svp_nvg_objective_region);
+		RCache.set_c(C, objective ? 1.f : 0.f, 0.f, 0.f, 0.f);
+	}
+} binder_svp_nvg_view;
 
 // pip intent flags for the patched 3DSS shaders, x/y/z = strip parallax shadow / chromatism /
 // nvg blur under true PiP, the per-image-type judgment lives in the shader
@@ -28,6 +48,36 @@ static class svp_control_binder : public R_constant_setup
 		RCache.set_c(C, k, ky, k, ts);
 	}
 } binder_svp_control;
+
+// pip keeps the packed 3DSS lane untouched and publishes the effective scale separately
+static class svp_mas_binder : public R_constant_setup
+{
+	virtual void setup(R_constant* C)
+	{
+		const float packed = ps_s3ds_param_2.w;
+		const float fraction = fmodf(packed, 0.01f);
+		const bool authored = fraction > 0.0005f && fraction < 0.0095f;
+		const float authored_scale = authored ? fraction * 1000.f : 0.f;
+		const bool see_through = (int(ps_s3ds_param_4.w) & S3DS_SEE_THROUGH_BIT) != 0;
+		const bool override_scale = authored && ps_r__svp_clean_optics
+			&& Device.true_pip_on && Device.m_SecondViewport.IsSVPActive()
+			&& ps_s3ds_param_3.x <= 1.5f && !see_through;
+		const float effective_scale = override_scale ? 1.f : authored_scale;
+		RCache.set_c(C, effective_scale, override_scale ? 1.f : 0.f,
+			authored_scale, packed);
+
+		if (ps_r__svp_cop_diag && Device.m_SecondViewport.IsSVPActive())
+		{
+			static u32 last_log = 0;
+			if (Device.dwTimeGlobal - last_log > 1000)
+			{
+				last_log = Device.dwTimeGlobal;
+				PipMsg("[SVP-MAS] packed=%.4f authored=%.3f effective=%.3f override=%d",
+					packed, authored_scale, effective_scale, override_scale ? 1 : 0);
+			}
+		}
+	}
+} binder_svp_mas;
 
 // glass optics tunables, x = illuminated reticle washout, y = field curvature edge softness, z = ACOG fiber sun mode
 static class svp_glass_binder : public R_constant_setup
@@ -96,7 +146,7 @@ static class svp_env_binder : public R_constant_setup
 		// debug forces the droplets in any weather, the value stands in for the density product
 		if (ps_r__svp_rain_debug > 0.f)
 			rain = ps_r__svp_rain_debug;
-		RCache.set_c(C, glare, rain, ps_r__svp_uv_debug ? 1.f : 0.f, ps_r__svp_autoflip ? 1.f : 0.f);
+		RCache.set_c(C, glare, rain, (float)ps_r__svp_uv_debug, ps_r__svp_autoflip ? 1.f : 0.f);
 	}
 } binder_svp_env;
 
@@ -162,10 +212,12 @@ static class ssfx_issvp : public R_constant_setup
 static const struct { const char* name; R_constant_setup* setup; } s_svp_binders[] = {
 	{ "shader_scope_params", &shader_scope_params }, // scope magnification
 	{ "svp_control", &binder_svp_control }, // pip clean-optics intent flags
+	{ "svp_mas", &binder_svp_mas }, // pip explicit attachment scale
 	{ "svp_glass", &binder_svp_glass }, // pip glass optics tunables
 	{ "svp_env", &binder_svp_env }, // pip glass environment data (glare, rain)
 	{ "ssfx_issvp", &ssfx_issvp },
 	{ "svp_nearblur_mode", &binder_svp_nearblur }, // pip near-blur composite selector
+	{ "svp_nvg_view", &binder_svp_nvg_view }, // pip objective view leaves the wearer mask in the main view
 };
 
 void RegisterSvpConstants(CBlender_Compile& dst)

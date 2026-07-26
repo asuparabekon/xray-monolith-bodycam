@@ -253,7 +253,7 @@ public:
 	ref_shader s_scope_lensfx; // pip r__svp_lensfx additive lens FX (CA, distortion, exit-pupil dimming)
 	ref_shader s_svp_nearblur; // pip near-field defocus on the scope image (svpscope 2)
 	ref_shader s_svp_distort_stamp; // pip neutral distort-mask stamp over the composited lens
-	ref_shader s_svp_taa_stamp; // pip taa alpha stamp over the composited lens so the main resolve skips it
+	ref_shader s_svp_taa_stamp; // pip raw taa skip mask over the composited lens
 	bool m_scope_shaders_ready = false;
 	// taa history seeds from the current frame on the next resolve, true at creation and on scope edges
 	bool m_taa_seed_history = true;
@@ -462,15 +462,19 @@ public:
 	void phase_gasmask_drops();
 	void phase_gasmask_dudv();
 	void phase_nightvision();
+	bool svp_nvg_objective_pass();
+	bool svp_nvg_pass();
 	void phase_fakescope(); //crookr
 	void phase_heatvision(); //--DSR-- HeatVision
 	void phase_3DSSReticle(); // Redotix99: for 3D Shader Based Scopes
 	void phase_svp_capture(); // pip copy the SVP combined color into rt_secondVP for the lens to sample
 	bool svp_nearblur_pass(); // pip near-field defocus dispatch, true when it ran else the caller copies
 	void draw_scope(ref_shader se, std::function<void()> bind); // pip render the scope lens meshes forcing se per phase
+	void svp_objective_hud_prepare(bool svp_follows); // pip validate one native objective weapon draw
+	void svp_objective_hud_report(); // pip report the native objective draw
 	void EvalSVP_DLSS(const SvpDlssInputs& in); // pip DLSS-SR eval, bilinear-passthrough stub for now (Task 7)
-	void draw_reflex(bool svp = false); // pip render reflex-sight lenses (mapReflexHUDSorted), svp draws them through the entrance-pupil camera
-	bool draw_reflex_proxy(); // pip collimated reflex proxy drawn into rt_secondVP after capture, returns true only on a proven draw
+	u32 draw_reflex(bool svp = false); // pip render captured reflex materials with their own shaders
+	bool draw_hybrid_reflex(); // pip render an engaged magnifier reflex through the objective camera
 	void phase_lut();
 	void phase_smaa();
 	void phase_scene_prepare();
