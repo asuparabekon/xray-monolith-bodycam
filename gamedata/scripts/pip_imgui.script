@@ -79,29 +79,38 @@ local descriptions = {
     r__svp_sss_sun = "Enable SSS sun contact shadows in the scope.",
 }
 
-local profile_fields = {
-    { "objective_mm", "Objective Diameter", "objective_mm" },
-    { "middle_grey", "Middle Grey", "middle_grey" },
-    { "adapt_speed", "Adaptation Speed", "adapt_speed" },
-    { "zero_m", "Zero Cap", "zero_m" },
-    { "tunneling_parallax", "Tube Parallax", "tunneling_parallax" },
-    { "tunneling_min", "Minimum Zoom Tunneling", "tunneling_min" },
-    { "tunneling_max", "Maximum Zoom Tunneling", "tunneling_max" },
-    { "tracking_speed", "Eye Tracking Speed", "tracking_speed" },
-    { "tracking_accel_mm_s2", "Eye Tracking Acceleration", "tracking_accel_mm_s2" },
-    { "tracking_limit_mm", "Eye Tracking Travel", "tracking_limit_mm" },
-    { "eye_relief_low_mm", "Low Zoom Eye Relief", "eye_relief_low_mm" },
-    { "eye_relief_high_mm", "High Zoom Eye Relief", "eye_relief_high_mm" },
-    { "exit_pupil_low_mm", "Low Zoom Exit Pupil", "exit_pupil_low_mm" },
-    { "exit_pupil_high_mm", "High Zoom Exit Pupil", "exit_pupil_high_mm" },
-    { "pupil_parity", "Pupil Parity", "pupil_parity" },
-    { "pupil_field_low", "Low Zoom Pupil Field", "pupil_field_low" },
-    { "pupil_field_high", "High Zoom Pupil Field", "pupil_field_high" },
-    { "transmission", "Light Transmission", "transmission" },
-    { "twilight_strength", "Twilight Strength", "twilight_strength" },
-    { "physical_min", "Physical Minimum Magnification", "physical_min" },
-    { "physical_max", "Physical Maximum Magnification", "physical_max" },
+local profile_labels = {
+    reticle_type = "Reticle Type",
+    hybrid_reflex = "Hybrid Reflex",
+    objective_offset = "Objective Offset",
+    objective_mm = "Objective Diameter",
+    middle_grey = "Middle Grey",
+    adapt_speed = "Adaptation Speed",
+    convergence_limit_m = "Convergence Limit",
+    tunneling_parallax = "Tube Parallax",
+    tunneling_min = "Minimum Zoom Tunneling",
+    tunneling_max = "Maximum Zoom Tunneling",
+    tracking_speed = "Eye Tracking Speed",
+    tracking_accel_mm_s2 = "Eye Tracking Acceleration",
+    tracking_limit_mm = "Eye Tracking Travel",
+    eye_relief_low_mm = "Low Zoom Eye Relief",
+    eye_relief_high_mm = "High Zoom Eye Relief",
+    exit_pupil_low_mm = "Low Zoom Exit Pupil",
+    exit_pupil_high_mm = "High Zoom Exit Pupil",
+    pupil_parity = "Pupil Parity",
+    pupil_field_low = "Low Zoom Pupil Field",
+    pupil_field_high = "High Zoom Pupil Field",
+    transmission = "Light Transmission",
+    twilight_strength = "Twilight Strength",
+    physical_min = "Physical Minimum Magnification",
+    physical_max = "Physical Maximum Magnification",
+    eye_coupling = "Eye Coupling",
+    reticle_illum = "Reticle Illumination",
+    magnification_mode = "Magnification Mode",
+    magnifications = "Magnifications",
+    mod_lane = "Mod Lane",
 }
+local profile_descriptors
 
 local function get_console()
     console = console or _G.get_console()
@@ -197,6 +206,63 @@ local function current_profile()
     end
 end
 
+local function current_profile_descriptors()
+    if profile_descriptors then
+        return profile_descriptors
+    end
+    local describe = rawget(_G, "svp_optic_api_describe")
+    if type(describe) ~= "function" then
+        return {}
+    end
+    local ok, result = pcall(describe)
+    if not ok or type(result) ~= "table" or type(result.fields) ~= "table" then
+        return {}
+    end
+    local values = {}
+    for name, descriptor in pairs(result.fields) do
+        if type(name) == "string" and type(descriptor) == "table"
+            and descriptor.source_required == true then
+            values[#values + 1] = {
+                name = name,
+                descriptor = descriptor,
+                index = tonumber(descriptor.index) or math.huge,
+            }
+        end
+    end
+    table.sort(values, function(left, right)
+        return left.index < right.index
+    end)
+    profile_descriptors = values
+    return values
+end
+
+local function profile_value_text(value, descriptor)
+    if value == nil then
+        return "none"
+    end
+    if type(value) == "boolean" then
+        return value and "true" or "false"
+    end
+    if type(value) == "number" then
+        return string.format("%.5g", value)
+    end
+    if type(value) ~= "table" then
+        return tostring(value)
+    end
+    if descriptor.type == "array" then
+        local parts = {}
+        for index, entry in ipairs(value) do
+            parts[index] = tostring(entry)
+        end
+        return table.concat(parts, ", ")
+    end
+    local parts = {}
+    for _, key in ipairs(descriptor.allowed_keys or {}) do
+        parts[#parts + 1] = tostring(key) .. "=" .. tostring(value[key])
+    end
+    return #parts > 0 and table.concat(parts, ", ") or "none"
+end
+
 local function profile_text(label, value)
     ImGui.Text(label)
     ImGui.SameLine(250)
@@ -214,25 +280,50 @@ local function draw_profile()
     profile_text("Scope", profile.scope)
     profile_text("Diagnostic Scope", profile.diagnostic_scope)
     profile_text("Identity", profile.identity_source)
-    profile_text("Profile", profile.profile)
-    profile_text("Physical Spec", profile.spec)
+    profile_text("Profile", profile.profile_id)
+    profile_text("Physical Spec", profile.spec_section)
     profile_text("Physical Model", profile.model)
     profile_text("Binding", profile.binding)
     profile_text("Binding Section", profile.binding_section)
-    profile_text("Objective Offset", string.format("%.4f, %.4f, %.4f, %.4f",
-        profile.objective_x or 0, profile.objective_y or 0,
-        profile.objective_z or 0, profile.objective_w or 0))
-    ImGui.TextDisabled("Source  " .. tostring(
-        profile.sources and profile.sources.objective_offset or "none"))
     ImGui.Separator()
-    for _, field in ipairs(profile_fields) do
-        local value = profile[field[1]]
-        ImGui.Text(field[2])
+    for _, field in ipairs(current_profile_descriptors()) do
+        local name = field.name
+        ImGui.Text(profile_labels[name] or name)
         ImGui.SameLine(250)
-        ImGui.Text(string.format("%.5g", tonumber(value) or 0))
+        ImGui.TextWrapped(profile_value_text(profile[name], field.descriptor))
         ImGui.TextDisabled("Source  " .. tostring(
-            profile.sources and profile.sources[field[3]] or "none"))
+            profile.sources and profile.sources[name] or "none"))
     end
+end
+
+local fixture_status
+
+-- runs the packed api fixture, per case results land in the log as [SVP-API-FIXTURE] lines
+local function draw_fixture()
+    ImGui.Separator()
+    if ImGui.Button("Run API Fixture", vector2():set(160, 0)) then
+        local fixture = rawget(_G, "pip_optic_api_fixture")
+        if type(fixture) == "table" and type(fixture.run) == "function" then
+            local ok, passed = pcall(fixture.run)
+            fixture_status = not ok and "error"
+                or (passed and "pass" or "refused or fail, see log")
+        else
+            fixture_status = "unavailable"
+        end
+    end
+    if fixture_status then
+        ImGui.SameLine(250)
+        ImGui.Text("fixture " .. fixture_status)
+    end
+end
+
+local function draw_workbench()
+    local workbench = rawget(_G, "pip_optic_workbench")
+    if type(workbench) == "table" and type(workbench.draw) == "function" then
+        workbench.draw()
+        return
+    end
+    ImGui.TextDisabled("Optics workbench module not installed")
 end
 
 local function render_window()
@@ -255,6 +346,11 @@ local function render_window()
         end
         if ImGui.BeginTabItem("Current Scope Profile", true, 0) then
             draw_profile()
+            draw_fixture()
+            ImGui.EndTabItem()
+        end
+        if ImGui.BeginTabItem("Optics Workbench", true, 0) then
+            draw_workbench()
             ImGui.EndTabItem()
         end
         ImGui.EndTabBar()

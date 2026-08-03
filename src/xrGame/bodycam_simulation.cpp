@@ -460,10 +460,11 @@ void UpdateSprintLayer(const SimulationSettings& settings, SimulationState& stat
 	state.sprint.prev_amount = state.sprint.amount;
 	state.sprint.target = target;
 	state.sprint.amount = Clamp(SmoothTime(state.sprint.amount, target, target > state.sprint.amount ? enter_time : exit_time, input.dt), 0.f, 1.25f);
-	if (!sprinting)
-		state.sprint.viewmodel_amount = 0.f;
-	else
-		state.sprint.viewmodel_amount = Clamp(SmoothTime(state.sprint.viewmodel_amount, viewmodel_target, viewmodel_target > state.sprint.viewmodel_amount ? enter_time : viewmodel_exit_time, input.dt), 0.f, 1.25f);
+	const float viewmodel_time =
+		viewmodel_target > state.sprint.viewmodel_amount ? enter_time : viewmodel_exit_time;
+	state.sprint.viewmodel_amount = Clamp(
+		SmoothTime(state.sprint.viewmodel_amount, viewmodel_target, viewmodel_time, input.dt),
+		0.f, 1.25f);
 	if (target <= kEpsilon && state.sprint.prev_amount > 0.15f)
 		state.sprint.settle = std::max(state.sprint.settle, state.sprint.prev_amount * 0.45f);
 	state.sprint.settle = SmoothTime(state.sprint.settle, 0.f, camera_settle_time, input.dt);

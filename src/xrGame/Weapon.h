@@ -60,6 +60,7 @@ class CWeapon : public CHudItemObject,
 {
 private:
 	typedef CHudItemObject inherited;
+	void PublishSvpWeaponPose();
 
 public:
 	CWeapon();
@@ -128,8 +129,9 @@ public:
 	virtual void HUD_VisualBulletUpdate(bool force = false, int force_idx = -1);
 
 	void UpdateSecondVP();
+	void UpdateSvpWeaponPose(); // publish after the finalized HUD update
 	bool GetSVPCameraMatrix(); // pip SVP readiness, a fresh captured lens is present
-	void ApplySvpSightAnchor(CActor* pActor, Fmatrix& trans); // pip swing envelope for the scope shadow
+	void UpdateSvpSwingEnvelope(CActor* pActor);
 
 	virtual void UpdateCL();
 	virtual void shedule_Update(u32 dt);
@@ -402,6 +404,14 @@ protected:
 		float m_fZoomTargetFactor; // pip smooth-zoom target, the current factor eases toward this (dynamic scopes)
 		bool m_bScriptedZoom = false; // pip true when a script authored the live factor, those carry the user fov already
 		bool m_bSvpAuthoredMin = false; // pip authored magnifications set the floor directly, skip the optical-model cap
+		int m_iSvpMagnificationMode = 0;
+		u8 m_uSvpMagnificationCount = 0;
+		float m_fSvpMagnifications[16] = {};
+		u64 m_uSvpMagnificationFingerprint = 0;
+		u32 m_uSvpMagnificationToken = 0;
+		u32 m_uSvpMagnificationGeneration = 0;
+		u32 m_uSvpMagnificationRouteEpoch = 0;
+		u32 m_uSvpMagnificationSession = 0;
 		float m_fZoomRotateTime;
 		float m_fBaseZoomFactor;
 		float m_fScopeZoomFactor;
@@ -428,13 +438,30 @@ protected:
 	shared_str m_svpZoomSeedIdentity;
 	bool m_svpZoomSeedValid;
 	xr_map<shared_str, float> m_svpZoomFactors;
+	xr_map<shared_str, float> m_svpTypedMagnifications;
 	int m_svpZoomSeedMode;
+	shared_str m_svpTypedMagnificationIdentity;
 	shared_str m_svpMainViewIdentity;
 	bool m_svpMainViewValid;
+	struct SSvpSwingEnvelope
+	{
+		bool initialized = false;
+		Fvector direction = { 0.f, 0.f, 1.f };
+		Fvector2 rate = { 0.f, 0.f };
+		float angular_rate = 0.f;
+		float acceleration = 0.f;
+		int ammo = -1;
+		u32 session = 0;
+		u32 frame = 0;
+		u32 log_time = 0;
+	} m_svpSwingEnvelope;
 	shared_str SvpZoomIdentity() const;
 	void InvalidateSvpZoomSeed();
 	void CaptureSvpZoomSeed();
 	void SyncSvpZoomSeedMode();
+	bool SyncSvpTypedMagnifications();
+	bool RefreshSvpTypedMagnifications();
+	float SvpTypedMagnification() const;
 
 private:
 	bool firstZoomDone;
@@ -469,6 +496,7 @@ public:
 	}
 
 	IC bool IsScriptedZoom() const { return m_zoom_params.m_bScriptedZoom; }
+	// pip the svp has proven itself for this optic identity so the main view stays wide through snapshot gaps
 	bool OwnsSvpMainView() const;
 
 	// the lua binding reads this, scripts see the commanded detent while the fov keeps easing

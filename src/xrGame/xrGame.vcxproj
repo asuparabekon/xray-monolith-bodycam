@@ -1998,6 +1998,7 @@
     <ClInclude Include="ui\UISubLine.h" />
     <ClInclude Include="ui\UITabButton.h" />
     <ClInclude Include="ui\UITabButtonMP.h" />
+    <ClInclude Include="ui\UITabScrollArrows.h" />
     <ClInclude Include="ui\UITabControl.h" />
     <ClInclude Include="ui\UITalkDialogWnd.h" />
     <ClInclude Include="ui\UITalkWnd.h" />
@@ -2805,8 +2806,7 @@
       <PrecompiledHeaderOutputFile>$(IntDir)$(ProjectName)_script.pch</PrecompiledHeaderOutputFile>
     </ClCompile>
     <ClCompile Include="svp_optic_config_script.cpp">
-      <PrecompiledHeaderFile>pch_script.h</PrecompiledHeaderFile>
-      <PrecompiledHeaderOutputFile>$(IntDir)$(ProjectName)_script.pch</PrecompiledHeaderOutputFile>
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
     </ClCompile>
     <ClCompile Include="cover_evaluators.cpp" />
     <ClCompile Include="cover_manager.cpp" />
@@ -4232,6 +4232,8 @@
     <ClCompile Include="ui\UITabButton.cpp" />
     <ClCompile Include="ui\UITabButtonMP.cpp" />
     <ClCompile Include="ui\UITabControl.cpp" />
+    <ClCompile Include="ui\UITabControl_scroll.cpp" />
+    <ClCompile Include="ui\UITabScrollArrows.cpp" />
     <ClCompile Include="ui\UITabControl_script.cpp">
       <PrecompiledHeaderFile>pch_script.h</PrecompiledHeaderFile>
       <PrecompiledHeaderOutputFile>$(IntDir)$(ProjectName)_script.pch</PrecompiledHeaderOutputFile>
@@ -4282,7 +4284,9 @@
     <ClCompile Include="wallmark_manager.cpp" />
     <ClCompile Include="Weapon.cpp" />
     <ClCompile Include="svp_weapon.cpp" />
-    <ClCompile Include="svp_mags.cpp" />
+    <ClCompile Include="svp_mags.cpp">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
     <ClCompile Include="WeaponAK74.cpp">
       <PrecompiledHeaderFile>pch_script.h</PrecompiledHeaderFile>
       <PrecompiledHeaderOutputFile>$(IntDir)$(ProjectName)_script.pch</PrecompiledHeaderOutputFile>

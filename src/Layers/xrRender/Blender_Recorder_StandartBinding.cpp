@@ -899,7 +899,13 @@ static class dev_param_8 : public R_constant_setup
 {
 	virtual void setup(R_constant* C)
 	{
-		RCache.set_c(C, ps_dev_param_8.x, ps_dev_param_8.y, ps_dev_param_8.z, ps_dev_param_8.w);
+		float x = ps_dev_param_8.x;
+		// svp render keeps the gen digit but draws the centered tube class so
+		// the wearer mask never bakes into the scope image
+		if (ps_r__svp_nvg_objective && Device.true_pip_on && x >= 1.f
+			&& Device.m_SecondViewport.m_render_pass_is_svp)
+			x = floorf(x) + 0.10f;
+		RCache.set_c(C, x, ps_dev_param_8.y, ps_dev_param_8.z, ps_dev_param_8.w);
 	}
 }    dev_param_8;
 

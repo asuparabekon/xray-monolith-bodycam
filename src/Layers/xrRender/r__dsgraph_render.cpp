@@ -22,6 +22,7 @@
 using namespace R_dsgraph;
 
 extern float r_ssaDISCARD;
+extern float r_ssaLOD_A; // lod-out threshold, the overlay counts main-view draws below it
 extern float r_ssaDONTSORT;
 extern float r_ssaHZBvsTEX;
 extern float r_ssaGLOD_start, r_ssaGLOD_end;
@@ -152,6 +153,7 @@ void CDSGraphManager::r_dsgraph_render_graph_sorted(R_dsgraph::mapDSGraphItems<T
 	{
 		if (svp_cull_reject(item.pVisual, item.pMatrix)) { if (ps_r__svp_stats) ++svp_stats_cull_reject; continue; } // pip skip off-cone SVP geometry
 		if (s_svp_ssa_cull > 0.f && !item.pMatrix && item.ssa < s_svp_ssa_cull) { if (ps_r__svp_stats) ++svp_stats_ssa_culled; if (!svp_ledger_ssa_culled) svp_ledger_ssa_culled = 1; continue; } // pip skip tiny STATIC clutter only (null matrix), never dynamic NPCs/items (matrix carriers)
+		if (ps_r__svp_stats && !Device.m_SecondViewport.m_render_pass_is_svp && item.ssa < r_ssaLOD_A) ++svp_stats_tiny; // overlay count only, main view
 		dxRender_Visual* V = item.pVisual;
 		VERIFY(V && V->shader._get());
 		if (s_svp_objective_suppress_wpnfx)
@@ -247,6 +249,7 @@ void CDSGraphManager::r_dsgraph_render_graph(RenderQueueArray& queues, u32 _prio
         {
             if (svp_cull_reject(packet.item.pVisual, packet.item.pMatrix)) { if (ps_r__svp_stats) ++svp_stats_cull_reject; continue; } // pip skip off-cone SVP geometry
             if (s_svp_ssa_cull > 0.f && !packet.item.pMatrix && packet.item.ssa < s_svp_ssa_cull) { if (ps_r__svp_stats) ++svp_stats_ssa_culled; if (!svp_ledger_ssa_culled) svp_ledger_ssa_culled = 1; continue; } // pip skip tiny STATIC clutter only (null matrix), never dynamic NPCs/items (matrix carriers)
+            if (ps_r__svp_stats && !Device.m_SecondViewport.m_render_pass_is_svp && packet.item.ssa < r_ssaLOD_A) ++svp_stats_tiny; // overlay count only, main view
             auto& currentKey = packet.sortKey;
             if (currentKey.high != high)
             {

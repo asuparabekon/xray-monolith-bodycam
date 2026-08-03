@@ -6,16 +6,23 @@ end
 local RETRY_EV = "pip_scope_push"
 local RETRY_STEP_S = 0.5
 local RETRY_MAX = 60
-local TYPED_API_VERSION = 2
+local TYPED_API_VERSION = 3
+local TYPED_SCHEMA_VERSION = 3
 local RECONCILE_MS = 100
+local PUSH_DONE = "done"
+local PUSH_RETRY = "retry"
+local PUSH_RESTART = "restart"
 
 local active_key
 local active_token
 local active_route
+local active_generation
+local active_profile_fingerprint
 local last_diag_key
 local last_mode
 local last_api
 local last_route_epoch
+local last_editor_epoch = 0
 local next_reconcile_ms = 0
 local identity_diag_key
 local api_checked = false
@@ -33,13 +40,15 @@ local function probe_typed_api()
     api_checked = true
 
     local version_fn = rawget(_G, "svp_optic_api_version")
+    local info_fn = rawget(_G, "svp_optic_api_info")
     local connect_fn = rawget(_G, "svp_optic_api_connect")
     local capability_fn = rawget(_G, "svp_optic_api_has_capability")
     local epoch_fn = rawget(_G, "svp_optic_route_epoch")
     local begin_fn = rawget(_G, "svp_begin_optic_context")
     local apply_fn = rawget(_G, "svp_apply_optic_profile")
     local clear_fn = rawget(_G, "svp_clear_optic_profile")
-    if type(version_fn) ~= "function" or type(connect_fn) ~= "function"
+    if type(version_fn) ~= "function" or type(info_fn) ~= "function"
+        or type(connect_fn) ~= "function"
         or type(epoch_fn) ~= "function"
         or type(begin_fn) ~= "function"
         or type(apply_fn) ~= "function" or type(clear_fn) ~= "function" then
@@ -51,8 +60,29 @@ local function probe_typed_api()
         printf("![SVP-CONFIG] typed api unavailable version=%s", tostring(version))
         return false
     end
-    local connect_ok, connected = pcall(connect_fn, TYPED_API_VERSION)
-    if not connect_ok or connected ~= true then
+    local info_ok, info = pcall(info_fn)
+    local pair_supported = false
+    if info_ok and type(info) == "table" and type(info.supported_pairs) == "table" then
+        for _, pair in ipairs(info.supported_pairs) do
+            if type(pair) == "table" and pair.api == TYPED_API_VERSION
+                and pair.schema == TYPED_SCHEMA_VERSION then
+                pair_supported = true
+                break
+            end
+        end
+    end
+    if not pair_supported then
+        printf("![SVP-CONFIG] typed api pair unavailable api=%d schema=%d",
+            TYPED_API_VERSION, TYPED_SCHEMA_VERSION)
+        return false
+    end
+    local connect_ok, connected =
+        pcall(connect_fn, TYPED_API_VERSION, TYPED_SCHEMA_VERSION)
+    if not connect_ok or type(connected) ~= "table" or connected.ok ~= true
+        or connected.api ~= TYPED_API_VERSION
+        or connected.schema ~= TYPED_SCHEMA_VERSION
+        or type(info.schema_hash) ~= "string" or info.schema_hash == ""
+        or connected.schema_hash ~= info.schema_hash then
         printf("![SVP-CONFIG] typed api handshake failed call=%s result=%s",
             tostring(connect_ok), tostring(connected))
         return false
@@ -67,8 +97,9 @@ local function probe_typed_api()
         local capability_ok, supported = pcall(capability_fn, "hybrid_reflex")
         api_hybrid_reflex = capability_ok and supported == true
     end
-    printf("[SVP-CONFIG] typed api version=%d hybrid_reflex=%s",
-        TYPED_API_VERSION, tostring(api_hybrid_reflex))
+    printf("[SVP-CONFIG] typed api version=%d schema=%d hash=%s hybrid_reflex=%s",
+        TYPED_API_VERSION, TYPED_SCHEMA_VERSION,
+        tostring(connected.schema_hash), tostring(api_hybrid_reflex))
     return true
 end
 
@@ -274,16 +305,18 @@ local function resolve_aux(scope_sec, weap_sec, scope_hint)
         read_num_info(scope_sec, weap_sec, "s3ds_middle_grey", scope_hint)
     local adapt, adapt_section, adapt_file, adapt_kind =
         read_num_info(scope_sec, weap_sec, "s3ds_adapt_speed", scope_hint)
-    local zero, zero_section, zero_file, zero_kind =
+    local convergence, convergence_section, convergence_file, convergence_kind =
         read_num_info(scope_sec, weap_sec, "scope_zero_m", scope_hint)
-    local zero_source
-    if zero == nil then
+    local convergence_source
+    if convergence == nil then
         local profile
-        zero, profile, zero_source =
+        convergence, profile, convergence_source =
             pip_optic_profile.profile_value_for(scope_sec, weap_sec, "scope_zero_m", scope_hint)
-        zero_source = zero_source or ("profile:" .. tostring(profile or "default"))
+        convergence_source =
+            convergence_source or ("profile:" .. tostring(profile or "default"))
     else
-        zero_source = source_text(zero_kind, zero_section, zero_file, "scope_zero_m")
+        convergence_source = source_text(convergence_kind, convergence_section,
+            convergence_file, "scope_zero_m")
     end
 
     return {
@@ -295,12 +328,16 @@ local function resolve_aux(scope_sec, weap_sec, scope_hint)
         adapt_speed_source = adapt ~= nil
             and source_text(adapt_kind, adapt_section, adapt_file, "s3ds_adapt_speed")
             or "lua_default",
-        zero_m = zero ~= nil and zero or 100,
-        zero_source = zero_source or "lua_default",
+        convergence_limit_m = convergence ~= nil and convergence or 100,
+        convergence_source = convergence_source or "lua_default",
     }
 end
 
 local mm_ini
+local function finite_positive(value)
+    return value and value == value and value > 0 and value < math.huge
+end
+
 local function read_mm(scope_sec, weap_sec, scope_hint)
     local mm, spec, _, _, spec_source =
         pip_optic_profile.objective_mm(scope_sec, weap_sec, scope_hint)
@@ -338,14 +375,56 @@ local function read_mm(scope_sec, weap_sec, scope_hint)
     end
 end
 
-local function parse_offset(value)
-    local numbers = {}
-    for item in string.gmatch(value or "", "[^,%s]+") do
-        numbers[#numbers + 1] = tonumber(item)
+local function resolve_objective_mm(scope_sec, weap_sec, scope_hint)
+    local objective, objective_source = read_mm(scope_sec, weap_sec, scope_hint)
+    if objective == 0 then
+        objective = nil
+        objective_source = nil
+    elseif objective ~= nil and (not finite_positive(objective) or objective > 200) then
+        return nil, nil, "objective_mm:range"
     end
-    if #numbers ~= 4 or numbers[1] == nil or numbers[2] == nil
-        or numbers[3] == nil or numbers[4] == nil then
-        return
+    if objective == nil then
+        local detected = rawget(_G, "svp_detected_obj_mm")
+        local measured = type(detected) == "function" and detected() or nil
+        if finite_positive(measured) and measured <= 200 then
+            objective = measured
+            objective_source = "engine_detection"
+        end
+    end
+    return objective, objective_source
+end
+
+local function parse_offset(value)
+    local text = tostring(value or "")
+    local numbers = {}
+    local cursor = 1
+    while true do
+        local separator = string.find(text, ",", cursor, true)
+        local item = string.match(
+            string.sub(text, cursor, separator and separator - 1 or #text),
+            "^%s*(.-)%s*$")
+        local number = tonumber(item)
+        if item == "" or not number or number ~= number or number == math.huge
+            or number == -math.huge then
+            return nil, "component"
+        end
+        numbers[#numbers + 1] = number
+        if #numbers > 4 then
+            return nil, "count"
+        end
+        if not separator then
+            break
+        end
+        cursor = separator + 1
+    end
+    if #numbers ~= 4 then
+        return nil, "count"
+    end
+    if numbers[1] < -8 or numbers[1] > 64
+        or numbers[2] < -8 or numbers[2] > 64
+        or numbers[3] <= 0 or numbers[3] > 64
+        or numbers[4] <= 0 or numbers[4] > 64 then
+        return nil, "range"
     end
     return numbers
 end
@@ -370,21 +449,11 @@ local function resolve_lens(scope_sec, weap_sec, scope_hint)
         return false
     end
 
-    local values = parse_offset(offset)
+    local values, offset_error = parse_offset(offset)
     if not values then
         printf("![SVP-PUSH] invalid objective offset section=%s value=%s",
             scope_sec or weap_sec or "none", tostring(offset))
-        return false
-    end
-
-    local objective, objective_source = read_mm(scope_sec, weap_sec, scope_hint)
-    if not objective then
-        local detected = rawget(_G, "svp_detected_obj_mm")
-        local measured = type(detected) == "function" and detected() or nil
-        if measured and measured > 0 then
-            objective = measured
-            objective_source = "engine_detection"
-        end
+        return false, nil, "objective_offset:" .. tostring(offset_error)
     end
 
     return true, {
@@ -394,8 +463,6 @@ local function resolve_lens(scope_sec, weap_sec, scope_hint)
         z = values[3],
         w = values[4],
         offset_source = offset_source or "unknown",
-        objective_mm = objective or 0,
-        objective_source = objective_source or "none",
     }
 end
 
@@ -468,7 +535,9 @@ local function aim_context()
     end
     local item = db.actor and db.actor:active_item()
     local weapon = item and item:cast_Weapon()
-    if not (item and weapon and weapon:IsZoomed()) or IsBinoc(item:section()) then
+    -- binoculars publish on the typed route only, the legacy route has no scopeless lane
+    if not (item and weapon and weapon:IsZoomed())
+        or (IsBinoc(item:section()) and select_route() ~= "typed") then
         return
     end
 
@@ -508,14 +577,16 @@ local function field_text(scope_sec, weap_sec, field, scope_hint)
 end
 
 local function log_optic(item, weapon, scope_sec, diagnostic_scope, scope_hint, weap_sec,
-    zoom_type, key, optics, lens, hybrid_reflex, hybrid_authored, hybrid_source, route, token)
+    zoom_type, key, optics, lens, objective_mm, objective_source,
+    hybrid_reflex, hybrid_authored, hybrid_source, route, token)
     local diag_key = table.concat({ key, route or "unknown", tostring(token or 0) }, "|")
     if get_console():get_integer("r__svp_diag") <= 0 or last_diag_key == diag_key then
         return
     end
     last_diag_key = diag_key
-    printf("[PIP-OPTIC] key=%s route=%s token=%s scope=%s diagnostic_scope=%s weapon=%s spec=%s model=%s binding=%s profile=%s physical=%s..%s",
-        key, route or "unknown", tostring(token or 0), scope_sec or "none",
+    printf("[PIP-OPTIC] key=%s route=%s token=%s generation=%s fingerprint=%s scope=%s diagnostic_scope=%s weapon=%s spec=%s model=%s binding=%s profile=%s physical=%s..%s",
+        key, route or "unknown", tostring(token or 0), tostring(active_generation or 0),
+        tostring(active_profile_fingerprint or "none"), scope_sec or "none",
         diagnostic_scope or "none", weap_sec or "none", optics.spec or "none",
         optics.model or "none", optics.binding or "none", optics.profile or "default",
         tostring(optics.physical_min or "none"), tostring(optics.physical_max or "none"))
@@ -541,58 +612,51 @@ local function log_optic(item, weapon, scope_sec, diagnostic_scope, scope_hint, 
         hybrid_source or "none",
         lens and lens.offset_text or "none",
         lens and lens.offset_source or "none",
-        tostring(lens and lens.objective_mm or 0),
-        lens and lens.objective_source or "none",
+        tostring(objective_mm or 0),
+        objective_source or "none",
         tostring(optics.exit_pupil_low_mm or "none"),
         tostring(optics.exit_pupil_high_mm or "none"))
 end
 
-local function materialize_legacy_console(optics, aux, lens)
+local function materialize_legacy_console(optics, aux, lens, objective_mm)
     pip_optic_profile.materialize_legacy(optics)
     exec_console_cmd("s3ds_middle_grey " .. tostring(aux.middle_grey))
     exec_console_cmd("s3ds_adapt_speed " .. tostring(aux.adapt_speed))
-    exec_console_cmd("g_svp_zero " .. tostring(aux.zero_m))
+    exec_console_cmd("g_svp_zero " .. tostring(aux.convergence_limit_m))
     exec_console_cmd("scope_objective_lens_offset "
         .. (lens and lens.offset_text or "0,0,0,0"))
     exec_console_cmd("s3ds_objective_mm "
-        .. tostring(lens and lens.objective_mm or 0))
+        .. tostring(objective_mm or 0))
 end
 
 local function typed_table(token, key, item, weapon_id, scope_sec, diagnostic_scope, scope_hint,
-    weap_sec, zoom_type, optics, aux, lens, hybrid_reflex, hybrid_authored)
+    weap_sec, zoom_type, optics, aux, lens, objective_mm, objective_source,
+    hybrid_reflex, hybrid_authored, hybrid_source)
     local values = optics.values
     local sources = optics.sources
-    local reticle_type =
+    local reticle_type, reticle_section, reticle_file, reticle_kind =
         read_3dss_num_info(item, scope_sec, weap_sec, "s3ds_reticle_type", scope_hint)
+    local reticle_source = reticle_type ~= nil
+        and source_text(reticle_kind, reticle_section, reticle_file, "s3ds_reticle_type")
+        or "engine_default:s3ds_reticle_type"
     local config = {
-        schema_version = 1,
+        schema_version = 3,
         context_token = token,
         context = key,
         weapon = weap_sec or "",
         weapon_id = weapon_id or 0,
-        scope = scope_sec or "",
-        diagnostic_scope = diagnostic_scope or "",
         identity_source = scope_sec and "engine:CWeapon.GetScopeName"
             or (scope_hint and "legacy:permanent_scope" or "engine:none"),
         zoom_type = zoom_type or 0,
         reticle_type = reticle_type or 0,
-        profile = optics.profile or "default",
-        spec = optics.spec or "",
-        model = optics.model or "",
-        binding = optics.binding or "",
-        binding_section = optics.binding_section or "",
-        has_objective_offset = lens ~= nil,
-        objective_x = lens and lens.x or 0,
-        objective_y = lens and lens.y or 0,
-        objective_z = lens and lens.z or 0,
-        objective_w = lens and lens.w or 0,
-        objective_mm = lens and lens.objective_mm or 0,
+        profile_id = optics.profile or "default",
         middle_grey = aux.middle_grey,
         adapt_speed = aux.adapt_speed,
-        zero_m = aux.zero_m,
+        convergence_limit_m = aux.convergence_limit_m,
         tunneling_parallax = values.s3ds_tunneling_parallax,
         tunneling_min = values.s3ds_tunneling_min,
         tunneling_max = values.s3ds_tunneling_max,
+        tunneling_softness = values.s3ds_tunneling_softness,
         tracking_speed = values.s3ds_eye_tracking_speed,
         tracking_accel_mm_s2 = values.s3ds_eye_tracking_accel_mm_s2,
         tracking_limit_mm = values.s3ds_eye_tracking_limit_mm,
@@ -605,17 +669,17 @@ local function typed_table(token, key, item, weapon_id, scope_sec, diagnostic_sc
         pupil_field_high = values.s3ds_pupil_field_high,
         transmission = values.s3ds_transmission,
         twilight_strength = values.s3ds_twilight_strength,
-        physical_min = optics.physical_min or 0,
-        physical_max = optics.physical_max or 0,
+        eye_coupling = optics.eye_coupling,
+        reticle_illum = optics.reticle_illum,
         sources = {
-            objective_offset = lens and lens.offset_source or "none",
-            objective_mm = lens and lens.objective_source or "none",
+            reticle_type = reticle_source,
             middle_grey = aux.middle_grey_source,
             adapt_speed = aux.adapt_speed_source,
-            zero_m = aux.zero_source,
+            convergence_limit_m = aux.convergence_source,
             tunneling_parallax = sources.s3ds_tunneling_parallax,
             tunneling_min = sources.s3ds_tunneling_min,
             tunneling_max = sources.s3ds_tunneling_max,
+            tunneling_softness = sources.s3ds_tunneling_softness,
             tracking_speed = sources.s3ds_eye_tracking_speed,
             tracking_accel_mm_s2 = sources.s3ds_eye_tracking_accel_mm_s2,
             tracking_limit_mm = sources.s3ds_eye_tracking_limit_mm,
@@ -628,51 +692,140 @@ local function typed_table(token, key, item, weapon_id, scope_sec, diagnostic_sc
             pupil_field_high = sources.s3ds_pupil_field_high,
             transmission = sources.s3ds_transmission,
             twilight_strength = sources.s3ds_twilight_strength,
-            physical_min = optics.physical_min_source or "none",
-            physical_max = optics.physical_max_source or "none",
+            eye_coupling = optics.eye_coupling_source,
+            reticle_illum = optics.reticle_illum_source,
         },
     }
+    if scope_sec and scope_sec ~= "" then
+        config.scope = scope_sec
+    end
+    if diagnostic_scope and diagnostic_scope ~= "" then
+        config.diagnostic_scope = diagnostic_scope
+    end
+    if optics.spec and optics.spec ~= "" then
+        config.spec_section = optics.spec
+    end
+    if optics.model and optics.model ~= "" then
+        config.model = optics.model
+    end
+    if optics.binding and optics.binding ~= "" then
+        config.binding = optics.binding
+    end
+    if optics.binding_section and optics.binding_section ~= "" then
+        config.binding_section = optics.binding_section
+    end
+    if lens then
+        config.objective_offset = {
+            x = lens.x,
+            y = lens.y,
+            z = lens.z,
+            radius = lens.w,
+        }
+        config.sources.objective_offset = lens.offset_source
+    end
+    if finite_positive(objective_mm) and objective_mm <= 200 then
+        config.objective_mm = objective_mm
+        config.sources.objective_mm = objective_source
+    end
+    if optics.physical_min and optics.physical_max then
+        config.physical_min = optics.physical_min
+        config.physical_max = optics.physical_max
+        config.sources.physical_min = optics.physical_min_source
+        config.sources.physical_max = optics.physical_max_source
+    end
+    if optics.magnification_mode and optics.magnifications then
+        config.magnification_mode = optics.magnification_mode
+        config.magnifications = optics.magnifications
+        config.sources.magnification_mode = optics.magnification_source
+        config.sources.magnifications = optics.magnification_source
+    end
     if api_hybrid_reflex and hybrid_authored then
         config.hybrid_reflex = hybrid_reflex == true
+        config.sources.hybrid_reflex = hybrid_source
     end
     return config
+end
+
+-- optional editor overlay, absent module leaves the composed table untouched
+local function workbench_overlay(config)
+    local workbench = rawget(_G, "pip_optic_workbench")
+    if type(workbench) ~= "table" or type(workbench.overlay_apply) ~= "function" then
+        return config
+    end
+    local ok, overlaid = pcall(workbench.overlay_apply, config)
+    return (ok and type(overlaid) == "table") and overlaid or config
+end
+
+local function workbench_epoch()
+    local workbench = rawget(_G, "pip_optic_workbench")
+    if type(workbench) ~= "table" or type(workbench.editor_epoch) ~= "function" then
+        return 0
+    end
+    local ok, value = pcall(workbench.editor_epoch)
+    return (ok and type(value) == "number") and value or 0
 end
 
 local function try_push(expected_key, expected_token, expected_route)
     local item, weapon, weapon_id, scope_sec, diagnostic_scope, scope_hint,
         weap_sec, zoom_type, key = aim_context()
     if not item then
-        return true
+        return PUSH_DONE
     end
     if key ~= expected_key or key ~= active_key or expected_token ~= active_token
         or expected_route ~= active_route then
         printf("[SVP-PUSH] stale retry stopped expected=%s current=%s token=%s active=%s",
             expected_key or "none", key or "none", tostring(expected_token or 0),
             tostring(active_token or 0))
-        return true
+        return PUSH_DONE
     end
 
     local optics = pip_optic_profile.resolve(scope_sec, weap_sec, scope_hint)
+    if expected_route == "typed" and optics.field_error then
+        printf("![SVP-CONFIG] profile rejected context=%s error=%s",
+            key, tostring(optics.field_error))
+        return PUSH_DONE
+    end
     local aux = resolve_aux(scope_sec, weap_sec, scope_hint)
     local hybrid_reflex, hybrid_source, hybrid_authored =
         read_3dss_bool_info(item, scope_sec, weap_sec, "svp_hybrid_reflex", scope_hint)
-    local landed, lens = resolve_lens(scope_sec, weap_sec, scope_hint)
+    local objective_mm, objective_source, objective_error =
+        resolve_objective_mm(scope_sec, weap_sec, scope_hint)
+    if expected_route == "typed" and objective_error then
+        printf("![SVP-CONFIG] profile rejected context=%s error=%s",
+            key, tostring(objective_error))
+        return PUSH_DONE
+    end
+    local landed, lens, lens_error = resolve_lens(scope_sec, weap_sec, scope_hint)
+    if expected_route == "typed" and lens_error then
+        printf("![SVP-CONFIG] profile rejected context=%s error=%s",
+            key, tostring(lens_error))
+        return PUSH_DONE
+    end
     if expected_route ~= "typed" and not landed
         and not objective_optional(scope_sec, weap_sec, zoom_type, scope_hint) then
-        return false
+        return PUSH_RETRY
     end
     if expected_route ~= "typed" then
-        materialize_legacy_console(optics, aux, lens)
+        materialize_legacy_console(optics, aux, lens, objective_mm)
     else
         local config = typed_table(expected_token, key, item, weapon_id, scope_sec,
             diagnostic_scope, scope_hint, weap_sec, zoom_type, optics, aux, lens,
-            hybrid_reflex, hybrid_authored)
+            objective_mm, objective_source, hybrid_reflex, hybrid_authored, hybrid_source)
+        config = workbench_overlay(config)
         local ok, accepted = pcall(api_apply, config.context_token, config)
-        if not ok or not accepted then
-            printf("![SVP-CONFIG] apply failed route=%s token=%s context=%s call=%s result=%s",
-                expected_route, tostring(expected_token), key, tostring(ok), tostring(accepted))
-            return true
+        if not ok or type(accepted) ~= "table" or accepted.ok ~= true then
+            printf("![SVP-CONFIG] apply failed route=%s token=%s context=%s call=%s code=%s message=%s",
+                expected_route, tostring(expected_token), key, tostring(ok),
+                type(accepted) == "table" and tostring(accepted.code) or "call_failed",
+                type(accepted) == "table" and tostring(accepted.message) or tostring(accepted))
+            local code = type(accepted) == "table" and accepted.code or nil
+            if code == "stale_token" or code == "identity_mismatch" then
+                return PUSH_RESTART
+            end
+            return PUSH_RETRY
         end
+        active_generation = accepted.config_generation
+        active_profile_fingerprint = accepted.profile_fingerprint
         if not landed and get_console():get_integer("r__svp_diag") > 0 then
             printf("[SVP-PUSH] typed objective=engine_fallback key=%s token=%s",
                 key, tostring(expected_token or 0))
@@ -680,9 +833,10 @@ local function try_push(expected_key, expected_token, expected_route)
     end
 
     log_optic(item, weapon, scope_sec, diagnostic_scope, scope_hint, weap_sec, zoom_type,
-        key, optics, lens, hybrid_reflex, hybrid_authored, hybrid_source,
+        key, optics, lens, objective_mm, objective_source,
+        hybrid_reflex, hybrid_authored, hybrid_source,
         expected_route, expected_token)
-    return true
+    return PUSH_DONE
 end
 
 local function clear_token()
@@ -695,6 +849,8 @@ local function clear_token()
         end
     end
     active_token = nil
+    active_generation = nil
+    active_profile_fingerprint = nil
 end
 
 local function clear_legacy_route(route)
@@ -711,6 +867,8 @@ local function clear_offset()
         clear_token()
     else
         active_token = nil
+        active_generation = nil
+        active_profile_fingerprint = nil
     end
     clear_legacy_route(route)
     active_key = nil
@@ -732,8 +890,8 @@ local function push_offset(force)
             clear_legacy_route(active_route)
         end
         clear_token()
-        active_key = key
-        active_route = route
+        active_key = nil
+        active_route = nil
         last_diag_key = nil
         if route == "typed" then
             local identity_source = scope_sec and "engine:CWeapon.GetScopeName"
@@ -748,23 +906,45 @@ local function push_offset(force)
             end
             active_token = token
         end
+        active_key = key
+        active_route = route
     end
 
     local token = active_token
-    if try_push(key, token, route) then
+    local push_result = try_push(key, token, route)
+    if push_result == PUSH_DONE then
         return
     end
+    if push_result == PUSH_RESTART then
+        clear_token()
+        active_key = nil
+        active_route = nil
+        return
+    end
+
     printf("[SVP-PUSH] unresolved neutral, retrying key=%s token=%s",
         key, tostring(token or 0))
     local tries = 0
     CreateTimeEvent(RETRY_EV, "retry", RETRY_STEP_S, function()
         tries = tries + 1
-        if try_push(key, token, route) then
+        local retry_result = try_push(key, token, route)
+        if retry_result == PUSH_DONE then
+            return true
+        end
+        if retry_result == PUSH_RESTART then
+            clear_token()
+            active_key = nil
+            active_route = nil
             return true
         end
         if tries >= RETRY_MAX then
             printf("![SVP-PUSH] unresolved after retry key=%s token=%s",
                 key, tostring(token or 0))
+            if route == "typed" then
+                clear_token()
+                active_key = nil
+                active_route = nil
+            end
             return true
         end
         ResetTimeEvent(RETRY_EV, "retry", RETRY_STEP_S)
@@ -786,28 +966,35 @@ local function route_update()
         local ok, value = pcall(api_route_epoch)
         epoch = ok and value or 0
     end
+    local editor = workbench_epoch()
     if last_mode == nil then
         last_mode = mode
         last_api = api
         last_route_epoch = epoch
+        last_editor_epoch = editor
     end
 
     if mode ~= last_mode or api ~= last_api or epoch ~= last_route_epoch then
         local previous_mode = last_mode
         local previous_api = last_api
         local previous_epoch = last_route_epoch
+        local previous_editor = last_editor_epoch
         last_mode = mode
         last_api = api
         last_route_epoch = epoch
+        last_editor_epoch = editor
         RemoveTimeEvent(RETRY_EV, "retry")
         clear_legacy_route(active_route)
         active_token = nil
+        active_generation = nil
+        active_profile_fingerprint = nil
         active_key = nil
         active_route = nil
         last_diag_key = nil
-        printf("[SVP-CONFIG] route transition mode=%s>%s api=%s>%s epoch=%s>%s",
+        printf("[SVP-CONFIG] route transition mode=%s>%s api=%s>%s epoch=%s>%s editor=%s>%s",
             tostring(previous_mode), tostring(mode), tostring(previous_api), tostring(api),
-            tostring(previous_epoch), tostring(epoch))
+            tostring(previous_epoch), tostring(epoch),
+            tostring(previous_editor), tostring(editor))
         if mode > 0 then
             push_offset(true)
         end
@@ -815,6 +1002,15 @@ local function route_update()
     end
 
     if mode <= 0 then
+        return
+    end
+
+    -- an editor overlay change re applies on the live context, no teardown
+    if editor ~= last_editor_epoch then
+        last_editor_epoch = editor
+        if active_key then
+            push_offset(false)
+        end
         return
     end
 
@@ -827,109 +1023,36 @@ local function route_update()
     end
 end
 
-local function typed_test_table(token)
-    local optics = pip_optic_profile.resolve(nil, nil)
-    local aux = resolve_aux(nil, nil)
-    return typed_table(token, "test|1||0", nil, 1, nil, nil, nil, "test", 0,
-        optics, aux, nil, false, true)
-end
-
-local function copy_test_table(value)
-    local copy = {}
-    for key, entry in pairs(value) do
-        if type(entry) == "table" then
-            local nested = {}
-            for nested_key, nested_value in pairs(entry) do
-                nested[nested_key] = nested_value
-            end
-            copy[key] = nested
-        else
-            copy[key] = entry
+-- gamma zoom sound script seeds its wheel memo with the console fov
+-- reseed with the live factor at zoom in so a clamped scroll stays silent
+local function seed_zoom_sound_memo()
+    if get_console():get_integer("r__svpscope") <= 0 then
+        return
+    end
+    local sounds = rawget(_G, "scope_zoom_sounds")
+    if type(sounds) ~= "table" or type(sounds.weapons) ~= "table"
+        or type(sounds.get_const_params) ~= "function" then
+        return
+    end
+    local item = db.actor and db.actor:active_item()
+    local weapon = item and item:cast_Weapon()
+    if not (item and weapon) then
+        return
+    end
+    local id = item:id()
+    local entry = sounds.weapons[id]
+    if not entry then
+        local ok, params = pcall(sounds.get_const_params, item:section())
+        if not ok or type(params) ~= "table" then
+            return
         end
+        entry = params
+        sounds.weapons[id] = entry
     end
-    return copy
-end
-
-function test_typed_api()
-    if not probe_typed_api() then
-        printf("[SVP-CONFIG-TEST] unavailable")
-        return false
+    entry.zoom = weapon:GetZoomFactor() or entry.zoom
+    if get_console():get_integer("r__svp_diag") > 0 then
+        printf("[SVP-SND] memo seed id=%s zoom=%s", tostring(id), tostring(entry.zoom))
     end
-    if is_svp_active() then
-        printf("[SVP-CONFIG-TEST] refused while scoped")
-        return false
-    end
-    local begin_ok, token = pcall(api_begin, "test|1||0", "test", 1, "", 0,
-        "engine:CWeapon.GetScopeName", "")
-    if not begin_ok or not token or token <= 0 then
-        printf("[SVP-CONFIG-TEST] begin failed")
-        return false
-    end
-
-    local valid = typed_test_table(token)
-    local cases = {
-        { name = "nil", make = function() return nil end },
-        { name = "scalar", make = function() return 1 end },
-        { name = "empty", make = function() return {} end },
-        { name = "metatable", make = function()
-            return setmetatable(copy_test_table(valid), {})
-        end },
-        { name = "unknown", make = function()
-            local value = copy_test_table(valid)
-            value.unknown = 1
-            return value
-        end },
-        { name = "source_unknown", make = function()
-            local value = copy_test_table(valid)
-            value.sources.unknown = "test"
-            return value
-        end },
-        { name = "wrong_primitive", make = function()
-            local value = copy_test_table(valid)
-            value.zero_m = "100"
-            return value
-        end },
-        { name = "nan", make = function()
-            local value = copy_test_table(valid)
-            value.zero_m = 0 / 0
-            return value
-        end },
-        { name = "infinity", make = function()
-            local value = copy_test_table(valid)
-            value.zero_m = 1 / 0
-            return value
-        end },
-        { name = "oversized", make = function()
-            local value = copy_test_table(valid)
-            value.profile = string.rep("x", 128)
-            return value
-        end },
-        { name = "hybrid_missing", make = function()
-            local value = copy_test_table(valid)
-            value.hybrid_reflex = nil
-            return value
-        end, expected = true },
-        { name = "hybrid_wrong", make = function()
-            local value = copy_test_table(valid)
-            value.hybrid_reflex = "true"
-            return value
-        end },
-        { name = "recovery", make = function()
-            return copy_test_table(valid)
-        end, expected = true },
-    }
-    local passed = true
-    for _, case in ipairs(cases) do
-        local ok, result = pcall(api_apply, token, case.make())
-        local expected = case.expected or false
-        local case_passed = ok and result == expected
-        passed = passed and case_passed
-        printf("[SVP-CONFIG-TEST] case=%s call=%s accepted=%s expected=%s pass=%s",
-            case.name, tostring(ok), tostring(result), tostring(expected),
-            tostring(case_passed))
-    end
-    pcall(api_clear, token)
-    return passed
 end
 
 function on_game_start()
@@ -946,8 +1069,15 @@ function on_game_start()
     else
         last_route_epoch = 0
     end
+    last_editor_epoch = workbench_epoch()
     RegisterScriptCallback("actor_on_weapon_zoom_in", function()
         push_offset(false)
+        seed_zoom_sound_memo()
+    end)
+    -- reseed at every wheel event, the sound gate compares one tick later against a memo
+    -- that an analog glide leaves stale, so a clamped scroll at the floor stays silent
+    RegisterScriptCallback("on_mouse_wheel", function()
+        seed_zoom_sound_memo()
     end)
     RegisterScriptCallback("actor_on_weapon_zoom_type_changed", function()
         push_offset(false)

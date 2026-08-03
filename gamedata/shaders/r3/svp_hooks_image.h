@@ -71,6 +71,8 @@ void svp_img_fix_flipped_lens(inout float2 scope_tc, Scope s)
 		scope_tc.y = 1.0 - scope_tc.y;
 }
 
+static float2 svp_thermal_probe_tc = float2(0.0, 0.0);
+
 void svp_img_thermal_fill(inout float2 scope_tc, Scope s)
 {
 		// true PiP panel fill, tc0 spans the panel exactly, svp_glass2.w = the engine V-crop
@@ -87,6 +89,7 @@ void svp_img_thermal_fill(inout float2 scope_tc, Scope s)
 			}
 			else if (svp_control.w > 0.5)
 				scope_tc = (floor(scope_tc * LCD_RES) + 0.5) / LCD_RES;
+			svp_thermal_probe_tc = scope_tc;
 		}
 }
 
@@ -108,6 +111,18 @@ void svp_img_thermal_veil(inout float3 back, gbuffer_data gbd)
 
 void svp_img_lcd_mask(inout float3 back)
 {
+		// the uv probe reaches the thermal branch, r__svp_uv_debug drives svp_env.z
+		if (shader_scope_params.w < -1.5 && svp_env.z > 1.5)
+		{
+			back = float3(svp_thermal_probe_tc.x, 1.0 - svp_thermal_probe_tc.x,
+				ddx(svp_thermal_probe_tc.x) < 0.0 ? 1.0 : 0.0);
+			return;
+		}
+		if (shader_scope_params.w < -1.5 && svp_env.z > 0.5)
+		{
+			back = float3(svp_thermal_probe_tc.y, 1.0 - svp_thermal_probe_tc.y, 0.2);
+			return;
+		}
 		// LCD subpixel mask, the stock lcd_effect look re-enabled deliberately for the panel
 		if (shader_scope_params.w < -1.5 && svp_control.w > 0.5)
 		{

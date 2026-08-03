@@ -791,6 +791,18 @@ void CGamePersistent::ImGui_OnRender(LPCSTR name)
 	}
 }
 
+// pip hand a fatal model load to the exit prompt, false when it cannot be shown
+bool CGamePersistent::OnModelLoadFatal(LPCSTR message)
+{
+	if (!g_pGameLevel || !g_pGameLevel->bReady)
+		return false;
+
+	::luabind::functor<bool> prompt;
+	if (!ai().script_engine().functor("_G.COnModelLoadFatalError", prompt))
+		return false;
+	return prompt(message) == true;
+}
+
 #include "game_sv_single.h"
 #include "xrServer.h"
 #include "UIGameCustom.h"

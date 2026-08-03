@@ -140,11 +140,15 @@ void CDSGraphManager::r_dsgraph_insert_dynamic(dxRender_Visual *pVisual, Fmatrix
 			Fvector lp;
 			if (!lens_center(pVisual, xform, lp))
 				return;
-			const float lens_distance = lp.distance_to_sqr(Device.vCameraPosition);
-			if (!_valid(lens_distance))
+			// lens roles order along the weapon forward axis, the camera plays no part
+			Fvector wfwd;
+			wfwd.set(xform->k);
+			wfwd.normalize_safe();
+			const float lens_axial = lp.dotproduct(wfwd);
+			if (!_valid(lens_axial))
 				return;
 
-			// The ocular is the nearest visible lens
+			// The ocular is the rear lens along the weapon axis
 			auto& M = RGraph.mapScopeHUDSorted;
 			bool keep_oc = M.empty();
 			if (!keep_oc)
@@ -158,8 +162,8 @@ void CDSGraphManager::r_dsgraph_insert_dynamic(dxRender_Visual *pVisual, Fmatrix
 				}
 				else
 				{
-					const float previous_distance = ep.distance_to_sqr(Device.vCameraPosition);
-					keep_oc = !_valid(previous_distance) || lens_distance < previous_distance;
+					const float previous_axial = ep.dotproduct(wfwd);
+					keep_oc = !_valid(previous_axial) || lens_axial < previous_axial;
 				}
 			}
 			if (keep_oc)
@@ -169,7 +173,7 @@ void CDSGraphManager::r_dsgraph_insert_dynamic(dxRender_Visual *pVisual, Fmatrix
 					i_mask[CDSGraphManager::fl_hud], val_hud_role);
 			}
 
-			// The objective is the farthest visible lens
+			// The objective is the front lens along the weapon axis
 			auto& O = RGraph.mapScopeHUDObjective;
 			bool keep_obj = O.empty();
 			if (!keep_obj)
@@ -183,8 +187,8 @@ void CDSGraphManager::r_dsgraph_insert_dynamic(dxRender_Visual *pVisual, Fmatrix
 				}
 				else
 				{
-					const float previous_distance = op.distance_to_sqr(Device.vCameraPosition);
-					keep_obj = !_valid(previous_distance) || lens_distance > previous_distance;
+					const float previous_axial = op.dotproduct(wfwd);
+					keep_obj = !_valid(previous_axial) || lens_axial > previous_axial;
 				}
 			}
 			if (keep_obj)

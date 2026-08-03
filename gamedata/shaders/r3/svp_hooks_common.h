@@ -20,18 +20,25 @@ uniform float4 svp_eyebox; // xy live eye offset at the virtual pupil, zw exit/e
 #ifndef SVP_OPTIC_PROFILE_DECLARED
 #define SVP_OPTIC_PROFILE_DECLARED
 uniform float4 svp_optic_profile; // x parallax, yz profile tunnel min/max, w global curve multiplier
-uniform float4 svp_pupil_model; // x field decenter, y pupil sensitivity, z tunnel offset, w reserved
+uniform float4 svp_pupil_model; // x field decenter, y pupil sensitivity, z tunnel offset, w tunnel softness
 #endif
 
 bool svp_physical_optics_active()
 {
 	return shader_scope_params.w < -1.5 && svp_aperture.x > 0.5;
 }
+
+bool svp_scope_uses_authored_inside(int ffp, bool excluded_type)
+{
+	return ffp == 0 && !excluded_type;
+}
 #ifndef SVP_LENS_GEOMETRY_DECLARED
 #define SVP_LENS_GEOMETRY_DECLARED
 uniform float4 svp_lens_center; // xyz eyepiece center, w inverse lens diameter
 uniform float4 svp_lens_right;
 uniform float4 svp_lens_up;
+uniform float4 svp_barrel_alignment; // xy final projectile direction in lens UV, z valid
+uniform float4 svp_scope_alignment; // xy physical scope axis in lens UV, z valid
 #endif
 #ifndef SVP_OPTICS_DECLARED
 #define SVP_OPTICS_DECLARED
@@ -51,7 +58,7 @@ float svp_effective_mas(float authored)
 #endif
 #ifndef SVP_GLASS_DECLARED
 #define SVP_GLASS_DECLARED
-uniform float4 svp_glass; // engine glass tunables, x = reticle washout, y = field curvature, z = ACOG fiber sun mode
+uniform float4 svp_glass; // engine glass tunables, y = field curvature, w = auto reticle flip
 #endif
 #ifndef SVP_ENV_DECLARED
 #define SVP_ENV_DECLARED

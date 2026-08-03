@@ -127,8 +127,11 @@ void CActor::g_fireParams(const CHudItem* pHudItem, Fvector& fire_pos, Fvector& 
 	fire_dir = pp.defs.dir;
 
 	// pip zeroing + the [3DB] tracer ring, in svp_weapon.cpp
-	extern void svp_apply_zero_and_trace(const SPickParam& pp, Fvector& fire_pos, Fvector& fire_dir);
-	svp_apply_zero_and_trace(pp, fire_pos, fire_dir);
+	const CWeapon* firing_weapon = smart_cast<const CWeapon*>(pHudItem);
+	const u16 firing_weapon_id = firing_weapon ? firing_weapon->ID() : u16(-1);
+	extern void svp_apply_zero_and_trace(const SPickParam& pp, u16 firing_weapon_id,
+		Fvector& fire_pos, Fvector& fire_dir);
+	svp_apply_zero_and_trace(pp, firing_weapon_id, fire_pos, fire_dir);
 }
 
 void CActor::g_WeaponBones(int& L, int& R1, int& R2)

@@ -80,6 +80,23 @@ public:
 	float svp_panel_vcrop = 1.f; // svp_glass2.w flat-panel V-crop (1 = svp matches the panel)
 	bool svp_panel_flat = false; // a reticle_type 8 flat window drives the svp this frame
 
+	// pip nearest drawn weapon extent ahead of the objective (m), published by the svp hud drain and
+	// read by the next frame's objective camera, -1 = nothing ahead, 0 = geometry reaches the plane
+	float svp_hud_min_axial = -1.f;
+	float svp_clipon_axial = -1.f; // far extent of a body ahead of the objective (m), -1 = none
+	u32 svp_hud_min_bones = 0; // bones the derive actually measured, 0 = whole-visual box path
+	u32 svp_hud_axis_skip = 0; // bones excluded because the sight axis passes through their box
+	u32 svp_hud_min_frame = u32(-1);
+	u32 svp_hud_min_session = 0;
+
+	// pip near extent of the hybrid capture reflex (m), published by the objective reflex draw and
+	// read by the next frame's near derive, -1 = no capture candidate this frame
+	float svp_hybrid_front = -1.f;
+	u32 svp_hybrid_front_frame = u32(-1);
+	u32 svp_hybrid_front_session = 0;
+	u32 svp_hybrid_front_epoch = 0;
+	u32 svp_hud_min_epoch = 0;
+
 	u32 svp_optic_epoch = 0; // pip optic identity counter, bumps on a lens visual or radius change, subscribers reseed
 	u32 svp_camera_epoch = 0; // pip camera input counter, leaves target and disc sizing untouched
 	// pip resolved per-optic optics inputs, the bus fills these once at the lens derive so one
@@ -108,6 +125,7 @@ public:
 		Fvector fire_ray_pos = {};
 		Fvector fire_ray_dir = {};
 		float fire_ray_zero = 0.f;
+		u16 weapon_id = u16(-1);
 		bool optic_typed = false;
 		bool optic_config_valid = false;
 		u32 optic_context_token = 0;
@@ -118,6 +136,10 @@ public:
 		Fvector muzzle_pos = {};
 		Fvector eye_ray_pos = {};
 		Fvector eye_ray_dir = {};
+		Fvector camera_pos = {};
+		Fvector camera_right = {};
+		Fvector camera_up = {};
+		Fvector camera_forward = {};
 	};
 
 	// pip render publishes the complete sight line as one record
@@ -125,6 +147,12 @@ public:
 	{
 		Fvector position = {};
 		Fvector direction = {};
+		Fvector root_local_position = {};
+		Fvector root_local_direction = {};
+		u64 root_token = 0;
+		u16 weapon_id = u16(-1);
+		u8 root_role = 0;
+		bool root_local_valid = false;
 		float lens_radius = 0.f;
 		bool optic_typed = false;
 		bool optic_config_valid = false;
@@ -138,16 +166,127 @@ public:
 
 	struct FireTrace { Fvector pos; Fvector dir; u32 time_ms; };
 
+	enum EOpticFieldType : u8
+	{
+		optic_type_integer,
+		optic_type_number,
+		optic_type_boolean,
+		optic_type_string,
+		optic_type_objective,
+		optic_type_mode,
+		optic_type_magnifications,
+		optic_type_lane,
+		optic_type_sources
+	};
+
+	enum EOpticFieldId : u8
+	{
+		optic_field_schema_version,
+		optic_field_context_token,
+		optic_field_context,
+		optic_field_weapon,
+		optic_field_weapon_id,
+		optic_field_scope,
+		optic_field_diagnostic_scope,
+		optic_field_identity_source,
+		optic_field_zoom_type,
+		optic_field_profile_id,
+		optic_field_spec_section,
+		optic_field_model,
+		optic_field_binding,
+		optic_field_binding_section,
+		optic_field_reticle_type,
+		optic_field_hybrid_reflex,
+		optic_field_objective_offset,
+		optic_field_objective_mm,
+		optic_field_middle_grey,
+		optic_field_adapt_speed,
+		optic_field_convergence_limit_m,
+		optic_field_tunneling_parallax,
+		optic_field_tunneling_min,
+		optic_field_tunneling_max,
+		optic_field_tunneling_softness,
+		optic_field_tracking_speed,
+		optic_field_tracking_accel,
+		optic_field_tracking_limit,
+		optic_field_eye_relief_low,
+		optic_field_eye_relief_high,
+		optic_field_exit_pupil_low,
+		optic_field_exit_pupil_high,
+		optic_field_pupil_parity,
+		optic_field_pupil_field_low,
+		optic_field_pupil_field_high,
+		optic_field_transmission,
+		optic_field_twilight_strength,
+		optic_field_physical_min,
+		optic_field_physical_max,
+		optic_field_eye_coupling,
+		optic_field_reticle_illum,
+		optic_field_magnification_mode,
+		optic_field_magnifications,
+		optic_field_mod_lane,
+		optic_field_sources,
+		optic_field_count
+	};
+
+	struct OpticObjectMemberDescriptor
+	{
+		LPCSTR name;
+		bool finite;
+		bool has_range;
+		double minimum;
+		double maximum;
+		bool minimum_exclusive;
+		bool maximum_exclusive;
+	};
+
+	struct OpticFieldDescriptor
+	{
+		EOpticFieldId id;
+		LPCSTR name;
+		EOpticFieldType type;
+		bool required;
+		bool registrable;
+		bool source_required;
+		double minimum;
+		double maximum;
+		u16 string_capacity;
+		u8 array_min;
+		u8 array_max;
+		bool finite;
+		bool ordered;
+		bool allow_zero;
+		bool minimum_exclusive;
+		bool maximum_exclusive;
+		bool non_empty;
+		const OpticObjectMemberDescriptor* members;
+		u8 member_count;
+		const LPCSTR* enum_values;
+		u8 enum_value_count;
+		LPCSTR element_type;
+		bool element_non_empty;
+		u16 element_string_capacity;
+		LPCSTR constraint;
+	};
+
+	using OpticFieldDescriptorArray = OpticFieldDescriptor[optic_field_count];
+	static const OpticFieldDescriptorArray& OpticFieldDescriptors();
+	static LPCSTR OpticFieldTypeName(EOpticFieldType type);
+	static LPCSTR OpticSchemaHash();
+
 	enum EOpticConfigValue : u8
 	{
+		optic_reticle_type,
+		optic_hybrid_reflex,
 		optic_objective_offset,
 		optic_objective_mm,
 		optic_middle_grey,
 		optic_adapt_speed,
-		optic_zero_m,
+		optic_convergence_limit_m,
 		optic_tunneling_parallax,
 		optic_tunneling_min,
 		optic_tunneling_max,
+		optic_tunneling_softness,
 		optic_tracking_speed,
 		optic_tracking_accel,
 		optic_tracking_limit,
@@ -162,7 +301,27 @@ public:
 		optic_twilight_strength,
 		optic_physical_min,
 		optic_physical_max,
+		optic_eye_coupling,
+		optic_reticle_illum,
+		optic_magnification_mode,
+		optic_magnifications,
+		optic_mod_lane,
 		optic_value_count
+	};
+
+	enum EOpticMagnificationMode : u8
+	{
+		optic_magnification_none,
+		optic_magnification_fixed,
+		optic_magnification_continuous,
+		optic_magnification_detent
+	};
+
+	struct OpticMagnifications
+	{
+		EOpticMagnificationMode mode = optic_magnification_none;
+		u8 count = 0;
+		float values[16] = {};
 	};
 
 	struct OpticConfig
@@ -170,8 +329,11 @@ public:
 		bool valid = false;
 		bool typed_route = false;
 		bool has_objective_offset = false;
+		bool has_objective_mm = false;
 		bool has_hybrid_reflex = false;
 		bool hybrid_reflex = false;
+		bool has_physical_range = false;
+		bool has_mod_lane = false;
 		u8 zoom_type = 0;
 		u8 reticle_type = 0;
 		u32 weapon_id = 0;
@@ -185,10 +347,11 @@ public:
 		float objective_mm = 0.f;
 		float middle_grey = 0.f;
 		float adapt_speed = 0.f;
-		float zero_m = 100.f;
+		float convergence_limit_m = 100.f;
 		float tunneling_parallax = 0.035f;
 		float tunneling_min = 0.04f;
 		float tunneling_max = 0.06f;
+		float tunneling_softness = 0.018f;
 		float tracking_speed = 5.f;
 		float tracking_accel_mm_s2 = 80.f;
 		float tracking_limit_mm = 7.f;
@@ -203,20 +366,42 @@ public:
 		float twilight_strength = 0.35f;
 		float physical_min = 0.f;
 		float physical_max = 0.f;
+		bool eye_coupling = true;
+		float reticle_illum = 1.f;
+		Fvector4 mod_lane = { 0.f, 0.f, 0.f, 0.f };
+		OpticMagnifications magnifications;
 		string256 context = {};
 		string128 weapon = {};
 		string128 scope = {};
 		string128 diagnostic_scope = {};
 		string64 identity_source = {};
-		string128 profile = {};
-		string128 spec = {};
+		string128 profile_id = {};
+		string128 spec_section = {};
 		string32 model = {};
 		string32 binding = {};
 		string128 binding_section = {};
 		string256 source[optic_value_count] = {};
 	};
 
-	static constexpr u32 optic_api_version = 2;
+	struct OpticPublication
+	{
+		OpticConfig accepted;
+		u32 base_generation = 0;
+		u64 base_fingerprint = 0;
+	};
+
+	static constexpr u32 optic_api_min = 3;
+	static constexpr u32 optic_api_max = 3;
+	static constexpr u32 optic_schema_min = 3;
+	static constexpr u32 optic_schema_max = 3;
+	static constexpr u32 optic_api_version = 3;
+	static constexpr u32 optic_schema_version = 3;
+	static bool MatchesOpticConfig(const WeaponPoseSnapshot& pose,
+		const OpticConfig& config);
+	static bool MatchesOpticConfig(const SightSnapshot& sight,
+		const OpticConfig& config);
+	static bool SameOpticConfig(const WeaponPoseSnapshot& pose,
+		const SightSnapshot& sight);
 	void PublishWeaponPose(const WeaponPoseSnapshot& pose);
 	bool ReadWeaponPose(WeaponPoseSnapshot& pose) const;
 	void ClearWeaponPose();
@@ -225,7 +410,7 @@ public:
 	void ClearSight();
 	void AppendFireTrace(const FireTrace& trace);
 	void ReadFireTraces(FireTrace (&traces)[16]) const;
-	bool ConnectOpticApi(u32 version);
+	bool ConnectOpticApi(u32 api, u32 schema);
 	void SetOpticScopeMode(u8 mode);
 	IC bool IsOpticApiConnected() const
 	{
@@ -239,8 +424,9 @@ public:
 	u32 BeginOpticContext(LPCSTR context, LPCSTR weapon, u32 weapon_id,
 		LPCSTR scope, u8 zoom_type,
 		LPCSTR identity_source, LPCSTR diagnostic_scope);
-	bool PublishOpticConfig(u32 context_token, const OpticConfig& config);
-	bool RejectOpticConfig(u32 context_token);
+	bool PrepareOpticConfig(u32 context_token, const OpticConfig& config,
+		OpticPublication& publication);
+	bool PublishOpticConfig(u32 context_token, const OpticPublication& publication);
 	bool ClearOpticConfig(u32 context_token);
 	void InvalidateOpticConfig();
 	bool ReadOpticConfig(OpticConfig& config) const;
@@ -273,11 +459,6 @@ public:
 
 	// set by the double-pass, read by the hybrid IsSVPFrame when true_pip is on
 	bool m_render_pass_is_svp = false;
-
-	// pip marks the main lens region as an objective view during NVG processing
-	bool svp_nvg_objective_region = false;
-	u32 svp_nvg_sensor_frame = u32(-1);
-	u32 svp_nvg_sensor_session = 0;
 
 	// pip set only when the hybrid reflex drew into rt_secondVP this frame
 	bool svp_reflex_capture_ok = false;

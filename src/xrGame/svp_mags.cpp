@@ -1,143 +1,121 @@
+#if defined(SVP_TEST_CLIENT)
+#include "../xrCore/xrCore.h"
+#else
 #include "stdafx.h"
+#endif
 #include "svp_mags.h"
 #include "../xrEngine/svp_gameplay_cvars.h"
 
-// pip parse a 3dss magnifications string, single N fixed, dash M-N dynamic, comma M,N stepped toggle
-// returns svp_mag_none on empty or malformed so the caller keeps the legacy factors
-static svp_mag_mode parse_svp_magnifications(LPCSTR raw, float& min_mag, float& max_mag)
+float svp_magnification_scroll_multiplier(float scroll_multiplier)
 {
-	if (!raw || !raw[0]) return svp_mag_none;
-	string256 buf;
-	u32 j = 0;
-	for (LPCSTR p = raw; *p && j + 1 < sizeof(buf); ++p)
-		if (*p != ' ' && *p != '\t') buf[j++] = *p;
-	buf[j] = 0;
-	if (!buf[0]) return svp_mag_none;
-
-	float a = 0.f, b = 0.f; char extra = 0;
-	if (strchr(buf, '-'))
-	{
-		if (sscanf(buf, "%f-%f%c", &a, &b, &extra) != 2) return svp_mag_none;
-		min_mag = a; max_mag = b; return svp_mag_dynamic;
-	}
-	if (strchr(buf, ','))
-	{
-		if (sscanf(buf, "%f,%f%c", &a, &b, &extra) != 2) return svp_mag_none;
-		min_mag = a; max_mag = b; return svp_mag_stepped;
-	}
-	if (sscanf(buf, "%f%c", &a, &extra) != 1) return svp_mag_none;
-	min_mag = max_mag = a; return svp_mag_fixed;
+	return _valid(scroll_multiplier) && scroll_multiplier > 0.f
+		? scroll_multiplier : 1.f;
 }
 
-// pip three tier resolution with the [SVP-MAGS] proof line, mode none keeps the legacy factors
-// true when the section authors either tier, malformed stays loud and terminal
-static bool resolve_from_section(LPCSTR sect, float zoom_multiple, svp_mags_data& out)
+float svp_magnification_to_runtime_factor(float magnification)
 {
-	float min_mag = 0.f, max_mag = 0.f;
-	bool authored = false, dyn = false, stepped = false;
+	if (!_valid(magnification) || magnification <= 0.f)
+		return 0.f;
+	const float factor = (SVP_ZOOM_BASE_FOV / 0.75f) / magnification;
+	return _valid(factor) && factor > 0.f ? factor : 0.f;
+}
 
-	LPCSTR source_key = nullptr;
-	LPCSTR raw = READ_IF_EXISTS(pSettings, r_string, sect, "svp_magnifications", NULL);
-	if (raw && raw[0])
-		source_key = "svp_magnifications";
-	else
-	{
-		raw = READ_IF_EXISTS(pSettings, r_string, sect, "magnifications", NULL);
-		if (raw && raw[0])
-			source_key = "magnifications";
-	}
-	svp_mag_mode mode = parse_svp_magnifications(raw, min_mag, max_mag);
-	if (raw && raw[0] && mode == svp_mag_none)
-	{
-		LPCSTR source = pSettings->DLTX_getFilenameOfLine(sect, source_key);
-		PipMsg("[SVP-MAGS] %s key=%s value='%s' src=%s malformed, legacy retained",
-			sect, source_key, raw, source ? source : "?");
-		return true;
-	}
-	if (mode != svp_mag_none)
-	{
-		authored = true;
-		dyn = (mode != svp_mag_fixed);
-		stepped = (mode == svp_mag_stepped);
-	}
-	else if (pSettings->line_exist(sect, "magnification"))
-	{
-		raw = pSettings->r_string(sect, "magnification");
-		source_key = "magnification";
-		mode = parse_svp_magnifications(raw, min_mag, max_mag);
-		if (mode == svp_mag_none)
-		{
-			LPCSTR source = pSettings->DLTX_getFilenameOfLine(sect, source_key);
-			PipMsg("[SVP-MAGS] %s key=%s value='%s' src=%s malformed, legacy retained",
-				sect, source_key, raw ? raw : "", source ? source : "?");
-			return true;
-		}
-		authored = true;
-		dyn = (mode != svp_mag_fixed);
-		stepped = (mode == svp_mag_stepped);
-		if (mode == svp_mag_fixed)
-		{
-			dyn = READ_IF_EXISTS(pSettings, r_bool, sect, "scope_dynamic_zoom", false);
-			if (dyn)
-				min_mag = READ_IF_EXISTS(pSettings, r_float, sect, "min_magnification", 1.f);
-		}
-	}
+float svp_runtime_factor_to_magnification(float runtime_factor)
+{
+	if (!_valid(runtime_factor) || runtime_factor <= 0.f)
+		return 0.f;
+	const float magnification = (SVP_ZOOM_BASE_FOV / 0.75f) / runtime_factor;
+	return _valid(magnification) && magnification > 0.f ? magnification : 0.f;
+}
 
-	if (!authored)
+float svp_magnification_to_weapon_factor(float magnification, float scroll_multiplier)
+{
+	return svp_magnification_to_runtime_factor(magnification) /
+		svp_magnification_scroll_multiplier(scroll_multiplier);
+}
+
+float svp_weapon_factor_to_magnification(float weapon_factor, float scroll_multiplier)
+{
+	return svp_runtime_factor_to_magnification(weapon_factor *
+		svp_magnification_scroll_multiplier(scroll_multiplier));
+}
+
+bool svp_magnification_ladder_valid(const svp_mags_data& ladder)
+{
+	const bool count_valid =
+		(ladder.mode == svp_mag_fixed && ladder.count == 1) ||
+		(ladder.mode == svp_mag_continuous && ladder.count == 2) ||
+		(ladder.mode == svp_mag_detent && ladder.count >= 2 &&
+			ladder.count <= _countof(ladder.values));
+	if (!count_valid)
 		return false;
-
-	const float svp_mag_base = SVP_ZOOM_BASE_FOV / 0.75f;
-	const float min_supported_mag = svp_mag_base / 200.f;
-	const float max_supported_mag = svp_mag_base;
-	if (!_valid(min_mag) || !_valid(max_mag) || min_mag < min_supported_mag
-		|| max_mag > max_supported_mag || min_mag > max_mag
-		|| !_valid(zoom_multiple) || zoom_multiple <= EPS)
-	{
-		LPCSTR source = pSettings->DLTX_getFilenameOfLine(sect, source_key);
-		PipMsg("[SVP-MAGS] %s key=%s value='%s' src=%s malformed, legacy retained",
-			sect, source_key, raw ? raw : "", source ? source : "?");
-		return true;
-	}
-
-	// 0.5x mirrors the 200 default min factor and 100x keeps the top factor positive
-	const float f_top = svp_mag_base / max_mag / zoom_multiple;
-	const float f_floor = svp_mag_base / min_mag;
-	// dynamic detents need an ordered range and the top factor under the base fov (NewGetZoomData VERIFY)
-	if (!_valid(f_top) || !_valid(f_floor) || (dyn && f_top >= SVP_ZOOM_BASE_FOV))
-	{
-		LPCSTR source = pSettings->DLTX_getFilenameOfLine(sect, source_key);
-		PipMsg("[SVP-MAGS] %s key=%s value='%s' src=%s malformed, legacy retained",
-			sect, source_key, raw ? raw : "", source ? source : "?");
-		return true;
-	}
-
-	out.mode = dyn ? (stepped ? svp_mag_stepped : svp_mag_dynamic) : svp_mag_fixed;
-	out.f_top = f_top;
-	out.f_floor = f_floor;
-	LPCSTR source = pSettings->DLTX_getFilenameOfLine(sect, source_key);
-	PipMsg("[SVP-MAGS] %s key=%s value='%s' src=%s mag=[%.2f..%.2f] f=[%.1f..%.1f]",
-		sect, source_key, raw ? raw : "", source ? source : "?", min_mag, max_mag, f_floor, f_top);
+	for (u32 i = 0; i < ladder.count; ++i)
+		if (!_valid(ladder.values[i]) || ladder.values[i] <= 0.f ||
+			ladder.values[i] > SVP_MAG_LIMIT ||
+			svp_magnification_to_runtime_factor(ladder.values[i]) <= 0.f ||
+			(i && !(ladder.values[i] > ladder.values[i - 1])))
+			return false;
 	return true;
 }
 
-// pip tries the passed section then the parent stripped scope section
-// an unauthored wpn_x_1p59 with parent_section wpn_x resolves from 1p59
-svp_mags_data svp_mags_resolve(LPCSTR sect, float zoom_multiple)
+static u64 svp_mag_hash(u64 hash, const void* data, size_t size)
 {
-	svp_mags_data out;
-	if (resolve_from_section(sect, zoom_multiple, out))
-		return out;
-
-	LPCSTR parent = READ_IF_EXISTS(pSettings, r_string, sect, "parent_section", NULL);
-	if (parent && parent[0])
+	const u8* bytes = static_cast<const u8*>(data);
+	for (size_t i = 0; i < size; ++i)
 	{
-		const u32 plen = xr_strlen(parent);
-		if (xr_strlen(sect) > plen + 1 && 0 == strncmp(sect, parent, plen) && sect[plen] == '_')
+		hash ^= bytes[i];
+		hash *= 1099511628211ull;
+	}
+	return hash;
+}
+
+u64 svp_magnification_fingerprint(const svp_mags_data& ladder)
+{
+	u64 hash = 14695981039346656037ull;
+	const u8 mode = static_cast<u8>(ladder.mode);
+	hash = svp_mag_hash(hash, &mode, sizeof(mode));
+	hash = svp_mag_hash(hash, &ladder.count, sizeof(ladder.count));
+	for (u32 i = 0; i < ladder.count && i < _countof(ladder.values); ++i)
+		hash = svp_mag_hash(hash, &ladder.values[i], sizeof(ladder.values[i]));
+	return hash;
+}
+
+int svp_magnification_exact_index(const svp_mags_data& ladder, float magnification)
+{
+	for (u32 i = 0; i < ladder.count && i < _countof(ladder.values); ++i)
+		if (ladder.values[i] == magnification)
+			return static_cast<int>(i);
+	return -1;
+}
+
+int svp_magnification_nearest_index(const svp_mags_data& ladder, float magnification)
+{
+	if (!ladder.count)
+		return -1;
+	u32 best = 0;
+	float distance = _abs(ladder.values[0] - magnification);
+	for (u32 i = 1; i < ladder.count && i < _countof(ladder.values); ++i)
+	{
+		const float candidate = _abs(ladder.values[i] - magnification);
+		if (candidate < distance)
 		{
-			LPCSTR suffix = sect + plen + 1;
-			if (pSettings->section_exist(suffix))
-				resolve_from_section(suffix, zoom_multiple, out);
+			best = i;
+			distance = candidate;
 		}
 	}
-	return out;
+	return static_cast<int>(best);
+}
+
+float svp_magnification_adjacent(const svp_mags_data& ladder, float magnification, int direction)
+{
+	if (ladder.mode != svp_mag_detent ||
+		!svp_magnification_ladder_valid(ladder))
+		return 0.f;
+	int index = svp_magnification_exact_index(ladder, magnification);
+	if (index < 0)
+		index = svp_magnification_nearest_index(ladder, magnification);
+	if (direction)
+		index += direction > 0 ? 1 : -1;
+	clamp(index, 0, static_cast<int>(ladder.count) - 1);
+	return ladder.values[index];
 }

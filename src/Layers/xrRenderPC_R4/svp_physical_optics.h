@@ -40,6 +40,12 @@ struct ObjectiveRegistration
 	bool valid = false;
 };
 
+struct CenteredRayProjection
+{
+	Vec2 lens_offset;
+	bool valid = false;
+};
+
 float SampleMagnificationResponse(const MagnificationResponse& response, float magnification);
 float ApplyMagnificationResponse(const MagnificationResponse& response, float magnification, float scale, float offset);
 float MagnificationFraction(float magnification, float minimum, float maximum);
@@ -48,6 +54,9 @@ float InterpolateReciprocalMagnification(float low, float high, float magnificat
 Vec2 LimitEyeOffset(const Vec2& offset, float limit_mm);
 ObjectiveRegistration MapObjectiveAxisToEyepiece(const Vec3& eye_local,
 	const Vec3& objective_local, const Vec2& lens_radius);
+CenteredRayProjection ProjectRayToCenteredLens(const Vec3& direction,
+	const Vec3& camera_right, const Vec3& camera_up, const Vec3& camera_forward,
+	float projection_x, float projection_y);
 void AccelerateEye(Vec2& velocity, const Vec2& desired_velocity, float max_delta);
 void UpdateEyeTracking(EyeTrackingState& state, const Vec2& target, bool suspended, std::uint32_t epoch,
 	std::uint32_t frame, float dt, float tracking_speed, float acceleration_mm_s2);

@@ -475,11 +475,16 @@ void CRender::renderGBuffer(bool clearGraph)
 		if (Target == TargetMain) // pip weapon HUD only in the main view, not the scope image
 		{
 			GMBase.r_dsgraph_capture_hud();
-			if (Device.true_pip_on)
+			const bool svp_scope_aimed = g_pGamePersistent
+				&& (g_pGamePersistent->m_pGShaderConstants->hud_params.y > 0.005f
+					|| (g_pGamePersistent->m_pGShaderConstants->hud_params.x > 0.05f
+						&& !GMBase.RGraph.mapScopeHUDSorted.empty()));
+			if (Device.true_pip_on
+				&& (Device.m_SecondViewport.IsSVPActive() || svp_scope_aimed))
 				GMBase.svp_latch_hud_poses();
 			// pip snapshot HUD geometry centers before render_hud clears the lists, so the geomscan (in
 			// deriveScopeLens, after the clear) can auto-derive the objective distance against the optical axis
-			if (scope_svp_enabled || scope_debug >= 2)
+			if ((scope_svp_enabled && svp_scope_aimed) || scope_debug >= 2)
 				svp_snapshot_hud_geom();
 			// keep the weapon list when an SVP pass follows, the scope image drains it second
 			extern bool g_svp_hud_frozen_pass;
@@ -496,10 +501,7 @@ void CRender::renderGBuffer(bool clearGraph)
 
 			// pip derive the scope lens then build the SVP camera (matrices[1]) while a PiP scope
 			// is aimed, zoom-0 tube sights have no zoom fov so ADS + a captured lens also qualifies
-			if (scope_svp_enabled && g_pGamePersistent &&
-				(g_pGamePersistent->m_pGShaderConstants->hud_params.y > 0.005f
-					|| (g_pGamePersistent->m_pGShaderConstants->hud_params.x > 0.05f
-						&& !GMBase.RGraph.mapScopeHUDSorted.empty())))
+			if (scope_svp_enabled && svp_scope_aimed)
 			{
 				deriveScopeLens();
 				// a culled weapon mid-aim re-arms the stale lens radius, m_W persists on its own
@@ -727,6 +729,7 @@ void CRender::renderSceneLighting(BOOL bSUN, bool svp)
 	// not re-render + clear the shared GMBase emissive list that the main pass still needs
 	{
 		PIX_EVENT(DEFER_SELF_ILLUM);
+		svp_stats::section_begin(svp_stats::SEC_MAIN_EMISSIVE);
 		Target->phase_accumulator();
 		// Render emissive geometry, stencil - write 0x0 at pixel pos
 		RCache.set_xform_project(Device.mProject);
@@ -742,6 +745,7 @@ void CRender::renderSceneLighting(BOOL bSUN, bool svp)
 		RCache.set_CullMode(CULL_CCW);
 		RCache.set_ColorWriteEnable();
 		GMBase.r_dsgraph_render_emissive(RImplementation.o.ssfx_bloom ? false : true);
+		svp_stats::section_end(svp_stats::SEC_MAIN_EMISSIVE);
 	}
 
 	if (RImplementation.o.ssfx_bloom)
@@ -750,7 +754,9 @@ void CRender::renderSceneLighting(BOOL bSUN, bool svp)
 		FLOAT ColorRGBA[4] = { 0,0,0,0 };
 		HW.pContext->ClearRenderTargetView(Target->rt_ssfx_bloom_emissive->pRT, ColorRGBA);
 		Target->u_setrt(Target->rt_ssfx_bloom_emissive, NULL, NULL, !RImplementation.o.dx10_msaa ? HW.pBaseZB : Target->rt_MSAADepth->pZRT);
-		GMBase.r_dsgraph_render_emissive(true, true);
+		// hud sorted glass (collimator dots, pda screen) stays out of the bloom emissive buffer,
+		// the bloom build's hud mask owns the hud response and feeding it here double counts unmasked
+		GMBase.r_dsgraph_render_emissive(true, ps_r__ssfx_bloom_hud != 0);
 	}
 
 	// Lighting, shadow maps build once on the main atlas, render_lights accumulates per viewport

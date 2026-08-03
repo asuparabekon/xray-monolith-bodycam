@@ -118,7 +118,7 @@ void CUIStaticItem::RenderInternal(const Fvector2& in_pos)
 	sPoly2D* R = NULL;
 
 	if (UI().m_currentPointType != IUIRender::pttLIT)
-		R = UI().ScreenFrustum().ClipPoly(S, D);
+		R = UI().ActiveClipFrustum().ClipPoly(S, D);
 	else
 	{
 		R = UI().ScreenFrustumLIT().ClipPoly(S, D);
@@ -198,7 +198,7 @@ void CUIStaticItem::RenderInternal(float angle)
 		UI().ClientToScreenScaled(S[i].pt);
 
 	sPoly2D D;
-	sPoly2D* R = UI().ScreenFrustum().ClipPoly(S, D);
+	sPoly2D* R = UI().ActiveClipFrustum().ClipPoly(S, D);
 	if (R && R->size())
 	{
 		for (u32 k = 0; k < R->size() - 2; k++)
@@ -216,7 +216,7 @@ void CUIStaticItem::Render()
 {
 	VERIFY(g_bRendering);
 	UIRender->SetShader(*hShader);
-	UIRender->StartPrimitive(8, IUIRender::ptTriList, UI().m_currentPointType);
+	UIRender->StartPrimitive(UI().HasCustomClip() ? UI().ActiveClipFrustum().ClipBudget(4) : 8, IUIRender::ptTriList, UI().m_currentPointType);
 	RenderInternal(vPos);
 	UIRender->FlushPrimitive();
 }

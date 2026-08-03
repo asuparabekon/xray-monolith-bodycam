@@ -105,6 +105,36 @@ ObjectiveRegistration MapObjectiveAxisToEyepiece(const Vec3& eye_local,
 	return registration;
 }
 
+CenteredRayProjection ProjectRayToCenteredLens(const Vec3& direction,
+	const Vec3& camera_right, const Vec3& camera_up, const Vec3& camera_forward,
+	float projection_x, float projection_y)
+{
+	CenteredRayProjection projection;
+	if (!std::isfinite(direction.x) || !std::isfinite(direction.y)
+		|| !std::isfinite(direction.z) || !std::isfinite(camera_right.x)
+		|| !std::isfinite(camera_right.y) || !std::isfinite(camera_right.z)
+		|| !std::isfinite(camera_up.x) || !std::isfinite(camera_up.y)
+		|| !std::isfinite(camera_up.z) || !std::isfinite(camera_forward.x)
+		|| !std::isfinite(camera_forward.y) || !std::isfinite(camera_forward.z)
+		|| !std::isfinite(projection_x) || projection_x <= 0.f
+		|| !std::isfinite(projection_y) || projection_y <= 0.f)
+		return projection;
+
+	const auto dot = [](const Vec3& left, const Vec3& right)
+	{
+		return left.x * right.x + left.y * right.y + left.z * right.z;
+	};
+	const float depth = dot(direction, camera_forward);
+	if (!std::isfinite(depth) || depth <= 0.00001f)
+		return projection;
+
+	projection.lens_offset.x = dot(direction, camera_right) / depth * projection_x * 0.5f;
+	projection.lens_offset.y = -dot(direction, camera_up) / depth * projection_y * 0.5f;
+	projection.valid = std::isfinite(projection.lens_offset.x)
+		&& std::isfinite(projection.lens_offset.y);
+	return projection;
+}
+
 void AccelerateEye(Vec2& velocity, const Vec2& desired_velocity, float max_delta)
 {
 	max_delta = std::max(max_delta, 0.f);

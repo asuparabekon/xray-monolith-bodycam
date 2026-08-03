@@ -1135,6 +1135,9 @@
     <ClCompile Include="xr_ioc_cmd.cpp" />
     <ClCompile Include="svp_gameplay_cvars.cpp" />
     <ClCompile Include="svp_crash_context.cpp" />
+    <ClCompile Include="svp_state.cpp">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
     <ClCompile Include="xr_object.cpp" />
     <ClCompile Include="xr_object_list.cpp" />
     <ClCompile Include="x_ray.cpp" />

@@ -365,6 +365,8 @@ public:
 	bool cam_BodycamGetHudOffset(Fvector& pos, Fvector& rot) const;
 	bool cam_BodycamGetArmPose(Bodycam::ArmPose& pose) const;
 	bool cam_BodycamSprintAnimReady() const;
+	bool cam_BodycamOwnsSprintTransition() const;
+	bool cam_BodycamSprintHudChangedThisFrame() const { return m_bodycam_sprint_hud_changed; }
 	enum EScriptCameraDeltaStatus : u8
 	{
 		eScriptCameraDeltaPending,
@@ -541,6 +543,8 @@ public:
 	float m_fLookoutFactor = 1;
 	Bodycam::MovementResponseState m_bodycam_movement_response;
 	bool m_bodycam_sprint_anim_ready = true;
+	bool m_bodycam_sprint_hud_active = false;
+	bool m_bodycam_sprint_hud_changed = false;
 	u8 m_bodycam_brake_steps_pending = 0;
 	float m_bodycam_brake_step_timer = 0.f;
 	void BodycamScheduleBrakeSteps();

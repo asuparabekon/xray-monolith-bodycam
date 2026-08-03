@@ -15,6 +15,7 @@
 #include "scope_3dss_common.h"
 #include "svp_hooks_reticle.h"
 #include "svp_hooks_shadow.h"
+#include "svp_hooks_inside.h"
 
 // ARC 3DSS dual-focal reticles use indices 10 and 11.
 // Relocate the unused mark magnifier to 12 so all three styles coexist.
@@ -73,6 +74,11 @@ float4 scope_custom_reticle(Scope S) {
 	}
 
 	svp_reticle_flip(reticle_tc, reticle_lens_tc, S);
+	const float reticle_scale = RETICLE_SIZE
+		* (FFP || RETICLE_TYPE == RT_GIPERON || RETICLE_TYPE == RT_DFP ? current_zoom : 1);
+	svp_reticle_follow_barrel(
+		reticle_tc, reticle_lens_tc, reticle_scale, RETICLE_SIZE,
+		RETICLE_PROJECT);
 
     float4 mark_texture = float4(0, 0, 0, 0);
 	if (reticle_tc.x >= 0 && reticle_tc.x <= 1 && reticle_tc.y >= 0 && reticle_tc.y <= 1)
@@ -198,10 +204,18 @@ float4 scope_custom_reticle(Scope S) {
 	}
 	
 	// LED-illuminated inside walls
-	float4 inside = s_inside.Sample(smp_base, SCOPECOORD_TO_TEXCOORD(clamp((reticle_tc - 0.5) * 0.62 + 0.5, 0, 1)));
-	inside = float4(markswitch_color.rgb * inside.r, inside.a);
-	if (RETICLE_TYPE == RT_SCREEN || RETICLE_TYPE == RT_FLAT_SCREEN || RETICLE_TYPE == RT_SPECTER || RETICLE_TYPE == RT_ACOG || RETICLE_TYPE == RT_MARK_MAGNIFIER || FFP) {
-		inside = float4(0, 0, 0, 0);
+	const bool inside_excluded = RETICLE_TYPE == RT_SCREEN
+		|| RETICLE_TYPE == RT_FLAT_SCREEN
+		|| RETICLE_TYPE == RT_SPECTER
+		|| RETICLE_TYPE == RT_ACOG
+		|| RETICLE_TYPE == RT_MARK_MAGNIFIER;
+	const bool uses_authored_inside = svp_scope_uses_authored_inside(FFP, inside_excluded);
+	const float2 inside_tc = SCOPECOORD_TO_TEXCOORD(
+		clamp((reticle_tc - 0.5) * 0.62 + 0.5, 0, 1));
+	float4 inside = 0;
+	if (uses_authored_inside) {
+		inside = svp_sample_authored_inside(inside_tc);
+		inside.rgb = markswitch_color.rgb * inside.r;
 	}
 	
 	if (RETICLE_TYPE == RT_LED_MASKED)

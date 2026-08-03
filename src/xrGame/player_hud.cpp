@@ -657,6 +657,10 @@ u32 attachable_hud_item::anim_play(const shared_str& anm_name_b, BOOL bMixIn, co
 	{
 		IKinematicsAnimated* ka = m_model->dcast_PKinematicsAnimated();
 
+		// a model whose motion bind failed stands down, the exit prompt owns the session
+		if (0 == ka->LL_MotionsSlotCount())
+			return ret;
+
 		shared_str item_anm_name;
 		if (anm->m_base_name != anm->m_additional_name)
 			item_anm_name = anm->m_additional_name;
@@ -1539,6 +1543,9 @@ void player_hud::update(const Fmatrix& cam_trans)
 		script_anim_offset_factor -= Device.fTimeDelta * 5.f;
 
 	clamp(script_anim_offset_factor, 0.f, 1.f);
+
+	if (wep && m_attached_items[0])
+		wep->UpdateSvpWeaponPose();
 }
 
 void player_hud::updateMovementLayerState()
@@ -1580,7 +1587,7 @@ void player_hud::updateMovementLayerState()
 			else if (state.bCrouch) {
 				m_movement_layers[eCrouch]->Play();
 			}
-			else if (state.bSprint) {
+			else if (state.bSprint && pActor->cam_BodycamSprintAnimReady()) {
 				m_movement_layers[eSprint]->Play();
 			}
 			else if (!isActorAccelerated(pActor->MovingState(), false)) {
@@ -1835,7 +1842,8 @@ u32 player_hud::script_anim_play(u8 hand, LPCSTR section, LPCSTR anm_name, bool 
 
 	const motion_descr& M = phm->m_animations[Random.randI(phm->m_animations.size())];
 
-	if (script_anim_item_model)
+	// a bind failed item model has no slots and stands down
+	if (script_anim_item_model && 0 != script_anim_item_model->LL_MotionsSlotCount())
 	{
 		shared_str item_anm_name;
 		if (phm->m_base_name != phm->m_additional_name)

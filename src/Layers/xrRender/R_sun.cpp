@@ -81,6 +81,7 @@ void CRender::render_sun_cascades()
 void CRender::render_sun_cascade(u32 cascade_ind)
 {
 	PROF_EVENT("Render Cascade");
+	if (ps_r__svp_stats) ++svp_stats_shadow; // overlay tally of cascade shadow-map renders
 	light* fuckingsun = (light*)Lights.sun_adapted._get();
 	sun::cascade& cascade = m_sun_cascades[cascade_ind];
 

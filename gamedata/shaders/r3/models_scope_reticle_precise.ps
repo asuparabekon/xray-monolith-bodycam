@@ -64,6 +64,7 @@ uniform float4 svp_optics; // x = 2*ocular_radius/eye_distance, y = true-scale p
 
 Texture2D s_prev_frame;
 Texture2D s_inside;
+#include "svp_hooks_inside.h"
 Texture2D s_dirt;
 Texture2D s_heat_map;
 TextureCube s_reflection;
@@ -441,7 +442,7 @@ float4 main(vf I) : SV_Target
 	const bool true_pip = shader_scope_params.w < -1.5;
 	float pip_k = true_pip ? 0.0 : 1.0;
 	float2 reticle_lens_tc = project(I.tc0, V_tangent.xy * pip_k, RETICLE_PROJECT, RETICLE_SIZE);
-float2 reticle_tc = project(I.tc0, V_tangent.xy * pip_k, RETICLE_PROJECT, RETICLE_SIZE * (FFP || RETICLE_TYPE == RT_GIPERON ? current_zoom : 1));
+float2 reticle_tc = project(I.tc0, V_tangent.xy * pip_k, RETICLE_PROJECT, RETICLE_SIZE * (FFP || RETICLE_TYPE == RT_GIPERON || RETICLE_TYPE == RT_DFP ? current_zoom : 1));
 
 
 	if (RETICLE_TYPE != RT_FLAT_SCREEN)
@@ -449,6 +450,15 @@ float2 reticle_tc = project(I.tc0, V_tangent.xy * pip_k, RETICLE_PROJECT, RETICL
 		float2 fish = fisheye(I.tc0, V_tangent.xy) / current_zoom * pip_k;
 		reticle_lens_tc += fish;
 		reticle_tc += fish;
+	}
+	if (svp_physical_optics_active() && svp_barrel_alignment.z > 0.5)
+	{
+		const float reticle_scale = RETICLE_SIZE
+			* (FFP || RETICLE_TYPE == RT_GIPERON || RETICLE_TYPE == RT_DFP ? current_zoom : 1);
+		// true PiP zeroes V_tangent above, so this project() path has unit slope.
+		const float2 correction = svp_barrel_alignment.xy;
+		reticle_lens_tc -= correction / max(RETICLE_SIZE, 0.001);
+		reticle_tc -= correction / max(reticle_scale, 0.001);
 	}
     float4 mark_texture = float4(0, 0, 0, 0);
 	if (reticle_tc.x >= 0 && reticle_tc.x <= 1 && reticle_tc.y >= 0 && reticle_tc.y <= 1)
@@ -604,8 +614,13 @@ if (RETICLE_TYPE == RT_DFP_ALT)
 	float4 shadow_texture;
 	if (svp_physical_optics_active())
 	{
-		const float2 tube_pupil_tc = svp_scope_lens_tc(I.w_P) + svp_scope_tunneling_offset();
-		shadow_texture = svp_profiled_tunneling_shadow(tube_pupil_tc);
+		const bool inside_excluded = RETICLE_TYPE == RT_SCREEN
+			|| RETICLE_TYPE == RT_FLAT_SCREEN
+			|| RETICLE_TYPE == RT_SPECTER
+			|| RETICLE_TYPE == RT_ACOG;
+		const bool uses_authored_inside = svp_scope_uses_authored_inside(FFP, inside_excluded);
+		const float2 tube_pupil_tc = svp_scope_tunneling_tc(I.tc0);
+		shadow_texture = svp_profiled_tunneling_shadow(tube_pupil_tc, uses_authored_inside);
 	}
 	else
 	{
@@ -624,10 +639,18 @@ if (RETICLE_TYPE == RT_DFP_ALT)
 	}
 	
 	// LED-illuminated scope interior
-	float4 inside = s_inside.Sample(smp_base, clamp((reticle_lens_tc - 0.5) * 0.62 + 0.5, 0, 1));
-	inside = float4(markswitch_color.rgb * inside.r, inside.a);
-	if (true_pip || RETICLE_TYPE == RT_SCREEN || RETICLE_TYPE == RT_FLAT_SCREEN || RETICLE_TYPE == RT_SPECTER || RETICLE_TYPE == RT_ACOG || FFP) {
-		inside = float4(0, 0, 0, 0);
+	const bool inside_excluded = RETICLE_TYPE == RT_SCREEN
+		|| RETICLE_TYPE == RT_FLAT_SCREEN
+		|| RETICLE_TYPE == RT_SPECTER
+		|| RETICLE_TYPE == RT_ACOG;
+	const bool uses_authored_inside = svp_scope_uses_authored_inside(FFP, inside_excluded);
+	const bool renders_authored_inside = uses_authored_inside
+		&& (!true_pip || svp_physical_optics_active());
+	const float2 inside_tc = clamp((reticle_lens_tc - 0.5) * 0.62 + 0.5, 0, 1);
+	float4 inside = 0;
+	if (renders_authored_inside) {
+		inside = svp_sample_authored_inside(inside_tc);
+		inside.rgb = markswitch_color.rgb * inside.r;
 	}
 
 	// Dirt texture

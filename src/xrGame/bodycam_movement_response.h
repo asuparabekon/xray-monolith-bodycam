@@ -30,6 +30,29 @@ struct MovementResponseOutput
 	bool active = false;
 };
 
+struct SprintHudState
+{
+	bool active = false;
+	bool ready = true;
+	bool changed = false;
+	bool notify = false;
+};
+
+inline SprintHudState ResolveSprintHudState(bool current_active, bool raw_sprint,
+	bool transition_owned, bool ads, bool moving, float speed_fraction, float handoff_speed)
+{
+	SprintHudState state;
+	state.ready = !transition_owned || !raw_sprint ||
+		(!ads && speed_fraction >= handoff_speed);
+	state.active = raw_sprint && state.ready;
+	state.changed = state.active != current_active;
+
+	// A full stop already sends the generic movement callback. Let that callback
+	// restart the HUD mixer instead of replaying the same animation twice.
+	state.notify = state.changed && (state.active || moving);
+	return state;
+}
+
 void ResetMovementResponse(MovementResponseState& state);
 MovementResponseOutput UpdateMovementResponse(const MovementResponseSettings& settings, MovementResponseState& state, const MovementResponseInput& input);
 } // namespace Bodycam

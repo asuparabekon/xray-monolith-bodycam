@@ -16,8 +16,101 @@
 #include "blenders\blender_recorder.h"
 #include "../../xrCore/_thread_types.h"
 
+#if RENDER == R_R4
+#include "svp_console.h"
+#endif
+
 //	Already defined in Texture.cpp
 void fix_texture_name(LPSTR fn);
+
+#if RENDER == R_R4
+namespace
+{
+constexpr LPCSTR scope_glass_materials_section = "scope_glass_materials";
+
+bool normalize_first_texture(LPCSTR textures, string_path& result)
+{
+	if (!textures)
+		return false;
+
+	while (*textures && isspace(static_cast<unsigned char>(*textures)))
+		++textures;
+
+	u32 length = 0;
+	while (textures[length] && textures[length] != ',' && length + 1 < sizeof(result))
+	{
+		result[length] = textures[length] == '/' ? '\\' : textures[length];
+		++length;
+	}
+
+	while (length && isspace(static_cast<unsigned char>(result[length - 1])))
+		--length;
+
+	result[length] = '\0';
+	if (!length)
+		return false;
+
+	xr_strlwr(result);
+	fix_texture_name(result);
+	return result[0] != '\0';
+}
+
+void normalize_texture_name(string_path& texture)
+{
+	for (LPSTR it = texture; *it; ++it)
+		if (*it == '/')
+			*it = '\\';
+
+	xr_strlwr(texture);
+	fix_texture_name(texture);
+}
+
+bool configured_scope_glass_texture(LPCSTR texture, string_path& replacement)
+{
+	if (!pSettings || !pSettings->section_exist(scope_glass_materials_section))
+		return false;
+
+	const CInifile::Sect& materials = pSettings->r_section(scope_glass_materials_section);
+	for (const CInifile::Item& material : materials.Data)
+	{
+		if (_GetItemCount(*material.second, '|') != 2)
+			continue;
+
+		string_path configured = {};
+		_GetItem(*material.second, 0, configured, '|');
+		normalize_texture_name(configured);
+		if (xr_strcmp(texture, configured) != 0)
+			continue;
+
+		_GetItem(*material.second, 1, replacement, '|');
+		normalize_texture_name(replacement);
+		return replacement[0] != '\0';
+	}
+
+	return false;
+}
+
+bool route_scope_glass_material(LPCSTR shader, LPCSTR textures, string1024& routed_textures)
+{
+	if (!ps_r__scope_glass || !shader || stricmp(shader, "models\\model") != 0)
+		return false;
+
+	string_path texture = {};
+	string_path replacement = {};
+	if (!normalize_first_texture(textures, texture) || !configured_scope_glass_texture(texture, replacement))
+		return false;
+
+	xr_strcpy(routed_textures, replacement);
+	if (LPCSTR remaining_textures = strchr(textures, ','))
+		xr_strcat(routed_textures, remaining_textures);
+
+	if (ps_r__scope_glass_debug)
+		Msg("[scope-glass] %s -> %s", texture, replacement);
+
+	return true;
+}
+}
+#endif
 
 /*
 void fix_texture_name(LPSTR fn)
@@ -329,6 +422,12 @@ Shader* CResourceManager::Create(LPCSTR s_shader, LPCSTR s_textures, LPCSTR s_co
 	if (!g_dedicated_server)
 #endif
 	{
+#if RENDER == R_R4
+		string1024 scope_glass_textures = {};
+		if (route_scope_glass_material(s_shader, s_textures, scope_glass_textures))
+			s_textures = scope_glass_textures;
+#endif
+
 		//	TODO: DX10: When all shaders are ready switch to common path
 #if defined(USE_DX10) || defined(USE_DX11)
 		if (_lua_HasShader(s_shader))

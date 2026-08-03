@@ -3,10 +3,81 @@
 local show_bodycam_window = false
 local bindings
 local binding_by_name = {}
-local custom_section = "bodycam_imgui_custom"
-local custom_save_delay_ms = 500
-local custom_save_due_time
+local preset_file = "bodycam_user.ltx"
+local preset_index_section = "bodycam_presets"
+local preset_section_prefix = "bodycam_preset_"
+local legacy_custom_section = "bodycam_imgui_custom"
+local preset_save_delay_ms = 500
+local preset_save_due_time
+local preset_ini
+local user_presets
+local selected_preset = { kind = "modified", id = "modified", name = "Modified" }
+local initial_preset_detected = false
+local new_preset_name = ""
+local preset_message
 local selected_feature = 1
+
+local red_orchestra_camera = {
+    hip_camera_deadzone_yaw = 8,
+    hip_camera_deadzone_pitch = 6,
+    hip_camera_follow_speed = 0.1,
+    hip_camera_max_yaw_offset = 8,
+    hip_camera_max_pitch_offset = 6,
+    hip_camera_roll_scale = 0.6,
+    hip_camera_inner_zone_response = 1,
+    hip_camera_follow_damping = 3,
+    hip_camera_soft_follow_yaw = 0,
+    hip_camera_soft_follow_pitch = 0,
+    hip_camera_position_scale = 0,
+    ads_camera_deadzone_yaw = 8,
+    ads_camera_deadzone_pitch = 6,
+    ads_camera_follow_speed = 0.1,
+    ads_camera_max_yaw_offset = 8,
+    ads_camera_max_pitch_offset = 6,
+    ads_camera_inner_zone_response = 0.1,
+    ads_camera_follow_damping = 1,
+    ads_camera_soft_follow_yaw = 1.8,
+    ads_camera_soft_follow_pitch = 1.2,
+    ads_camera_roll_scale = 0.6,
+    ads_camera_position_scale = 0.006,
+    movement_camera_roll_scale = 3,
+    movement_camera_position_scale = 0.020,
+}
+
+local red_orchestra_ads_camera = {}
+for name, value in pairs(red_orchestra_camera) do
+    red_orchestra_ads_camera[name] = value
+end
+red_orchestra_ads_camera.hip_camera_max_yaw_offset = 0
+red_orchestra_ads_camera.hip_camera_max_pitch_offset = 0
+red_orchestra_ads_camera.hip_camera_roll_scale = 0
+
+local builtin_presets = {
+    { id = "default", name = "Default", engine_preset = 2 },
+    { id = "balanced", name = "Balanced", engine_preset = 1 },
+    { id = "disabled", name = "Disable", engine_preset = 0 },
+    {
+        id = "no_ads",
+        name = "No ADS",
+        engine_preset = 2,
+        values = {
+            ads_camera_max_yaw_offset = 90,
+            ads_camera_max_pitch_offset = 90,
+        },
+    },
+    {
+        id = "red_orchestra",
+        name = "Red Orchestra",
+        engine_preset = 2,
+        values = red_orchestra_camera,
+    },
+    {
+        id = "red_orchestra_ads",
+        name = "Red Orchestra (ADS only)",
+        engine_preset = 2,
+        values = red_orchestra_ads_camera,
+    },
+}
 
 local feature_tabs = {
     {
@@ -504,62 +575,274 @@ local function load_bindings()
     for _, binding in ipairs(bindings) do
         binding_by_name[binding.name] = binding
     end
+
+    if not initial_preset_detected then
+        initial_preset_detected = true
+        local matches_default = true
+        for _, binding in ipairs(bindings) do
+            if binding.type == "bool" then
+                if bodycam.get_bool(binding.name, binding.default) ~= binding.default then
+                    matches_default = false
+                    break
+                end
+            elseif math.abs(bodycam.get_float(binding.name, binding.default) - binding.default) > 0.0001 then
+                matches_default = false
+                break
+            end
+        end
+        if matches_default then
+            selected_preset = { kind = "builtin", id = "default", name = "Default" }
+        end
+    end
     return true
 end
 
-local function custom_storage()
-    return axr_main and axr_main.config
-end
-
-local function save_custom_preset()
-    local ini = custom_storage()
-    if not ini or not load_bindings() then
-        return
+local function preset_storage()
+    if preset_ini then
+        return preset_ini
+    end
+    if not ini_file_ex then
+        return nil
     end
 
-    for _, binding in ipairs(bindings) do
-        if binding.type == "bool" then
-            ini:w_value(custom_section, binding.name, bodycam.get_bool(binding.name, binding.default))
-        else
-            ini:w_value(custom_section, binding.name, bodycam.get_float(binding.name, binding.default))
+    local ok, ini = pcall(ini_file_ex, preset_file, true)
+    if ok then
+        preset_ini = ini
+    end
+    return preset_ini
+end
+
+local function clean_preset_name(name)
+    name = tostring(name or "")
+    name = string.gsub(name, "[\r\n%[%]=;]", " ")
+    name = string.gsub(name, "^%s+", "")
+    name = string.gsub(name, "%s+$", "")
+    name = string.gsub(name, "%s%s+", " ")
+    return string.sub(name, 1, 48)
+end
+
+local function read_user_presets(ini)
+    local result = {}
+    if ini and ini:section_exist(preset_index_section) then
+        local count = ini:line_count(preset_index_section)
+        for index = 0, count - 1 do
+            local exists, id, name = ini:r_line(preset_index_section, index, "", "")
+            if exists and string.sub(id, 1, #preset_section_prefix) == preset_section_prefix then
+                table.insert(result, {
+                    kind = "user",
+                    id = id,
+                    name = clean_preset_name(name),
+                    section = id,
+                })
+            end
         end
     end
+    table.sort(result, function(left, right)
+        return string.lower(left.name) < string.lower(right.name)
+    end)
+    return result
+end
+
+local function find_user_preset(id)
+    for _, preset in ipairs(user_presets or {}) do
+        if preset.id == id then
+            return preset
+        end
+    end
+end
+
+local function find_user_preset_by_name(name)
+    local needle = string.lower(clean_preset_name(name))
+    for _, preset in ipairs(user_presets or {}) do
+        if string.lower(preset.name) == needle then
+            return preset
+        end
+    end
+end
+
+local function write_preset_values(ini, section, source_ini, source_section)
+    for _, binding in ipairs(bindings) do
+        local value
+        if source_ini and source_ini:line_exist(source_section, binding.name) then
+            value = source_ini:r_value(
+                source_section,
+                binding.name,
+                binding.type == "bool" and 1 or 2,
+                binding.default)
+        elseif binding.type == "bool" then
+            value = bodycam.get_bool(binding.name, binding.default)
+        else
+            value = bodycam.get_float(binding.name, binding.default)
+        end
+        ini:w_value(section, binding.name, value)
+    end
+end
+
+local function create_user_preset(name, source_ini, source_section)
+    local ini = preset_storage()
+    name = clean_preset_name(name)
+    if not ini or name == "" or not load_bindings() then
+        return nil, "Enter a preset name."
+    end
+    if find_user_preset_by_name(name) then
+        return nil, "A user preset with that name already exists."
+    end
+    if #(user_presets or {}) >= 64 then
+        return nil, "The 64-preset limit has been reached."
+    end
+
+    local next_id = ini:r_value(preset_index_section, "next_id", 2, 1)
+    local id = preset_section_prefix .. math.floor(next_id)
+    ini:w_value(preset_index_section, "next_id", math.floor(next_id) + 1)
+    ini:w_value(preset_index_section, id, name)
+    write_preset_values(ini, id, source_ini, source_section)
     ini:save()
-    custom_save_due_time = nil
+
+    user_presets = read_user_presets(ini)
+    return find_user_preset(id)
 end
 
-local function schedule_custom_save()
-    custom_save_due_time = time_global() + custom_save_delay_ms
-end
-
-local function apply_custom_preset()
-    local ini = custom_storage()
-    if not ini or not ini:section_exist(custom_section) or not load_bindings() then
+local function migrate_legacy_custom(ini)
+    if not ini or ini:r_value(preset_index_section, "legacy_custom_migrated", 1, false) then
         return
     end
 
-    for _, binding in ipairs(bindings) do
-        if ini:line_exist(custom_section, binding.name) then
+    ini:w_value(preset_index_section, "legacy_custom_migrated", true)
+    user_presets = read_user_presets(ini)
+    local legacy = axr_main and axr_main.config
+    if legacy and legacy:section_exist(legacy_custom_section) and not find_user_preset_by_name("Custom") then
+        create_user_preset("Custom", legacy, legacy_custom_section)
+    else
+        ini:save()
+    end
+end
+
+local function load_user_presets()
+    if user_presets then
+        return true
+    end
+    local ini = preset_storage()
+    if not ini or not load_bindings() then
+        return false
+    end
+    user_presets = read_user_presets(ini)
+    migrate_legacy_custom(ini)
+    user_presets = read_user_presets(ini)
+    return true
+end
+
+local function save_user_preset(preset)
+    local ini = preset_storage()
+    if not ini or not preset or preset.kind ~= "user" or not load_bindings() then
+        return
+    end
+    write_preset_values(ini, preset.section)
+    ini:save()
+    preset_save_due_time = nil
+end
+
+local function schedule_user_preset_save()
+    if selected_preset.kind == "user" then
+        preset_save_due_time = time_global() + preset_save_delay_ms
+    else
+        selected_preset = { kind = "modified", id = "modified", name = "Modified" }
+    end
+end
+
+local function preserve_pending_user_preset()
+    if preset_save_due_time then
+        save_user_preset(selected_preset)
+    end
+end
+
+local function apply_binding_values(values)
+    for name, value in pairs(values or {}) do
+        local binding = binding_by_name[name]
+        if binding then
             if binding.type == "bool" then
-                bodycam.set_bool(binding.name,
-                    ini:r_value(custom_section, binding.name, 1, binding.default))
+                bodycam.set_bool(name, value)
             else
-                bodycam.set_float(binding.name,
-                    ini:r_value(custom_section, binding.name, 2, binding.default))
+                bodycam.set_float(name, value)
             end
         end
     end
 end
 
-local function actor_on_update()
-    if custom_save_due_time and time_global() >= custom_save_due_time then
-        save_custom_preset()
-    end
+local function apply_builtin_preset(preset)
+    preserve_pending_user_preset()
+    bodycam.apply_preset(preset.engine_preset)
+    apply_binding_values(preset.values)
+    selected_preset = { kind = "builtin", id = preset.id, name = preset.name }
+    preset_save_due_time = nil
 end
 
-local function preserve_pending_custom_preset()
-    if custom_save_due_time then
-        save_custom_preset()
+local function apply_user_preset(preset)
+    local ini = preset_storage()
+    if not ini or not preset or not ini:section_exist(preset.section) then
+        return
+    end
+
+    preserve_pending_user_preset()
+    bodycam.apply_preset(2)
+    for _, binding in ipairs(bindings) do
+        if ini:line_exist(preset.section, binding.name) then
+            local value = ini:r_value(
+                preset.section,
+                binding.name,
+                binding.type == "bool" and 1 or 2,
+                binding.default)
+            if binding.type == "bool" then
+                bodycam.set_bool(binding.name, value)
+            else
+                bodycam.set_float(binding.name, value)
+            end
+        end
+    end
+    selected_preset = preset
+    new_preset_name = preset.name
+    preset_save_due_time = nil
+end
+
+local function delete_user_preset(preset)
+    local ini = preset_storage()
+    if not ini or not preset or preset.kind ~= "user" then
+        return
+    end
+
+    for _, binding in ipairs(bindings) do
+        if ini:line_exist(preset.section, binding.name) then
+            ini:remove_line(preset.section, binding.name)
+        end
+    end
+    ini:remove_line(preset_index_section, preset.id)
+    ini:save()
+    user_presets = read_user_presets(ini)
+    selected_preset = { kind = "modified", id = "modified", name = "Modified" }
+    preset_save_due_time = nil
+end
+
+local function rename_user_preset(preset, name)
+    local ini = preset_storage()
+    name = clean_preset_name(name)
+    local duplicate = find_user_preset_by_name(name)
+    if not ini or not preset or preset.kind ~= "user" or name == "" then
+        return false
+    end
+    if duplicate and duplicate.id ~= preset.id then
+        return false
+    end
+
+    ini:w_value(preset_index_section, preset.id, name)
+    ini:save()
+    user_presets = read_user_presets(ini)
+    selected_preset = find_user_preset(preset.id)
+    new_preset_name = name
+    return true
+end
+
+local function actor_on_update()
+    if preset_save_due_time and time_global() >= preset_save_due_time then
+        save_user_preset(selected_preset)
     end
 end
 
@@ -619,7 +902,7 @@ local function draw_binding(binding, label, use_slider)
                 value = binding.default
             end
             bodycam.set_bool(binding.name, value)
-            schedule_custom_save()
+            schedule_user_preset_save()
         end
         return
     end
@@ -640,7 +923,7 @@ local function draw_binding(binding, label, use_slider)
             value = binding.default
         end
         bodycam.set_float(binding.name, value)
-        schedule_custom_save()
+        schedule_user_preset_save()
     end
 end
 
@@ -661,24 +944,93 @@ local function draw_settings_table(id, settings, use_slider)
 end
 
 local function draw_presets()
-    if ImGui.Button("Default", vector2():set(110, 0)) then
-        preserve_pending_custom_preset()
-        bodycam.apply_preset(2)
+    if not load_user_presets() then
+        ImGui.TextDisabled("Preset storage is unavailable.")
+        return
+    end
+
+    ImGui.TextDisabled("PRESET")
+    ImGui.SetNextItemWidth(300)
+    if ImGui.BeginCombo("##bodycam_preset", selected_preset.name, ImGuiComboFlags.None) then
+        ImGui.TextDisabled("Built-in")
+        for _, preset in ipairs(builtin_presets) do
+            local selected = selected_preset.kind == "builtin" and selected_preset.id == preset.id
+            if ImGui.Selectable(preset.name .. "##builtin_" .. preset.id, selected,
+                ImGuiSelectableFlags.None, vector2():set(0, 0)) then
+                apply_builtin_preset(preset)
+                new_preset_name = ""
+                preset_message = nil
+            end
+            if selected then
+                ImGui.SetItemDefaultFocus()
+            end
+        end
+
+        if #user_presets > 0 then
+            ImGui.Separator()
+            ImGui.TextDisabled("User")
+            for _, preset in ipairs(user_presets) do
+                local selected = selected_preset.kind == "user" and selected_preset.id == preset.id
+                if ImGui.Selectable(preset.name .. "##user_" .. preset.id, selected,
+                    ImGuiSelectableFlags.None, vector2():set(0, 0)) then
+                    apply_user_preset(preset)
+                    preset_message = nil
+                end
+                if selected then
+                    ImGui.SetItemDefaultFocus()
+                end
+            end
+        end
+        ImGui.EndCombo()
+    end
+
+    ImGui.SameLine(0, 8)
+    ImGui.SetNextItemWidth(220)
+    local name, changed = ImGui.InputTextWithHint(
+        "##bodycam_preset_name",
+        "New preset name",
+        new_preset_name,
+        ImGuiInputTextFlags.None,
+        64)
+    if changed then
+        new_preset_name = name
+    end
+
+    ImGui.SameLine(0, 8)
+    if ImGui.Button("Save New", vector2():set(90, 0)) then
+        local preset, message = create_user_preset(new_preset_name)
+        if preset then
+            selected_preset = preset
+            new_preset_name = preset.name
+            preset_message = "Saved to " .. preset_file
+        else
+            preset_message = message
+        end
+    end
+
+    local is_user_preset = selected_preset.kind == "user"
+    ImGui.SameLine(0, 8)
+    ImGui.BeginDisabled(not is_user_preset)
+    if ImGui.Button("Update", vector2():set(80, 0)) then
+        save_user_preset(selected_preset)
+        preset_message = "Preset updated."
     end
     ImGui.SameLine(0, 8)
-    if ImGui.Button("Balanced", vector2():set(110, 0)) then
-        preserve_pending_custom_preset()
-        bodycam.apply_preset(1)
+    if ImGui.Button("Rename", vector2():set(80, 0)) then
+        preset_message = rename_user_preset(selected_preset, new_preset_name)
+            and "Preset renamed."
+            or "Enter a unique preset name."
     end
     ImGui.SameLine(0, 8)
-    if ImGui.Button("Cinematic", vector2():set(110, 0)) then
-        preserve_pending_custom_preset()
-        bodycam.apply_preset(3)
+    if ImGui.Button("Delete", vector2():set(80, 0)) then
+        delete_user_preset(selected_preset)
+        new_preset_name = ""
+        preset_message = "Preset deleted."
     end
-    ImGui.SameLine(0, 8)
-    if ImGui.Button("Custom", vector2():set(110, 0)) then
-        preserve_pending_custom_preset()
-        apply_custom_preset()
+    ImGui.EndDisabled()
+
+    if preset_message then
+        ImGui.TextDisabled(preset_message)
     end
 end
 

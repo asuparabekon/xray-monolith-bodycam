@@ -419,23 +419,24 @@ void CActor::g_SetAnimation(u32 mstate_rl)
 
 	if (this == Level().CurrentViewEntity())
 	{
+		const bool sprint_callback_sent = cam_BodycamSprintHudChangedThisFrame();
+
 		if (mstate_rl & mcAnyMove)
 		{
-			if ((mstate_rl & mcSprint) != (mstate_old & mcSprint))
-			{
-				g_player_hud->OnMovementChanged(mcSprint);
-			}
-			else if ((mstate_rl & mcCrouch) != (mstate_old & mcCrouch))
+			if (!sprint_callback_sent &&
+				(mstate_rl & mcCrouch) != (mstate_old & mcCrouch))
 			{
 				g_player_hud->OnMovementChanged(mcCrouch);
 			}
-			else if ((mstate_rl & mcAccel) != (mstate_old & mcAccel) && !Actor()->IsZoomAimingMode())
+			else if (!sprint_callback_sent &&
+				(mstate_rl & mcAccel) != (mstate_old & mcAccel) && !Actor()->IsZoomAimingMode())
 			{
 				g_player_hud->OnMovementChanged(mcAccel);
 			}
 		}
 
-		if (!(mstate_old & mcAnyMove) && (mstate_rl & mcAnyMove) || (mstate_old & mcAnyMove) && !(mstate_rl & mcAnyMove))
+		const bool movement_changed = !!(mstate_old & mcAnyMove) != !!(mstate_rl & mcAnyMove);
+		if (movement_changed && !sprint_callback_sent)
 			g_player_hud->OnMovementChanged(mcAnyMove);
 	};
 

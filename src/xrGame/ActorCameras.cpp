@@ -188,11 +188,18 @@ bool CActor::cam_BodycamGetArmPose(Bodycam::ArmPose& pose) const
 
 bool CActor::cam_BodycamSprintAnimReady() const
 {
-	if (!m_bodycam.HudEnabled() || !Bodycam::GetConfig().movement.enable)
+	if (!cam_BodycamOwnsSprintTransition())
 		return true;
 	if (!(mstate_real & mcSprint))
 		return true;
 	return m_bodycam_sprint_anim_ready;
+}
+
+bool CActor::cam_BodycamOwnsSprintTransition() const
+{
+	const Bodycam::RuntimeConfig& config = Bodycam::GetConfig();
+	return m_bodycam.HudEnabled() && config.features.sprint_transition_enable &&
+		config.movement.enable && HasActiveFirearm(*this);
 }
 
 u32 CActor::cam_QueueScriptCameraDelta(float yaw_delta, float pitch_delta)

@@ -56,6 +56,20 @@ public:
 	}
 };
 
+// settable for the session, never written to user.ltx
+class CCC_SvpVolatileFloat final : public CCC_Float
+{
+public:
+	CCC_SvpVolatileFloat(LPCSTR name, float* value, float minimum, float maximum)
+		: CCC_Float(name, value, minimum, maximum)
+	{
+	}
+
+	void Save(IWriter*) override
+	{
+	}
+};
+
 class CCC_SvpInternalInteger final : public CCC_Integer
 {
 public:

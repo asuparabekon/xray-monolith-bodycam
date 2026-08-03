@@ -354,6 +354,7 @@ void CActor::g_cl_CheckControls(u32 mstate_wf, Fvector& vControlAccel, float& Ju
 
 	if (Local() && g_Alive())
 	{
+		m_bodycam_sprint_hud_changed = false;
 		Bodycam::MovementResponseInput response_input;
 		response_input.dt = dt;
 		response_input.move_flags = mstate_real;
@@ -366,15 +367,19 @@ void CActor::g_cl_CheckControls(u32 mstate_wf, Fvector& vControlAccel, float& Ju
 		cam_eff_factor = vControlAccel.magnitude();
 		m_bodycam.SetMovementDebug(response.target_speed, response.actual_speed, response.speed_fraction);
 
-		const bool sprint_anim_was_ready = m_bodycam_sprint_anim_ready;
 		const Bodycam::RuntimeConfig& config = Bodycam::GetConfig();
-		const bool sprint_anim_gate =
-			config.movement.enable && !IsZoomAimingMode() && !!(mstate_real & mcSprint);
-		m_bodycam_sprint_anim_ready = !sprint_anim_gate ||
-			response.speed_fraction >= Bodycam::ClampSprintBridgeHandoffSpeed(config.sprint.bridge_handoff_speed);
-
-		if (sprint_anim_gate && !sprint_anim_was_ready && m_bodycam_sprint_anim_ready && g_player_hud)
+		const bool sprint_transition_owned = cam_BodycamOwnsSprintTransition();
+		const Bodycam::SprintHudState sprint_hud = Bodycam::ResolveSprintHudState(
+			m_bodycam_sprint_hud_active, !!(mstate_real & mcSprint), sprint_transition_owned,
+			IsZoomAimingMode(), !!(mstate_real & mcAnyMove), response.speed_fraction,
+			Bodycam::ClampSprintBridgeHandoffSpeed(config.sprint.bridge_handoff_speed));
+		m_bodycam_sprint_anim_ready = sprint_hud.ready;
+		m_bodycam_sprint_hud_active = sprint_hud.active;
+		if (sprint_hud.notify && g_player_hud)
+		{
+			m_bodycam_sprint_hud_changed = true;
 			g_player_hud->OnMovementChanged(mcSprint);
+		}
 		if ((mstate_old & mcSprint) && !(mstate_real & mcSprint) && response.actual_speed > 0.25f)
 			BodycamScheduleBrakeSteps();
 		BodycamUpdateBrakeSteps(dt);
@@ -384,6 +389,8 @@ void CActor::g_cl_CheckControls(u32 mstate_wf, Fvector& vControlAccel, float& Ju
 		Bodycam::ResetMovementResponse(m_bodycam_movement_response);
 		m_bodycam.SetMovementDebug(0.f, 0.f, 0.f);
 		m_bodycam_sprint_anim_ready = true;
+		m_bodycam_sprint_hud_active = false;
+		m_bodycam_sprint_hud_changed = false;
 		m_bodycam_brake_steps_pending = 0;
 		m_bodycam_brake_step_timer = 0.f;
 	}

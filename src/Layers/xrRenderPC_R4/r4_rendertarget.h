@@ -258,6 +258,8 @@ public:
 	// taa history seeds from the current frame on the next resolve, true at creation and on scope edges
 	bool m_taa_seed_history = true;
 	bool m_svp_dlss_built = false; // pip this SVP target was built with the DLSS gate on (toggle-recreate key)
+	// lean gate one-shot clear, the water reflection buffer gets wiped once on entering the skip
+	bool m_lean_water_cleared = false;
 	void EnsureScopeShaders();
 	void phase_scope_debug(); // pip draw the scope debug overlay (main+SVP views, ssfx, smap), main only
 
@@ -462,7 +464,6 @@ public:
 	void phase_gasmask_drops();
 	void phase_gasmask_dudv();
 	void phase_nightvision();
-	bool svp_nvg_objective_pass();
 	bool svp_nvg_pass();
 	void phase_fakescope(); //crookr
 	void phase_heatvision(); //--DSR-- HeatVision

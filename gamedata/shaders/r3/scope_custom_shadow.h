@@ -62,14 +62,20 @@ float scope_custom_shadow(v_out I, Scope S) {
 	float offset = distance(S.exit_pupil, S.sfp) + 1.0;
 	offset = pow(offset,1.2);
 
-	// True PiP uses mesh-independent lens coordinates and keeps the physical
-	// transmission boundary separate from the persistent tube shadow.
+	// True PiP keeps the physical transmission boundary separate from the
+	// persistent tube shadow.
 	const bool true_pip = shader_scope_params.w < -1.5;
 	float4 shadow_texture;
 	if (svp_physical_optics_active())
 	{
-		exit_pupil_tc = svp_scope_lens_tc(I.w_P) + svp_scope_tunneling_offset();
-		shadow_texture = svp_profiled_tunneling_shadow(exit_pupil_tc);
+		const bool inside_excluded = RETICLE_TYPE == RT_SCREEN
+			|| RETICLE_TYPE == RT_FLAT_SCREEN
+			|| RETICLE_TYPE == RT_SPECTER
+			|| RETICLE_TYPE == RT_ACOG
+			|| RETICLE_TYPE == RT_MARK_MAGNIFIER;
+		const bool uses_authored_inside = svp_scope_uses_authored_inside(FFP, inside_excluded);
+		exit_pupil_tc = svp_scope_tunneling_tc(S.tc0);
+		shadow_texture = svp_profiled_tunneling_shadow(exit_pupil_tc, uses_authored_inside);
 		shadow_texture = svp_merge_black_shadow(shadow_texture, zoom_switch_shadow);
 		zoom_switch_shadow = float4(0, 0, 0, 0);
 	}

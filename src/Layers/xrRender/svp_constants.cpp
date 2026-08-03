@@ -20,15 +20,12 @@ extern Fvector4 ps_s3ds_param_4;
 
 static constexpr int S3DS_SEE_THROUGH_BIT = 1 << 2;
 
+// stale nvg patch shaders still declare this, a deterministic zero keeps them on authored behavior
 static class svp_nvg_view_binder : public R_constant_setup
 {
 	virtual void setup(R_constant* C)
 	{
-		const bool active = ps_dev_param_8.x >= 1.f;
-		const bool objective = active && ps_r__svp_nvg_objective && Device.true_pip_on
-			&& (Device.m_SecondViewport.m_render_pass_is_svp
-				|| Device.m_SecondViewport.svp_nvg_objective_region);
-		RCache.set_c(C, objective ? 1.f : 0.f, 0.f, 0.f, 0.f);
+		RCache.set_c(C, 0.f, 0.f, 0.f, 0.f);
 	}
 } binder_svp_nvg_view;
 
@@ -79,17 +76,15 @@ static class svp_mas_binder : public R_constant_setup
 	}
 } binder_svp_mas;
 
-// glass optics tunables, x = illuminated reticle washout, y = field curvature edge softness, z = ACOG fiber sun mode
+// glass optics tunables, y = field curvature edge softness, w = auto reticle flip, x z retired
 static class svp_glass_binder : public R_constant_setup
 {
 	virtual void setup(R_constant* C)
 	{
-		extern float ps_r__svp_reticle_washout;
 		extern float ps_r__svp_field_curve;
-		extern int ps_r__svp_acog_fiber;
 		extern int ps_r__svp_autoflip_reticle;
 		if (Device.true_pip_on)
-			RCache.set_c(C, ps_r__svp_reticle_washout, ps_r__svp_field_curve, ps_r__svp_acog_fiber ? 1.f : 0.f, ps_r__svp_autoflip_reticle ? 1.f : 0.f);
+			RCache.set_c(C, 0.f, ps_r__svp_field_curve, 0.f, ps_r__svp_autoflip_reticle ? 1.f : 0.f);
 		else
 			RCache.set_c(C, 0.f, 0.f, 0.f, 0.f);
 	}
@@ -156,6 +151,27 @@ extern float g_pip_scope_magnification;
 extern float g_pip_scope_min_mag;
 extern float g_pip_scope_max_mag;
 extern float g_pip_scope_ratio;
+
+// pip [SVP-RETBIND] logs the values the reticle shader actually receives at bind time
+static void retbind_diag(const char* lane, float cur, float mn, float mx, float w)
+{
+	extern int ps_r__svp_diag;
+	if (!ps_r__svp_diag) return;
+	static u32 s_ms = 0;
+	if (Device.dwTimeGlobal - s_ms < 1000) return;
+	s_ms = Device.dwTimeGlobal;
+	extern Fvector4 ps_s3ds_param_1;
+	extern Fvector4 ps_s3ds_param_3;
+	PipMsg("[SVP-RETBIND] lane=%s cur=%.3f min=%.3f max=%.3f w=%.1f mag=%.3f ratio=%.3f eng_min=%.3f eng_max=%.3f rsize=%.2f rtype=%.0f lua=(%.2f,%.2f,%.2f,%.2f) hudy=%.2f fovp=(%.2f,%.2f)",
+		lane, cur, mn, mx, w, g_pip_scope_magnification, g_pip_scope_ratio,
+		g_pip_scope_min_mag, g_pip_scope_max_mag,
+		ps_s3ds_param_1.x, ps_s3ds_param_3.y,
+		ps_shader_scope_params.x, ps_shader_scope_params.y, ps_shader_scope_params.z, ps_shader_scope_params.w,
+		g_pGamePersistent ? g_pGamePersistent->m_pGShaderConstants->hud_params.y : 0.f,
+		g_pGamePersistent ? g_pGamePersistent->m_pGShaderConstants->hud_fov_params.x : 0.f,
+		g_pGamePersistent ? g_pGamePersistent->m_pGShaderConstants->hud_fov_params.y : 0.f);
+}
+
 static class shader_scope_params : public R_constant_setup
 {
 	virtual void setup(R_constant* C)
@@ -177,18 +193,24 @@ static class shader_scope_params : public R_constant_setup
 			const float mx = k * r * ((g_pip_scope_max_mag > 0.01f) ? g_pip_scope_max_mag : g_pip_scope_magnification);
 			// w = -2 is the true-PiP sentinel, the legacy Lua writes -1 so patched shaders gate on
 			// w < -1.5 and stay inert at svpscope 0
-			RCache.set_c(C, cur, mn, mx, Device.m_SecondViewport.IsSVPActive() ? -2.f : ps_shader_scope_params.w);
+			const float w = Device.m_SecondViewport.IsSVPActive() ? -2.f : ps_shader_scope_params.w;
+			retbind_diag("pip", cur, mn, mx, w);
+			RCache.set_c(C, cur, mn, mx, w);
 		}
 		else
 #endif
 		if (ps_shader_scope_params.y > 0.f)
+		{
+			retbind_diag("lua", ps_shader_scope_params.x, ps_shader_scope_params.y, ps_shader_scope_params.z, ps_shader_scope_params.w);
 			RCache.set_c(C, ps_shader_scope_params.x, ps_shader_scope_params.y, ps_shader_scope_params.z, ps_shader_scope_params.w);
+		}
 		else if (Device.true_pip_on)
 		{
 			// engine fallback for a scope with no Lua data, only meaningful while PiP drives the mags
 			const float cur = g_pip_scope_magnification;
 			const float mn = (g_pip_scope_min_mag > 0.f) ? g_pip_scope_min_mag : cur;
 			const float mx = (g_pip_scope_max_mag > 0.f) ? g_pip_scope_max_mag : cur;
+			retbind_diag("fallback", cur, mn, mx, 0.f);
 			RCache.set_c(C, cur, mn, mx, 0.0f);
 		}
 		else
@@ -217,7 +239,7 @@ static const struct { const char* name; R_constant_setup* setup; } s_svp_binders
 	{ "svp_env", &binder_svp_env }, // pip glass environment data (glare, rain)
 	{ "ssfx_issvp", &ssfx_issvp },
 	{ "svp_nearblur_mode", &binder_svp_nearblur }, // pip near-blur composite selector
-	{ "svp_nvg_view", &binder_svp_nvg_view }, // pip objective view leaves the wearer mask in the main view
+	{ "svp_nvg_view", &binder_svp_nvg_view }, // pip stale nvg patch inertizer
 };
 
 void RegisterSvpConstants(CBlender_Compile& dst)

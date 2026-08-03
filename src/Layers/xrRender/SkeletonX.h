@@ -113,6 +113,9 @@ public:
 	bool SVP_BoneSnapshotXform(u16 bone, Fmatrix& out);
 	bool SVP_BoneSnapshotXform(const IKinematics* owner, u16 bone, Fmatrix& out);
 	bool SVP_BoneSnapshotVisible(BOOL& visible);
+	u16 SVP_MeasureBoneCount() const; // pip bone count for the near-plane derive, 0 when unparented
+	bool SVP_BoneCornersWorld(u16 bone, const Fmatrix& pose, Fvector* corners8); // pip posed bone obb
+	u32 SVP_MeshVertsWorld(const Fmatrix& pose, const xr_vector<u8>& through, xr_vector<Fvector>& out); // pip posed verts of the flagged bones
 	const void* SVP_SkeletonOwner() const { return Parent; }
 	// pip append each dedup bind-pose vertex, model space, with its global dominant bone id
 	void SVP_GatherVerts(xr_vector<Fvector>& positions, xr_vector<u16>& bones);

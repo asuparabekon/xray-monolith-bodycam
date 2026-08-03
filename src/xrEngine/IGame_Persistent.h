@@ -142,6 +142,8 @@ public:
 	virtual void OnAppDeactivate();
 	virtual void _BCL OnFrame();
 	virtual void ImGui_OnRender(LPCSTR name) {};
+	// pip a model load failure that would fatal, true when the exit prompt took over
+	virtual bool OnModelLoadFatal(LPCSTR message) { return false; };
 
 	// вызывается только когда изменяется тип игры
 	virtual void OnGameStart();

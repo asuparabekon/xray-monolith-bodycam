@@ -130,6 +130,8 @@ public:
 		float axial = 0.f;
 		float radial = -1.f;
 		float radius = 0.f;
+		float dir_right = 0.f;
+		float dir_up = 0.f;
 		float axial_lo = 0.f;
 		float axial_hi = 0.f;
 		float objective = 0.f;
@@ -137,6 +139,10 @@ public:
 		bool candidate = false;
 		bool reject = false;
 		bool forward = false;
+		// world aabb and its 8 posed corners, the near-plane derive frustum tests them
+		Fbox box_w;
+		Fvector corners_w[8];
+		bool box_valid = false;
 	};
 	void svp_classify_objective_hud(dxRender_Visual* visual, Fmatrix* matrix, u8 role,
 		SSvpHudAdmission& admission);

@@ -1,6 +1,7 @@
 #include "pch_script.h"
 #include "Actor_Flags.h"
 #include "hudmanager.h"
+#include "../xrCore/svp_log.h"
 #ifdef DEBUG
 
 #	include "PHDebug.h"
@@ -1120,7 +1121,7 @@ float CActor::currentFOV(bool wantSVPFov)
 			return g_fov;
 		else if (svp_owns_main_view && wantSVPFov)
 			// pip the true through-scope fov, config factors ride the 75 base and rescale to the live fov
-			return pWeapon->GetZoomFactor() * 0.75f * (pWeapon->IsScriptedZoom() ? 1.f : g_fov / SVP_ZOOM_BASE_FOV);
+			return svp_factor_to_fov(pWeapon->GetZoomFactor(), pWeapon->IsScriptedZoom() ? 1.f : g_fov / SVP_ZOOM_BASE_FOV);
 		else
 			return pWeapon->GetZoomFactor() * (0.75f);
 	}
@@ -1248,6 +1249,27 @@ void CActor::UpdateCL()
 
 			g_pGamePersistent->m_pGShaderConstants->hud_fov_params.x = pWeapon->CurrentZoomFactor();
 			g_pGamePersistent->m_pGShaderConstants->hud_fov_params.y = pWeapon->GetMinScopeZoomFactor();
+
+			// dial telemetry, the three inputs the scope zoom mapping divides, prints in any mode
+			{
+				extern int ps_r__svp_diag;
+				extern int scope_svp_enabled;
+				if (ps_r__svp_diag && pWeapon->IsZoomed())
+				{
+					static u32 s_dial_ms = 0;
+					if (Device.dwTimeGlobal - s_dial_ms > 1000)
+					{
+						s_dial_ms = Device.dwTimeGlobal;
+						const float F = pWeapon->GetZoomFactor();
+						const float Fmin = pWeapon->GetMinScopeZoomFactor();
+						const float Ftop = pWeapon->CurrentZoomFactor();
+						const float part = (_abs(Ftop - Fmin) > EPS) ? (F - Fmin) / (Ftop - Fmin) : 0.f;
+						PipMsg("[SVP-DIAL] %s scope=%s F=%.3f Fmin=%.3f Ftop=%.3f part=%.4f svp=%d",
+							pWeapon->cNameSect().c_str(), pWeapon->GetScopeName().c_str(),
+							F, Fmin, Ftop, part, scope_svp_enabled);
+					}
+				}
+			}
 		}
 	}
 #ifdef STATIONARYMGUN_NEW

@@ -6897,6 +6897,9 @@
     <ClInclude Include="..\ui\UITabButton.h">
       <Filter>UI\UIWindows\TabControl</Filter>
     </ClInclude>
+    <ClInclude Include="..\ui\UITabScrollArrows.h">
+      <Filter>UI\UIWindows\TabControl</Filter>
+    </ClInclude>
     <ClInclude Include="..\ui\UITabControl.h">
       <Filter>UI\UIWindows\TabControl</Filter>
     </ClInclude>
@@ -10605,6 +10608,12 @@
       <Filter>UI\UIWindows\TabControl</Filter>
     </ClCompile>
     <ClCompile Include="..\ui\UITabControl.cpp">
+      <Filter>UI\UIWindows\TabControl</Filter>
+    </ClCompile>
+    <ClCompile Include="..\ui\UITabControl_scroll.cpp">
+      <Filter>UI\UIWindows\TabControl</Filter>
+    </ClCompile>
+    <ClCompile Include="..\ui\UITabScrollArrows.cpp">
       <Filter>UI\UIWindows\TabControl</Filter>
     </ClCompile>
     <ClCompile Include="..\ui\UITabControl_script.cpp">

@@ -702,6 +702,9 @@
     <ClCompile Include="svp_crash_context.cpp">
       <Filter>Engine\Console\commands</Filter>
     </ClCompile>
+    <ClCompile Include="svp_state.cpp">
+      <Filter>RenderRef\Execution &amp; 3D\Device</Filter>
+    </ClCompile>
     <ClCompile Include="Engine.cpp">
       <Filter>Engine\Core</Filter>
     </ClCompile>

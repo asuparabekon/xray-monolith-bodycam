@@ -14,7 +14,11 @@ static const float SVP_SETTLED_ROT = 0.999f;
 static bool svp_config_matches_weapon(const CSecondVPParams::OpticConfig& config,
 	const CWeapon& weapon)
 {
-	if (!config.valid || xr_strcmp(config.weapon, weapon.cNameSect().c_str()) ||
+	const auto& viewport = Device.m_SecondViewport;
+	if (!config.valid || !config.typed_route ||
+		config.session != viewport.GetSVPSession() ||
+		config.route_epoch != viewport.GetOpticRouteEpoch() ||
+		xr_strcmp(config.weapon, weapon.cNameSect().c_str()) ||
 		config.weapon_id != weapon.ID() || config.zoom_type != weapon.GetZoomType())
 		return false;
 
@@ -41,105 +45,155 @@ static float svp_configured_zero(const CWeapon& weapon, const CSecondVPParams& v
 	pose.optic_context_token = config.context_token;
 	pose.optic_config_generation = config.generation;
 	pose.optic_route_epoch = config.route_epoch;
-	return svp_config_matches_weapon(config, weapon) ? config.zero_m : 0.f;
+	return svp_config_matches_weapon(config, weapon) ? config.convergence_limit_m : 0.f;
 }
 
-static bool svp_same_optic_config(const CSecondVPParams::WeaponPoseSnapshot& pose,
-	const CSecondVPParams::SightSnapshot& sight)
+static bool svp_current_sight(const CSecondVPParams& viewport,
+	const CSecondVPParams::WeaponPoseSnapshot& pose,
+	CSecondVPParams::SightSnapshot& sight)
 {
-	if (pose.optic_typed != sight.optic_typed)
+	if (!viewport.ReadSight(sight)
+		|| !viewport.SnapshotRecent(sight.frame, sight.session, Device.dwFrame)
+		|| !CSecondVPParams::SameOpticConfig(pose, sight)
+		|| sight.weapon_id != pose.weapon_id)
 		return false;
-	if (!pose.optic_typed)
-		return true;
-	return pose.optic_config_valid && sight.optic_config_valid &&
-		pose.optic_context_token == sight.optic_context_token &&
-		pose.optic_config_generation == sight.optic_config_generation &&
-		pose.optic_route_epoch == sight.optic_route_epoch;
+
+	attachable_hud_item* root = nullptr;
+	if (g_player_hud)
+	{
+		switch (sight.root_role)
+		{
+		case IDSGraphManager::hud_optic:
+			root = g_player_hud->attached_item(SCOPE_ATTACH_IDX);
+			break;
+		case IDSGraphManager::hud_primary_item:
+			root = g_player_hud->attached_item(0);
+			break;
+		default:
+			break;
+		}
+	}
+	if (!sight.root_local_valid || !root
+		|| sight.root_token != reinterpret_cast<u64>(&root->m_item_transform))
+		return false;
+
+	root->m_item_transform.transform_tiny(
+		sight.position, sight.root_local_position);
+	root->m_item_transform.transform_dir(
+		sight.direction, sight.root_local_direction);
+	sight.direction.normalize_safe();
+	return _valid(sight.position) && _valid(sight.direction)
+		&& sight.direction.square_magnitude() > EPS;
 }
 
-// pip hosts the swing envelope that drives the scope shadow crescent
-void CWeapon::ApplySvpSightAnchor(CActor* pActor, Fmatrix& trans)
+static void svp_resolve_projectile_ray(const SPickParam& pick,
+	const CSecondVPParams::SightSnapshot& sight, bool sight_valid,
+	float zero_m, const Fvector& muzzle, Fvector& position, Fvector& direction)
+{
+	position.set(pick.defs.start);
+	direction.set(pick.defs.dir);
+	if (!sight_valid || zero_m <= 0.f)
+		return;
+
+	if (!pick.barrel_blocked && muzzle.square_magnitude() > EPS)
+		position.set(muzzle);
+
+	Fvector zero_point;
+	zero_point.mad(sight.position, sight.direction, zero_m);
+	Fvector zero_direction;
+	zero_direction.sub(zero_point, position);
+	if (zero_direction.magnitude() > 1.f)
+	{
+		zero_direction.normalize();
+		direction.set(zero_direction);
+	}
+}
+
+void CWeapon::UpdateSvpSwingEnvelope(CActor* pActor)
 {
 	auto& vp = Device.m_SecondViewport;
-	// the aim reference axis for the swing envelope
+	SSvpSwingEnvelope& envelope = m_svpSwingEnvelope;
+	const Fvector cr = pActor->cam_FirstEye()->vDirection;
+	const int current_ammo = GetAmmoElapsed();
+	const u32 session = vp.GetSVPSession();
+	if (!envelope.initialized || envelope.session != session ||
+		Device.dwFrame - envelope.frame > 1)
 	{
-		const Fvector cr = pActor->cam_FirstEye()->vDirection;
-		// swing envelope for the shadow, aim axis angular acceleration reads recoil kicks and
-		// hard swings, smooth tracking holds near zero so calm aim never charges it
-		{
-			static Fvector s_env_dir = {0.f, 0.f, 1.f};
-			static float s_env_w = 0.f;
-			static float s_env_accel = 0.f;
-			const float dt = _max(Device.fTimeDelta, 0.001f);
-			// cross magnitude keeps the tiny frame angles numerically clean, a short smooth
-			// window drops the single frame spikes that flickered the crescent at rest
-			Fvector cx;
-			cx.crossproduct(s_env_dir, cr);
-			float sind = cx.magnitude();
-			clamp(sind, 0.f, 1.f);
-			const float w = asinf(sind) / dt;
-			s_env_accel += (_abs(w - s_env_w) / dt - s_env_accel) * (1.f - expf(-dt / 0.04f));
-			// the smoothed lateral rate picks the crescent side, the direction latches so the
-			// fading crescent keeps its side instead of recentering into a ring
-			{
-				static Fvector2 s_env_swing = {0.f, 0.f};
-				Fvector dm;
-				dm.sub(cr, s_env_dir);
-				Fvector up;
-				up.set(pActor->cam_FirstEye()->vNormal);
-				Fvector rt;
-				rt.crossproduct(up, cr);
-				rt.normalize_safe();
-				const float ks = 1.f - expf(-dt / 0.12f);
-				s_env_swing.x += (dm.dotproduct(rt) / dt - s_env_swing.x) * ks;
-				s_env_swing.y += (dm.dotproduct(up) / dt - s_env_swing.y) * ks;
-				const float sm = _sqrt(s_env_swing.x * s_env_swing.x + s_env_swing.y * s_env_swing.y);
-				if (sm > 0.05f)
-				{
-					vp.svp_swing_x = s_env_swing.x / sm;
-					vp.svp_swing_y = s_env_swing.y / sm;
-				}
-			}
-			s_env_dir.set(cr);
-			s_env_w = w;
-			// charges only at settled aim so the raise and zoom rotate never draw the tunnel
-			static int s_prev_ammo = -1;
-			const int ammo = GetAmmoElapsed();
-			const bool shot = (s_prev_ammo != -1 && ammo < s_prev_ammo);
-			s_prev_ammo = ammo;
-			extern int g_svp_crescent;
-			if (g_svp_crescent && vp.IsSVPActive() && GetZRotatingFactor() > 0.999f)
-			{
-				// every shot kicks the crescent in, swings must clear a gate the walk bob cannot
-				const float dz = _max(24.f / _max(vp.svp_mag, 1.f), 12.f);
-				float sw = (s_env_accel - dz) / (0.5f * dz);
-				clamp(sw, 0.f, 1.f);
-				if (shot)
-				{
-					vp.svp_shadow_gain += 0.45f;
-					clamp(vp.svp_shadow_gain, 0.f, 1.f);
-				}
-				else if (sw > vp.svp_shadow_gain)
-					vp.svp_shadow_gain += (sw - vp.svp_shadow_gain) * (1.f - expf(-dt / 0.06f));
-				// tuning numbers for the feel report, quiet at true rest
-				if (s_env_accel > 2.f || vp.svp_shadow_gain > 0.05f)
-				{
-					static u32 s_sw_ms = 0;
-					if (Device.dwTimeGlobal - s_sw_ms > 1000)
-					{
-						s_sw_ms = Device.dwTimeGlobal;
-						PipMsg("[SVP-SWING] accel %.1f dz %.1f gain %.2f mag %.1f",
-							s_env_accel, dz, vp.svp_shadow_gain, vp.svp_mag);
-					}
-				}
-			}
-		}
+		envelope.initialized = true;
+		envelope.direction.set(cr);
+		envelope.rate.set(0.f, 0.f);
+		envelope.angular_rate = 0.f;
+		envelope.acceleration = 0.f;
+		envelope.ammo = current_ammo;
+		envelope.log_time = Device.dwTimeGlobal;
+	}
+	envelope.session = session;
+	envelope.frame = Device.dwFrame;
+
+	// Angular acceleration catches recoil and hard swings while ignoring steady tracking.
+	const float dt = _max(Device.fTimeDelta, 0.001f);
+	Fvector turn_axis;
+	turn_axis.crossproduct(envelope.direction, cr);
+	float sine = turn_axis.magnitude();
+	clamp(sine, 0.f, 1.f);
+	const float angular_rate = asinf(sine) / dt;
+	const float acceleration = _abs(angular_rate - envelope.angular_rate) / dt;
+	envelope.acceleration += (acceleration - envelope.acceleration) *
+		(1.f - expf(-dt / 0.04f));
+
+	Fvector direction_delta;
+	direction_delta.sub(cr, envelope.direction);
+	Fvector up;
+	up.set(pActor->cam_FirstEye()->vNormal);
+	Fvector right;
+	right.crossproduct(up, cr);
+	right.normalize_safe();
+	const float rate_blend = 1.f - expf(-dt / 0.12f);
+	envelope.rate.x += (direction_delta.dotproduct(right) / dt - envelope.rate.x) * rate_blend;
+	envelope.rate.y += (direction_delta.dotproduct(up) / dt - envelope.rate.y) * rate_blend;
+	const float rate_magnitude = envelope.rate.magnitude();
+	if (rate_magnitude > 0.05f)
+	{
+		vp.svp_swing_x = envelope.rate.x / rate_magnitude;
+		vp.svp_swing_y = envelope.rate.y / rate_magnitude;
+	}
+	envelope.direction.set(cr);
+	envelope.angular_rate = angular_rate;
+
+	const bool shot = envelope.ammo != -1 && current_ammo < envelope.ammo;
+	envelope.ammo = current_ammo;
+	extern int g_svp_crescent;
+	if (!g_svp_crescent || !vp.IsSVPActive() || GetZRotatingFactor() <= 0.999f)
+		return;
+
+	const float threshold = _max(24.f / _max(vp.svp_mag, 1.f), 12.f);
+	float swing = (envelope.acceleration - threshold) / (0.5f * threshold);
+	clamp(swing, 0.f, 1.f);
+	if (shot)
+	{
+		vp.svp_shadow_gain += 0.45f;
+		clamp(vp.svp_shadow_gain, 0.f, 1.f);
+	}
+	else if (swing > vp.svp_shadow_gain)
+	{
+		vp.svp_shadow_gain += (swing - vp.svp_shadow_gain) *
+			(1.f - expf(-dt / 0.06f));
+	}
+
+	if ((envelope.acceleration > 2.f || vp.svp_shadow_gain > 0.05f) &&
+		Device.dwTimeGlobal - envelope.log_time > 1000)
+	{
+		envelope.log_time = Device.dwTimeGlobal;
+		PipMsg("[SVP-SWING] accel %.1f dz %.1f gain %.2f mag %.1f",
+			envelope.acceleration, threshold, vp.svp_shadow_gain, vp.svp_mag);
 	}
 }
 
 void CWeapon::UpdateSecondVP()
 {
 	SyncSvpZoomSeedMode();
+	if (m_zoomtype == 0)
+		RefreshSvpTypedMagnifications();
 	if (!(ParentIsActor() && (m_pInventory != NULL) && (m_pInventory->ActiveItem() == this)))
 		return;
 
@@ -257,41 +311,53 @@ void CWeapon::UpdateSecondVP()
 		vp.svp_min_75base = m_zoom_params.m_bSvpAuthoredMin || SvpDetentBase();
 	}
 
-	// pip mirror the live ballistic ray and range the authored zero
-	if (svp_act)
-	{
-		auto& vp = Device.m_SecondViewport;
-		CSecondVPParams::WeaponPoseSnapshot pose;
-		const float configured_zero = svp_configured_zero(*this, vp, pose);
-		CSecondVPParams::SightSnapshot sight;
-		const bool sight_ok = vp.ReadSight(sight)
-			&& vp.SnapshotRecent(sight.frame, sight.session, Device.dwFrame)
-			&& svp_same_optic_config(pose, sight);
-		// the pick remaps through the actor's real eye under demo_record (CHudItem::Ray)
-		const SPickParam& pp = GetPick();
-		pose.fire_ray_pos.set(pp.defs.start);
-		pose.fire_ray_dir.set(pp.defs.dir);
-		pose.muzzle_pos.set(get_LastFP());
-		// the actor's true eye, immune to the demo camera, the overlay's crosshair ray
-		pose.eye_ray_pos.set(pActor->cam_FirstEye()->vPosition);
-		pose.eye_ray_dir.set(pActor->cam_FirstEye()->vDirection);
-		float zero_eff = configured_zero;
-		if (configured_zero > 0.f && vp.IsSVPActive() && sight_ok)
-		{
-			// the published sight line, never the render scratch (zeroes at frame start mid tick)
-			Fvector so = sight.position;
-			Fvector sd = sight.direction;
-			collide::rq_result RQ;
-			if (Level().ObjectSpace.RayPick(so, sd, configured_zero, collide::rqtBoth, RQ, H_Parent()))
-				zero_eff = _max(RQ.range, 2.f);
-		}
-		pose.fire_ray_zero = zero_eff;
-		pose.frame = Device.dwFrame;
-		pose.session = vp.GetSVPSession();
-		vp.PublishWeaponPose(pose);
-	}
 }
 
+void CWeapon::UpdateSvpWeaponPose()
+{
+	if (!Device.m_SecondViewport.IsSVPActive())
+		return;
+
+	UpdatePick();
+	PublishSvpWeaponPose();
+}
+
+void CWeapon::PublishSvpWeaponPose()
+{
+	auto& vp = Device.m_SecondViewport;
+	if (!vp.IsSVPActive() || !ParentIsActor() || !m_pInventory
+		|| m_pInventory->ActiveItem() != this)
+		return;
+
+	CActor* actor = smart_cast<CActor*>(H_Parent());
+	if (!actor)
+		return;
+
+	const SPickParam& pp = GetPick();
+	CSecondVPParams::WeaponPoseSnapshot pose;
+	pose.weapon_id = ID();
+	const float configured_zero = svp_configured_zero(*this, vp, pose);
+	CSecondVPParams::SightSnapshot sight;
+	const bool sight_ok = svp_current_sight(vp, pose, sight);
+
+	// player_hud has finalized the weapon, optic, and procedural transforms.
+	// Publish that same transform for optics and 3D ballistics.
+	pose.muzzle_pos.set(get_LastFP());
+	pose.eye_ray_pos.set(actor->cam_FirstEye()->vPosition);
+	pose.eye_ray_dir.set(actor->cam_FirstEye()->vDirection);
+	pose.camera_pos.set(Device.vCameraPosition);
+	pose.camera_right.set(Device.vCameraRight);
+	pose.camera_up.set(Device.vCameraTop);
+	pose.camera_forward.set(Device.vCameraDirection);
+	svp_resolve_projectile_ray(pp, sight, sight_ok, configured_zero,
+		pose.muzzle_pos, pose.fire_ray_pos, pose.fire_ray_dir);
+	pose.fire_ray_zero = configured_zero;
+	pose.frame = Device.dwFrame;
+	pose.session = vp.GetSVPSession();
+	vp.PublishWeaponPose(pose);
+}
+
+// pip main view fov ownership, latched per optic identity so a lens snapshot gap cannot zoom the main view
 bool CWeapon::OwnsSvpMainView() const
 {
 	return scope_svp_enabled >= 2 && m_zoomtype == 0 && m_svpMainViewValid
@@ -311,43 +377,30 @@ bool CWeapon::GetSVPCameraMatrix()
 
 	CSecondVPParams::OpticConfig config;
 	return vp.ReadOpticConfig(config) && svp_config_matches_weapon(config, *this)
-		&& sight.optic_typed && sight.optic_config_valid
-		&& sight.optic_context_token == config.context_token
-		&& sight.optic_config_generation == config.generation
-		&& sight.optic_route_epoch == config.route_epoch;
+		&& sight.optic_typed
+		&& CSecondVPParams::MatchesOpticConfig(sight, config);
 }
 
 // pip zeroing, the shot converges onto the sight line at the ranged zero, then the tracer
 // ring records the final departure ray, called from CActor::g_fireParams
-void svp_apply_zero_and_trace(const SPickParam& pp, Fvector& fire_pos, Fvector& fire_dir)
+void svp_apply_zero_and_trace(const SPickParam& pp, u16 firing_weapon_id,
+	Fvector& fire_pos, Fvector& fire_dir)
 {
 	// pip zeroing converges onto the sight line at the ranged zero
 	auto& vp = Device.m_SecondViewport;
 	CSecondVPParams::WeaponPoseSnapshot pose;
-	CSecondVPParams::SightSnapshot sight;
 	const bool pose_ok = vp.ReadWeaponPose(pose)
-		&& vp.SnapshotRecent(pose.frame, pose.session, Device.dwFrame);
-	const bool sight_ok = vp.ReadSight(sight)
-		&& vp.SnapshotRecent(sight.frame, sight.session, Device.dwFrame)
-		&& svp_same_optic_config(pose, sight);
-	const float configured_zero = pose_ok ? pose.fire_ray_zero : 0.f;
-	if (configured_zero > 0.f && Device.true_pip_on && vp.IsSVPActive() && pose_ok && sight_ok)
+		&& vp.SnapshotExact(pose.frame, pose.session, Device.dwFrame)
+		&& pose.weapon_id == firing_weapon_id;
+	if (Device.true_pip_on && vp.IsSVPActive() && pose_ok)
 	{
-		// scoped shots depart the muzzle, the stock ray stays when the barrel is blocked
-		if (!pp.barrel_blocked && pose.muzzle_pos.square_magnitude() > EPS)
-			fire_pos.set(pose.muzzle_pos);
-		// the stable published sight line
-		Fvector so = sight.position;
-		Fvector axis = sight.direction;
-		Fvector zero_pt;
-		zero_pt.mad(so, axis, configured_zero);
-		Fvector d;
-		d.sub(zero_pt, fire_pos);
-		if (d.magnitude() > 1.f)
-		{
-			d.normalize();
-			fire_dir.set(d);
-		}
+		fire_pos.set(pose.fire_ray_pos);
+		fire_dir.set(pose.fire_ray_dir);
+	}
+	else
+	{
+		fire_pos.set(pp.defs.start);
+		fire_dir.set(pp.defs.dir);
 	}
 
 	// pip [3DB] tracer ring, records the final departure ray of every shot for the fading overlay

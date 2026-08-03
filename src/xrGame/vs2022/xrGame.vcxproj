@@ -1915,6 +1915,7 @@
     <ClInclude Include="..\ui\UISubLine.h" />
     <ClInclude Include="..\ui\UITabButton.h" />
     <ClInclude Include="..\ui\UITabButtonMP.h" />
+    <ClInclude Include="..\ui\UITabScrollArrows.h" />
     <ClInclude Include="..\ui\UITabControl.h" />
     <ClInclude Include="..\ui\UITalkDialogWnd.h" />
     <ClInclude Include="..\ui\UITalkWnd.h" />
@@ -4135,6 +4136,8 @@
     <ClCompile Include="..\ui\UITabButton.cpp" />
     <ClCompile Include="..\ui\UITabButtonMP.cpp" />
     <ClCompile Include="..\ui\UITabControl.cpp" />
+    <ClCompile Include="..\ui\UITabControl_scroll.cpp" />
+    <ClCompile Include="..\ui\UITabScrollArrows.cpp" />
     <ClCompile Include="..\ui\UITabControl_script.cpp">
       <PrecompiledHeaderFile>pch_script.h</PrecompiledHeaderFile>
       <PrecompiledHeaderOutputFile>$(IntDir)$(ProjectName)_script.pch</PrecompiledHeaderOutputFile>

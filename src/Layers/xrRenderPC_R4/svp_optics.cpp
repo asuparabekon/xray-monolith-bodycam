@@ -81,11 +81,47 @@ static bool svp_thermal_active(float param3x, int markswitch)
 	return (param3x >= 1.5f) && svp_overlay_active(param3x, markswitch);
 }
 
+// pip the thermal overlay state for callers outside this file
+bool svp_thermal_overlay_active()
+{
+	extern Fvector4 ps_s3ds_param_3;
+	extern int ps_markswitch_current;
+	return svp_thermal_active(ps_s3ds_param_3.x, ps_markswitch_current);
+}
+
+// pip a fresh forward body ahead of the objective, published by the hud drain
+bool svp_clipon_resolved()
+{
+	extern int ps_r__svp_clipon;
+	auto& vp = Device.m_SecondViewport;
+	return ps_r__svp_clipon && _valid(vp.svp_clipon_axial) && vp.svp_clipon_axial > 0.f
+		&& vp.svp_hud_min_frame != u32(-1)
+		&& Device.dwFrame >= vp.svp_hud_min_frame
+		&& Device.dwFrame - vp.svp_hud_min_frame <= 8
+		&& vp.svp_hud_min_session == vp.GetSVPSession()
+		&& vp.svp_hud_min_epoch == vp.svp_optic_epoch;
+}
+
+// pip eye coupling from the typed profile, the legacy thermal read covers an untyped route
+bool svp_optic_eye_coupled()
+{
+	// a clip-on presents through the host eyepiece so the display exemption never applies
+	if (svp_clipon_resolved())
+		return true;
+	const auto& config = Device.m_SecondViewport.RenderOpticConfig();
+	if (config.typed_route)
+		return config.eye_coupling;
+	extern Fvector4 ps_s3ds_param_3;
+	extern int ps_markswitch_current;
+	return !svp_thermal_active(ps_s3ds_param_3.x, ps_markswitch_current);
+}
+
 // pip physical aperture cvars, registered in svp_console.cpp, drive the exit-pupil model at r__svp_aperture 1
 extern int ps_r__svp_aperture;
 extern int ps_r__svp_photo_model;
 extern int ps_r__svp_authored_optics;
 extern int ps_r__svp_diag;
+extern int ps_r__svp_reticle_fit;
 extern float ps_r__svp_eyebox;
 extern float ps_r__svp_twilight;
 extern float ps_s3ds_transmission;
@@ -95,6 +131,7 @@ extern float ps_s3ds_exit_pupil_low_mm, ps_s3ds_exit_pupil_high_mm;
 extern float ps_s3ds_pupil_field_low, ps_s3ds_pupil_field_high;
 extern float ps_s3ds_eye_tracking_speed, ps_s3ds_eye_tracking_accel_mm_s2, ps_s3ds_eye_tracking_limit_mm;
 extern float ps_s3ds_tunneling_parallax, ps_s3ds_tunneling_min, ps_s3ds_tunneling_max;
+extern float ps_s3ds_tunneling_softness;
 extern float ps_svp_exit_scale, ps_svp_exit_offset, ps_svp_tunnel_scale, ps_svp_tunnel_offset, ps_svp_dim_scale, ps_svp_dim_offset;
 extern float g_pip_scope_magnification, g_pip_scope_min_mag, g_pip_scope_max_mag;
 extern Fvector4 ps_s3ds_param_1;
@@ -259,16 +296,12 @@ SSvpEyeSample svp_update_eye_sample(const Fmatrix& eye_view)
 	cached_frame = Device.dwFrame;
 	SSvpEyeSample& sample = cached;
 	const auto& eyepiece = viewport.eyepiece;
-	const auto& objective = viewport.objective;
 	if (eyepiece.radius <= EPS)
 		return sample;
 
 	Fvector lens_right = eyepiece.m_W.i;
 	Fvector lens_up = eyepiece.m_W.j;
-	Fvector optical_axis;
-	optical_axis.sub(objective.m_W.c, eyepiece.m_W.c);
-	if (objective.radius <= EPS || optical_axis.square_magnitude() <= EPS)
-		optical_axis.set(eyepiece.m_W.k);
+	Fvector optical_axis = eyepiece.m_W.k;
 	lens_right.normalize_safe();
 	lens_up.normalize_safe();
 	optical_axis.normalize_safe();
@@ -322,6 +355,220 @@ SSvpEyeSample svp_update_eye_sample(const Fmatrix& eye_view)
 	return sample;
 }
 
+static bool svp_project_direction_to_lens(const Fvector& direction,
+	const CSecondVPParams::WeaponPoseSnapshot& pose,
+	const Fmatrix& projection_matrix, Fvector4& alignment)
+{
+	const auto projection = SvpPhysicalOptics::ProjectRayToCenteredLens(
+		{ direction.x, direction.y, direction.z },
+		{ pose.camera_right.x, pose.camera_right.y, pose.camera_right.z },
+		{ pose.camera_up.x, pose.camera_up.y, pose.camera_up.z },
+		{ pose.camera_forward.x, pose.camera_forward.y, pose.camera_forward.z },
+		projection_matrix._11, projection_matrix._22);
+	if (!projection.valid)
+		return false;
+
+	alignment.set(
+		std::clamp(projection.lens_offset.x, -1.f, 1.f),
+		std::clamp(projection.lens_offset.y, -1.f, 1.f),
+		1.f, 0.f);
+	return _valid(alignment);
+}
+
+static bool svp_project_world_point_to_lens(const Fvector& point,
+	const Fmatrix& view, const Fmatrix& projection, Fvector4& alignment)
+{
+	Fmatrix view_projection;
+	view_projection.mul(projection, view);
+
+	Fvector4 clip;
+	view_projection.transform(clip, { point.x, point.y, point.z, 1.f });
+	if (!_valid(clip) || clip.w <= EPS)
+		return false;
+
+	const float inverse_w = 1.f / clip.w;
+	alignment.set(
+		std::clamp(clip.x * inverse_w * 0.5f, -1.f, 1.f),
+		std::clamp(-clip.y * inverse_w * 0.5f, -1.f, 1.f),
+		1.f, 0.f);
+	return _valid(alignment);
+}
+
+enum class ESvpLensAlignmentStatus : u8
+{
+	disabled,
+	camera_stale,
+	pose_stale,
+	ray_invalid,
+	route_mismatch,
+	config_mismatch,
+	projection_invalid,
+	sight_stale,
+	sight_config_mismatch,
+	sight_invalid,
+	sight_projection_invalid,
+	valid
+};
+
+struct SSvpLensAlignment
+{
+	Fvector4 projectile = {};
+	Fvector4 scope = {};
+	ESvpLensAlignmentStatus status = ESvpLensAlignmentStatus::disabled;
+};
+
+static LPCSTR svp_lens_alignment_status(ESvpLensAlignmentStatus status)
+{
+	switch (status)
+	{
+	case ESvpLensAlignmentStatus::disabled: return "disabled";
+	case ESvpLensAlignmentStatus::camera_stale: return "camera-stale";
+	case ESvpLensAlignmentStatus::pose_stale: return "pose-stale";
+	case ESvpLensAlignmentStatus::ray_invalid: return "ray-invalid";
+	case ESvpLensAlignmentStatus::route_mismatch: return "route-mismatch";
+	case ESvpLensAlignmentStatus::config_mismatch: return "config-mismatch";
+	case ESvpLensAlignmentStatus::projection_invalid: return "projection-invalid";
+	case ESvpLensAlignmentStatus::sight_stale: return "sight-stale";
+	case ESvpLensAlignmentStatus::sight_config_mismatch: return "sight-config-mismatch";
+	case ESvpLensAlignmentStatus::sight_invalid: return "sight-invalid";
+	case ESvpLensAlignmentStatus::sight_projection_invalid: return "sight-projection-invalid";
+	case ESvpLensAlignmentStatus::valid: return "valid-pip-projectile-and-sight";
+	}
+	return "unknown";
+}
+
+static SSvpLensAlignment svp_project_weapon_to_lens()
+{
+	SSvpLensAlignment result;
+	auto& viewport = Device.m_SecondViewport;
+	if (!ps_r__svp_aperture)
+		return result;
+	if (viewport.svp_camera_frame != Device.dwFrame
+		|| viewport.svp_camera_session != viewport.GetSVPSession())
+	{
+		result.status = ESvpLensAlignmentStatus::camera_stale;
+		return result;
+	}
+
+	CSecondVPParams::WeaponPoseSnapshot pose;
+	if (!viewport.ReadWeaponPose(pose)
+		|| !viewport.SnapshotExact(pose.frame, pose.session, Device.dwFrame))
+	{
+		result.status = ESvpLensAlignmentStatus::pose_stale;
+		return result;
+	}
+	if (!_valid(pose.fire_ray_pos) || !_valid(pose.fire_ray_dir)
+		|| !_valid(pose.camera_pos) || !_valid(pose.camera_right)
+		|| !_valid(pose.camera_up) || !_valid(pose.camera_forward)
+		|| pose.fire_ray_dir.square_magnitude() <= EPS
+		|| pose.camera_right.square_magnitude() <= EPS
+		|| pose.camera_up.square_magnitude() <= EPS
+		|| pose.camera_forward.square_magnitude() <= EPS)
+	{
+		result.status = ESvpLensAlignmentStatus::ray_invalid;
+		return result;
+	}
+
+	const auto& config = viewport.RenderOpticConfig();
+	if (pose.optic_typed != config.typed_route)
+	{
+		result.status = ESvpLensAlignmentStatus::route_mismatch;
+		return result;
+	}
+	if (!CSecondVPParams::MatchesOpticConfig(pose, config))
+	{
+		result.status = ESvpLensAlignmentStatus::config_mismatch;
+		return result;
+	}
+
+	Fvector fire_direction = pose.fire_ray_dir;
+	fire_direction.normalize_safe();
+	const float zero_distance = pose.fire_ray_zero > EPS
+		? pose.fire_ray_zero : 100.f;
+	Fvector zero_point;
+	zero_point.mad(pose.fire_ray_pos, fire_direction, zero_distance);
+	Fvector4 projectile_alignment = {};
+	if (!svp_project_world_point_to_lens(zero_point,
+		Device.matrices[1].mView, Device.matrices[1].mProject, projectile_alignment))
+	{
+		result.status = ESvpLensAlignmentStatus::projection_invalid;
+		return result;
+	}
+
+	// Use the sight published by deriveScopeLens() for this render frame.
+	CSecondVPParams::SightSnapshot sight;
+	if (!viewport.ReadSight(sight)
+		|| !viewport.SnapshotExact(sight.frame, sight.session, Device.dwFrame)
+		|| sight.optic_epoch != viewport.svp_optic_epoch)
+	{
+		result.status = ESvpLensAlignmentStatus::sight_stale;
+		return result;
+	}
+	if (!CSecondVPParams::MatchesOpticConfig(sight, config))
+	{
+		result.status = ESvpLensAlignmentStatus::sight_config_mismatch;
+		return result;
+	}
+	if (!_valid(sight.direction) || sight.direction.square_magnitude() <= EPS)
+	{
+		result.status = ESvpLensAlignmentStatus::sight_invalid;
+		return result;
+	}
+	Fvector scope_direction = sight.direction;
+	scope_direction.normalize_safe();
+	Fvector4 scope_alignment = {};
+	if (!svp_project_direction_to_lens(
+		scope_direction, pose, Device.matrices[1].mProject, scope_alignment))
+	{
+		result.status = ESvpLensAlignmentStatus::sight_projection_invalid;
+		return result;
+	}
+
+	result.projectile = projectile_alignment;
+	result.scope = scope_alignment;
+	result.status = ESvpLensAlignmentStatus::valid;
+	return result;
+}
+
+static void svp_log_aperture_state(const SSvpEyeSample& eye,
+	const Fvector2& applied_eye, float exit_pupil_mm, float pupil_mm,
+	const SSvpLensAlignment& alignment)
+{
+	if (!ps_r__svp_diag)
+		return;
+
+	static u32 s_apert_ms = 0;
+	if (Device.dwTimeGlobal - s_apert_ms <= 1000)
+		return;
+	s_apert_ms = Device.dwTimeGlobal;
+
+	const float magnification = _max(g_pip_scope_magnification, 1.f);
+	PipMsg("[SVP-APERT] raw %.2f,%.2fmm applied %.2f,%.2fmm exit_r %.2fmm pupil_r %.2fmm mag %.2f projectile_uv %.4f,%.4f scope_uv %.4f,%.4f tube_uv %.4f,%.4f valid %u status %s",
+		eye.raw_mm.x, eye.raw_mm.y, applied_eye.x, applied_eye.y,
+		exit_pupil_mm * 0.5f, pupil_mm * 0.5f, g_pip_scope_magnification,
+		alignment.projectile.x, alignment.projectile.y,
+		alignment.scope.x, alignment.scope.y,
+		alignment.scope.x / magnification, alignment.scope.y / magnification,
+		alignment.projectile.z > 0.5f ? 1u : 0u,
+		svp_lens_alignment_status(alignment.status));
+}
+
+static void svp_log_reticle_fit(float slope, float scale,
+	float eyepiece_radius, float axial_distance)
+{
+	if (!ps_r__svp_diag)
+		return;
+
+	static u32 s_reticle_ms = 0;
+	if (Device.dwTimeGlobal - s_reticle_ms <= 1000)
+		return;
+	s_reticle_ms = Device.dwTimeGlobal;
+
+	PipMsg("[SVP-RETZ] z=%.4f kg=%.4f R=%.4fcm L=%.4fcm fit=%d",
+		slope, scale, eyepiece_radius * 100.f, axial_distance * 100.f,
+		ps_r__svp_reticle_fit);
+}
+
 // physical aperture bind, always binds the aperture constants, x = 0 when the cvar is off
 static void svp_bind_aperture(float pupil_mm)
 {
@@ -342,8 +589,11 @@ static void svp_bind_aperture(float pupil_mm)
 	const Fvector2 aperture_eye_offset_mm = eye.residual_mm;
 	const float inverse_lens_diameter = eyepiece.radius > EPS ? 0.5f / eyepiece.radius : 0.f;
 
+	// a rigid display panel carries no eyepiece, its image ignores where the eye sits
+	const bool digital_display = !svp_optic_eye_coupled();
 	RCache.set_c("svp_aperture", ps_r__svp_aperture ? 1.f : 0.f, g_pip_scope_magnification, minimum_mag, maximum_mag);
-	RCache.set_c("svp_eyebox", aperture_eye_offset_mm.x, aperture_eye_offset_mm.y,
+	RCache.set_c("svp_eyebox", digital_display ? 0.f : aperture_eye_offset_mm.x,
+		digital_display ? 0.f : aperture_eye_offset_mm.y,
 		exit_pupil_mm * 0.5f, pupil_mm * 0.5f);
 	const float exit_response = SvpPhysicalOptics::ApplyMagnificationResponse(
 		svp_make_response(ps_svp_exit_curve_low, ps_svp_exit_curve_high), g_pip_scope_magnification,
@@ -352,30 +602,25 @@ static void svp_bind_aperture(float pupil_mm)
 		svp_make_response(ps_svp_tunnel_curve_low, ps_svp_tunnel_curve_high), g_pip_scope_magnification,
 		ps_svp_tunnel_scale, 0.f);
 	const auto& config = viewport.RenderOpticConfig();
-	const float tunnel_parallax = config.typed_route
-		? config.tunneling_parallax : ps_s3ds_tunneling_parallax;
-	const float tunnel_min = config.typed_route
-		? config.tunneling_min : ps_s3ds_tunneling_min;
-	const float tunnel_max = config.typed_route
-		? config.tunneling_max : ps_s3ds_tunneling_max;
+	const float tunnel_parallax = digital_display ? 0.f
+		: (config.typed_route ? config.tunneling_parallax : ps_s3ds_tunneling_parallax);
+	const float tunnel_min = digital_display ? 0.f
+		: (config.typed_route ? config.tunneling_min : ps_s3ds_tunneling_min);
+	const float tunnel_max = digital_display ? 0.f
+		: (config.typed_route ? config.tunneling_max : ps_s3ds_tunneling_max);
+	const float tunnel_softness = digital_display ? 0.f
+		: (config.typed_route ? config.tunneling_softness : ps_s3ds_tunneling_softness);
 	RCache.set_c("svp_optic_profile", tunnel_parallax, tunnel_min, tunnel_max, tunnel_response);
-	RCache.set_c("svp_pupil_model", svp_pupil_field_scale(), exit_response, ps_svp_tunnel_offset, 0.f);
+	RCache.set_c("svp_pupil_model", svp_pupil_field_scale(), exit_response,
+		digital_display ? 0.f : ps_svp_tunnel_offset, tunnel_softness);
 	RCache.set_c("svp_lens_center", eyepiece.m_W.c.x, eyepiece.m_W.c.y, eyepiece.m_W.c.z, inverse_lens_diameter);
 	RCache.set_c("svp_lens_right", lens_right.x, lens_right.y, lens_right.z, 0.f);
 	RCache.set_c("svp_lens_up", lens_up.x, lens_up.y, lens_up.z, 0.f);
-
-	if (ps_r__svp_diag)
-	{
-		static u32 s_apert_ms = 0;
-		if (Device.dwTimeGlobal - s_apert_ms > 1000)
-		{
-			s_apert_ms = Device.dwTimeGlobal;
-			PipMsg("[SVP-APERT] raw %.2f,%.2fmm applied %.2f,%.2fmm exit_r %.2fmm pupil_r %.2fmm",
-				raw_eye_offset_mm.x, raw_eye_offset_mm.y,
-				aperture_eye_offset_mm.x, aperture_eye_offset_mm.y,
-				exit_pupil_mm * 0.5f, pupil_mm * 0.5f);
-		}
-	}
+	const SSvpLensAlignment alignment = svp_project_weapon_to_lens();
+	RCache.set_c("svp_barrel_alignment", alignment.projectile);
+	RCache.set_c("svp_scope_alignment", alignment.scope);
+	svp_log_aperture_state(eye, aperture_eye_offset_mm,
+		exit_pupil_mm, pupil_mm, alignment);
 }
 
 void CRenderTarget::EnsureScopeShaders()
@@ -754,8 +999,19 @@ void CRenderTarget::draw_scope(ref_shader se, std::function<void()> bind)
 				const float hfov = deg2rad(_max(Device.fFOV, 1.f));
 				par = ps_r__svp_parallax * 0.00075f * kg * eff_mag / hfov;
 			}
-			// z stays clear for legacy depth effects and w carries the eyepiece fit ratio
-			RCache.set_c("svp_optics", kg, par, 0.f, _max(g_pip_scope_ratio, 1.f));
+			// z is the sine exact rim slope 2R/sqrt(RR+LL) on the axial depth, the stock
+			// per pixel tangent saturates at the rim where kg in x stays the linear tan
+			float zslope = 0.f;
+			const float axial_distance = _max(ed.dotproduct(Device.vCameraDirection), 0.02f);
+			if (ps_r__svp_reticle_fit)
+			{
+				const float R = Device.m_SecondViewport.eyepiece.radius;
+				zslope = 2.f * R / sqrtf(R * R + axial_distance * axial_distance);
+				clamp(zslope, 0.02f, 3.f);
+			}
+			svp_log_reticle_fit(zslope, kg,
+				Device.m_SecondViewport.eyepiece.radius, axial_distance);
+			RCache.set_c("svp_optics", kg, par, zslope, _max(g_pip_scope_ratio, 1.f));
 		}
 		// pip scope-local exposure, x = 0 off else 2^bias
 		{
@@ -1015,7 +1271,10 @@ u32 CRenderTarget::draw_reflex(bool svp)
 	u32 selected_index = u32(-1);
 	Fmatrix selected_world = {};
 	bool selected_frozen = false;
+	bool selected_straddle = false;
+	Fvector selected_shift = {};
 	float selected_score = flt_max;
+	float hybrid_front = -1.f;
 	if (svp)
 	{
 		auto& vp = Device.m_SecondViewport;
@@ -1072,6 +1331,13 @@ u32 CRenderTarget::draw_reflex(bool svp)
 			const float world_scale = _max(boundsW.i.magnitude(),
 				_max(boundsW.j.magnitude(), boundsW.k.magnitude()));
 			const float world_radius = vis.sphere.R * world_scale;
+			// capture content ahead of the objective, its near extent bounds the near derive
+			if (bone_visible && related && _valid(view_center) && _valid(world_radius)
+				&& world_radius > EPS)
+			{
+				const float front = _max(view_center.z - world_radius, 0.f);
+				hybrid_front = (hybrid_front < 0.f) ? front : _min(hybrid_front, front);
+			}
 			const float near_plane = _max(vp.svp_near, EPS);
 			const float far_plane = _max(vp.svp_far, near_plane + EPS);
 
@@ -1090,7 +1356,10 @@ u32 CRenderTarget::draw_reflex(bool svp)
 				&& view_center.z - world_radius < far_plane;
 			float ndc_x = 0.f;
 			float ndc_y = 0.f;
-			if (visible && view_center.z > EPS)
+			// a sphere straddling the camera plane projects to infinity, the depth test above
+			// already admits it so the screen bounds refine only a fully forward candidate
+			const bool straddle = view_center.z - world_radius <= near_plane;
+			if (visible && !straddle)
 			{
 				const Fmatrix& P = Device.matrices[1].mProject;
 				const float clip_x = view_center.x * P._11 + view_center.y * P._21
@@ -1127,9 +1396,23 @@ u32 CRenderTarget::draw_reflex(bool svp)
 				selected_index = index;
 				selected_world = refW;
 				selected_frozen = frozen_reflex;
+				selected_straddle = straddle;
 				selected_score = score;
+				selected_shift.set(0.f, 0.f, 0.f);
+				if (straddle)
+				{
+					// minimum axial push that clears the near plane with one near depth spare
+					const float push = near_plane * 2.f + world_radius - view_center.z;
+					selected_shift.mul(objective_axis, push);
+				}
 			}
 		}
+
+		// published for the next camera build so the derived near never clips the capture
+		vp.svp_hybrid_front = hybrid_front;
+		vp.svp_hybrid_front_frame = Device.dwFrame;
+		vp.svp_hybrid_front_session = vp.GetSVPSession();
+		vp.svp_hybrid_front_epoch = vp.svp_optic_epoch;
 	}
 
 	u32 drawn = 0;
@@ -1149,6 +1432,10 @@ u32 CRenderTarget::draw_reflex(bool svp)
 		RCache.set_Element(N.pSE);
 		Fmatrix refW = svp ? selected_world
 			: *RImplementation.GMBase.svp_pose_of(N.pMatrix);
+		// a mesh straddling the camera plane cannot rasterize, the minimum axial push
+		// clears the near plane and the window keeps filling the view
+		if (svp && selected_straddle)
+			refW.c.add(selected_shift);
 		CSkeletonX* sk = fast_dynamic_cast<CSkeletonX*>(N.pVisual);
 		const bool frozen_reflex = svp ? selected_frozen
 			: svp_objective_hud_current() && sk && sk->SVP_BoneSnapshotReady();
@@ -1167,9 +1454,14 @@ u32 CRenderTarget::draw_reflex(bool svp)
 		if (node_diag)
 		{
 			auto tx = N.pVisual->GetTexture();
-			PipMsg("[SVP-HYBRID] selected=%u tex=%s score=%.4f frozen=%d owner=%p",
+			Fvector draw_view;
+			Device.matrices[1].mView.transform_tiny(draw_view, refW.c);
+			PipMsg("[SVP-HYBRID] selected=%u tex=%s score=%.4f frozen=%d straddle=%d drawView=(%.3f %.3f %.3f) vp=%ux%u owner=%p",
 				node_index, tx ? tx->cName.c_str() : "?", selected_score,
-				frozen_reflex ? 1 : 0, sk ? sk->SVP_SkeletonOwner() : nullptr);
+				frozen_reflex ? 1 : 0, selected_straddle ? 1 : 0,
+				draw_view.x, draw_view.y, draw_view.z,
+				Device.dwWidth, Device.dwHeight,
+				sk ? sk->SVP_SkeletonOwner() : nullptr);
 		}
 		RCache.set_xform_world(refW);
 		RImplementation.apply_object(N.pObject);
@@ -1315,7 +1607,8 @@ bool CRenderTarget::draw_hybrid_reflex()
 			camera_current ? 1 : 0, lens_current ? 1 : 0, target_current ? 1 : 0,
 			optic.typed_route ? 1 : 0, identity_current ? 1 : 0,
 			type_current ? 1 : 0,
-			optic_name, optic.spec[0] ? optic.spec : "none", optic.generation, drawn,
+			optic_name, optic.spec_section[0] ? optic.spec_section : "none",
+			optic.generation, drawn,
 			vp.GetSVPSession(), vp.svp_optic_epoch, Device.dwFrame);
 	}
 
@@ -1348,12 +1641,18 @@ void CRenderTarget::phase_3DSSReticle()
 			extern Fvector4 ps_s3ds_param_1;
 			extern Fvector4 ps_s3ds_param_3;
 			extern Fvector4 ps_shader_scope_params;
-			PipMsg("[SVP-RET] path=%s svp=%d lens=%d scope=%u reflex=%u obj=%u rsize=%.2f rtype=%.0f mag=%.2f/%.2f/%.2f w=%.1f hudy=%.1f",
+			extern float g_pip_scope_magnification;
+			extern float g_pip_scope_min_mag;
+			extern float g_pip_scope_max_mag;
+			extern float g_pip_scope_ratio;
+			// the lua triplet stays zero under pip, the pip fields carry the live engine mags
+			PipMsg("[SVP-RET] path=%s svp=%d lens=%d scope=%u reflex=%u obj=%u rsize=%.2f rtype=%.0f lua=%.2f/%.2f/%.2f w=%.1f pip=%.2f/%.2f/%.2f ratio=%.2f hudy=%.1f",
 				(Device.true_pip_on && (svp || has_lens)) ? "pip" : "stock",
 				(int)svp, (int)has_lens,
 				(u32)G.mapScopeHUDSorted.size(), (u32)G.mapReflexHUDSorted.size(), (u32)G.mapScopeHUDObjective.size(),
 				ps_s3ds_param_1.x, ps_s3ds_param_3.y,
 				ps_shader_scope_params.x, ps_shader_scope_params.y, ps_shader_scope_params.z, ps_shader_scope_params.w,
+				g_pip_scope_magnification, g_pip_scope_min_mag, g_pip_scope_max_mag, g_pip_scope_ratio,
 				g_pGamePersistent ? g_pGamePersistent->m_pGShaderConstants->hud_params.y : 0.f);
 			auto dump = [&](const char* tag, auto& map) {
 				u32 i = 0;

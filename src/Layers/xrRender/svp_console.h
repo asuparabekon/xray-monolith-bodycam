@@ -16,6 +16,8 @@ extern ECORE_API int ps_r__svp_diag;
 extern ECORE_API int ps_r__svp_cop_diag;
 extern ECORE_API int ps_r__svp_report;
 extern ECORE_API int ps_r__svp_stats; // per-viewport render stats overlay (0 off, 1 compact, 2 breakdown)
+extern ECORE_API int ps_r__scope_glass;
+extern ECORE_API int ps_r__scope_glass_debug;
 extern ECORE_API u32 svp_stats_ssa_culled; // svp small-object cull tally read by the overlay, incremented in r__dsgraph_render
 extern ECORE_API u32 svp_stats_cull_reject; // svp off-cone frustum-reject tally read by the overlay, incremented in r__dsgraph_render
 extern ECORE_API u32 svp_stats_cull_reject_ident; // svp identity-matrix sorted world statics the cone rejects, incremented in svp_cull_reject
@@ -62,9 +64,30 @@ extern ECORE_API int ps_r__svp_skip_volumetric;
 extern ECORE_API int ps_r__svp_skip_grass;
 extern ECORE_API int ps_r__svp_sss_sun;
 
+// main-view post gate, lossless skips for post passes with nothing to do
+extern ECORE_API int ps_r__pp_lean;
+extern ECORE_API int ps_r__ssfx_ssr_enable;
+extern ECORE_API int ps_r__ssfx_bloom_hud;
+extern ECORE_API u32 svp_stats_lean_flags; // bit per lean skip that fired this frame, decoded by the breakdown panel
+
+// pipeline-waste tallies for the third overlay box, all reset per frame like the counters above
+extern ECORE_API u32 svp_stats_copies;
+extern ECORE_API u32 svp_stats_copy_kb;
+extern ECORE_API u32 svp_stats_tiny;
+extern ECORE_API u32 svp_stats_shadow;
+// tracked copy categories, hist is the closed temporal publishes, tail the back-copies, scene the alias publishes
+enum svp_copy_cat_e { SVP_CP_HIST = 0, SVP_CP_TAIL, SVP_CP_SCENE, SVP_CP_COUNT };
+extern ECORE_API u32 svp_stats_copy_kb_cat[SVP_CP_COUNT];
+// brackets one tracked full-frame copy, self-gated so it costs an int compare when the overlay is off
+extern ECORE_API void svp_copy_begin(u32 cat, u32 bytes);
+extern ECORE_API void svp_copy_end(u32 cat);
+// gpu timer hook, the r4 stats module installs it, null on the renderers without a query pool
+extern ECORE_API void (*svp_copy_timer_hook)(u32 cat, bool begin);
+
 // optics derivation
 extern ECORE_API float ps_r__svp_obj_dist;
 extern ECORE_API float ps_r__svp_obj_size;
+extern ECORE_API float ps_r__svp_near;
 extern ECORE_API int ps_r__svp_focal_derive;
 extern ECORE_API int ps_r__svp_glare_model;
 extern ECORE_API int ps_r__svp_photo_model;
@@ -95,13 +118,13 @@ extern ECORE_API float ps_s3ds_adapt_speed;
 
 // glass / reticle cosmetics
 extern ECORE_API int ps_r__svp_chroma;
-extern ECORE_API float ps_r__svp_reticle_washout;
 extern ECORE_API float ps_r__svp_field_curve;
 extern ECORE_API int ps_r__svp_field_stop;
 extern ECORE_API int ps_r__svp_aperture;
 extern ECORE_API float ps_s3ds_tunneling_parallax;
 extern ECORE_API float ps_s3ds_tunneling_min;
 extern ECORE_API float ps_s3ds_tunneling_max;
+extern ECORE_API float ps_s3ds_tunneling_softness;
 extern ECORE_API float ps_s3ds_eye_tracking_speed;
 extern ECORE_API float ps_s3ds_eye_tracking_accel_mm_s2;
 extern ECORE_API float ps_s3ds_eye_tracking_limit_mm;
@@ -126,7 +149,6 @@ extern ECORE_API float ps_svp_tunnel_scale;
 extern ECORE_API float ps_svp_tunnel_offset;
 extern ECORE_API float ps_svp_dim_scale;
 extern ECORE_API float ps_svp_dim_offset;
-extern ECORE_API int ps_r__svp_acog_fiber;
 extern ECORE_API float ps_r__svp_veiling_glare;
 extern ECORE_API float ps_r__svp_rain_optic;
 extern ECORE_API float ps_r__svp_rain_debug;

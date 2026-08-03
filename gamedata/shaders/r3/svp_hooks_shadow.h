@@ -27,28 +27,44 @@ float svp_magnification_fraction()
 	return smoothstep(0.0, 1.0, saturate((svp_aperture.y - svp_aperture.z) / range));
 }
 
-float4 svp_profiled_tunneling_shadow(float2 lens_tc)
+float4 svp_profiled_tunneling_shadow(float2 lens_tc, bool authored_inside)
 {
+	if (svp_physical_optics_active() && authored_inside)
+		return float4(0.0, 0.0, 0.0, 0.0);
+
 	static const float reference_width = 0.15;
 	const float profile_amount = lerp(svp_optic_profile.y, svp_optic_profile.z, svp_magnification_fraction());
 	const float amount = saturate(profile_amount * max(svp_optic_profile.w, 0.0) + svp_pupil_model.z);
-	const float width = min(reference_width * amount, 0.09);
-	if (width <= 0.0001)
+	const float tube_width = min(reference_width * amount, 0.09);
+	if (tube_width <= 0.0001)
 		return float4(0.0, 0.0, 0.0, 0.0);
 
+	const float inner_radius = 0.5 - tube_width;
+	const float radial_distance = distance(lens_tc, float2(0.5, 0.5));
+	const float pixel_feather = max(fwidth(radial_distance) * 1.5, 0.0005);
+	const float feather = max(svp_pupil_model.w, pixel_feather);
 	const float alpha = smoothstep(
-		0.5 - width, 0.5,
-		distance(lens_tc, float2(0.5, 0.5)));
+		inner_radius - feather, inner_radius, radial_distance);
 	return float4(0.0, 0.0, 0.0, alpha);
 }
 
-float2 svp_scope_tunneling_offset()
+float2 svp_scope_tunneling_tc(float2 lens_tc)
 {
-	if (svp_aperture.x < 0.5 || svp_eyebox.z <= 0.0 || svp_eyebox.w <= 0.0)
-		return float2(0.0, 0.0);
-	const float pupil_span = max(svp_eyebox.z + svp_eyebox.w, 0.001);
-	const float2 normalized_eye = clamp(svp_optical_eye_offset() / pupil_span, -1.0, 1.0);
-	return -normalized_eye * svp_optic_profile.x;
+	// The virtual eye can recenter for gameplay, but the scope tube remains
+	// displaced with the weapon axis. Remove optical magnification from the
+	// reticle displacement, then cap it at the optic's authored tube parallax.
+	if (ddy(lens_tc.y) < 0.0)
+		lens_tc.y = 1.0 - lens_tc.y;
+
+	if (svp_scope_alignment.z <= 0.5)
+		return lens_tc;
+
+	float2 tube_offset = svp_scope_alignment.xy / max(svp_aperture.y, 1.0);
+	const float parallax_limit = max(svp_optic_profile.x, 0.0);
+	const float offset_length = length(tube_offset);
+	if (offset_length > parallax_limit && offset_length > 0.0001)
+		tube_offset *= parallax_limit / offset_length;
+	return lens_tc - tube_offset;
 }
 
 float svp_pupil_overlap(float separation, float exit_radius, float eye_radius)

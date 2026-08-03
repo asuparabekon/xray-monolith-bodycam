@@ -5,6 +5,7 @@
 #include "../../xrEngine/environment.h"
 #if defined(USE_DX11)
 #include "../../../gamedata/shaders/r3/scope_defines.h" // SCOPE_PHASE_* (kept in sync with the shader)
+#include "svp_optics.h" // pip svp_optic_eye_coupled, the data driven eyepiece gate
 #endif
 
 #if defined(USE_DX11)
@@ -15,30 +16,14 @@ static float svp_objective_mm()
 	return Device.m_SecondViewport.svp_opt_obj_mm;
 }
 
-// pip electronic overlay actually on screen, NV shows only with its overlay on (markswitch 0),
-// thermal shows until the overlay is dropped (markswitch < 2)
-static bool svp_overlay_active(float param3x, int markswitch)
-{
-	return (param3x >= 0.5f) && ((param3x < 1.5f) ? (markswitch == 0) : (markswitch < 2));
-}
-// pip thermal-typed optic with its overlay on, near-blur skips these so they keep full DoF
-static bool svp_thermal_active(float param3x, int markswitch)
-{
-	return (param3x >= 1.5f) && svp_overlay_active(param3x, markswitch);
-}
-
 // pip near-field defocus pass, true when it dispatched else the caller copies
 bool CRenderTarget::svp_nearblur_pass()
 {
-	// pip near-field defocus replaces the plain copy in the realism mode, thermal sensors keep
-	// full depth of field so they take the plain copy
+	// pip near-field defocus replaces the plain copy in the realism mode, an uncoupled display
+	// and a live thermal sensor keep full depth of field so they take the plain copy
 	extern float ps_r__svp_near_blur;
-	extern Fvector4 ps_s3ds_param_3;
-	extern int ps_markswitch_current;
-	// thermal keeps full DoF only while its overlay is on, markswitch >= 2 falls back to a plain
-	// objective image that should defocus like any optic
-	const bool thermal_active = svp_thermal_active(ps_s3ds_param_3.x, ps_markswitch_current);
-	if (ps_r__svp_near_blur > 0.01f && scope_svp_enabled >= 2 && !thermal_active
+	if (ps_r__svp_near_blur > 0.01f && scope_svp_enabled >= 2 && svp_optic_eye_coupled()
+		&& !svp_thermal_overlay_active()
 		&& rt_Position && rt_secondVP->pRT)
 	{
 		EnsureScopeShaders();
