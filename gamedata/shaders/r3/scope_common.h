@@ -114,6 +114,7 @@ float mas_scale() {
 }
 
 uniform float4 shader_scope_params;
+#include "svp_hooks_common.h"
 float curMag() { return shader_scope_params.x; }
 float minMag() { return shader_scope_params.y; }
 float maxMag() { return shader_scope_params.z; }
@@ -176,7 +177,7 @@ float2 SCOPECOORD_TO_TEXCOORD(float2 sc) {
 		float shift = lerp(0, IMAGE_PROJECT, zoomRotateFactor());
 		float2 scope_tc = (1.0 / zoom) * (screen_tc.xy - 0.5) + 0.5;
 		V_tangent.x = V_tangent.x / output_res.x * output_res.y;
-		scope_tc = scope_tc + V_tangent.xy * mas_scale() * shift;
+		scope_tc = scope_tc + V_tangent.xy * svp_effective_mas(mas_scale()) * shift;
 		return scope_tc;
 		
 	} else {

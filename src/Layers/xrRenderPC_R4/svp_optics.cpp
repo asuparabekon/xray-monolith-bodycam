@@ -481,14 +481,20 @@ static SSvpLensAlignment svp_project_weapon_to_lens()
 		return result;
 	}
 
-	Fvector fire_direction = pose.fire_ray_dir;
-	fire_direction.normalize_safe();
-	const float zero_distance = pose.fire_ray_zero > EPS
-		? pose.fire_ray_zero : 100.f;
-	Fvector zero_point;
-	zero_point.mad(pose.fire_ray_pos, fire_direction, zero_distance);
+	Fvector convergence_target;
+	if (pose.fire_ray_target_valid && _valid(pose.fire_ray_target))
+		convergence_target.set(pose.fire_ray_target);
+	else
+	{
+		Fvector fire_direction = pose.fire_ray_dir;
+		fire_direction.normalize_safe();
+		const float zero_distance = pose.fire_ray_zero > EPS
+			? pose.fire_ray_zero : 100.f;
+		convergence_target.mad(
+			pose.fire_ray_pos, fire_direction, zero_distance);
+	}
 	Fvector4 projectile_alignment = {};
-	if (!svp_project_world_point_to_lens(zero_point,
+	if (!svp_project_world_point_to_lens(convergence_target,
 		Device.matrices[1].mView, Device.matrices[1].mProject, projectile_alignment))
 	{
 		result.status = ESvpLensAlignmentStatus::projection_invalid;

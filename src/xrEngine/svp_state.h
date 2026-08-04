@@ -124,7 +124,9 @@ public:
 	{
 		Fvector fire_ray_pos = {};
 		Fvector fire_ray_dir = {};
+		Fvector fire_ray_target = {};
 		float fire_ray_zero = 0.f;
+		bool fire_ray_target_valid = false;
 		u16 weapon_id = u16(-1);
 		bool optic_typed = false;
 		bool optic_config_valid = false;

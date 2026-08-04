@@ -13,8 +13,12 @@ local preset_ini
 local user_presets
 local selected_preset = { kind = "modified", id = "modified", name = "Modified" }
 local initial_preset_detected = false
-local new_preset_name = ""
 local preset_message
+local preset_dialog_name = ""
+local preset_dialog_message
+local new_preset_source = { kind = "current", id = "current", name = "Current Settings" }
+local rename_preset_id
+local delete_preset_id
 local selected_feature = 1
 
 local red_orchestra_camera = {
@@ -660,10 +664,12 @@ local function find_user_preset_by_name(name)
     end
 end
 
-local function write_preset_values(ini, section, source_ini, source_section)
+local function write_preset_values(ini, section, source_ini, source_section, source_values)
     for _, binding in ipairs(bindings) do
         local value
-        if source_ini and source_ini:line_exist(source_section, binding.name) then
+        if source_values and source_values[binding.name] ~= nil then
+            value = source_values[binding.name]
+        elseif source_ini and source_ini:line_exist(source_section, binding.name) then
             value = source_ini:r_value(
                 source_section,
                 binding.name,
@@ -678,7 +684,7 @@ local function write_preset_values(ini, section, source_ini, source_section)
     end
 end
 
-local function create_user_preset(name, source_ini, source_section)
+local function create_user_preset(name, source_ini, source_section, source_values)
     local ini = preset_storage()
     name = clean_preset_name(name)
     if not ini or name == "" or not load_bindings() then
@@ -695,7 +701,7 @@ local function create_user_preset(name, source_ini, source_section)
     local id = preset_section_prefix .. math.floor(next_id)
     ini:w_value(preset_index_section, "next_id", math.floor(next_id) + 1)
     ini:w_value(preset_index_section, id, name)
-    write_preset_values(ini, id, source_ini, source_section)
+    write_preset_values(ini, id, source_ini, source_section, source_values)
     ini:save()
 
     user_presets = read_user_presets(ini)
@@ -799,7 +805,6 @@ local function apply_user_preset(preset)
         end
     end
     selected_preset = preset
-    new_preset_name = preset.name
     preset_save_due_time = nil
 end
 
@@ -825,19 +830,85 @@ local function rename_user_preset(preset, name)
     local ini = preset_storage()
     name = clean_preset_name(name)
     local duplicate = find_user_preset_by_name(name)
-    if not ini or not preset or preset.kind ~= "user" or name == "" then
-        return false
+    if not ini or not preset or preset.kind ~= "user" then
+        return false, "The selected preset is unavailable."
+    end
+    if name == "" then
+        return false, "Enter a preset name."
     end
     if duplicate and duplicate.id ~= preset.id then
-        return false
+        return false, "A user preset with that name already exists."
     end
 
     ini:w_value(preset_index_section, preset.id, name)
     ini:save()
     user_presets = read_user_presets(ini)
     selected_preset = find_user_preset(preset.id)
-    new_preset_name = name
     return true
+end
+
+local function capture_current_values()
+    local values = {}
+    for _, binding in ipairs(bindings) do
+        if binding.type == "bool" then
+            values[binding.name] = bodycam.get_bool(binding.name, binding.default)
+        else
+            values[binding.name] = bodycam.get_float(binding.name, binding.default)
+        end
+    end
+    return values
+end
+
+local function read_user_preset_values(preset)
+    local ini = preset_storage()
+    if not ini or not preset or not ini:section_exist(preset.section) then
+        return nil
+    end
+
+    local values = {}
+    for _, binding in ipairs(bindings) do
+        values[binding.name] = ini:r_value(
+            preset.section,
+            binding.name,
+            binding.type == "bool" and 1 or 2,
+            binding.default)
+    end
+    return values
+end
+
+local function find_builtin_preset(id)
+    for _, preset in ipairs(builtin_presets) do
+        if preset.id == id then
+            return preset
+        end
+    end
+end
+
+local function capture_builtin_preset_values(preset)
+    if not preset then
+        return nil
+    end
+
+    local current = capture_current_values()
+    bodycam.apply_preset(preset.engine_preset)
+    apply_binding_values(preset.values)
+    local values = capture_current_values()
+    apply_binding_values(current)
+    return values
+end
+
+local function copy_source_values(source)
+    if not source or source.kind == "current" then
+        return capture_current_values()
+    elseif source.kind == "builtin" then
+        return capture_builtin_preset_values(find_builtin_preset(source.id))
+    elseif source.kind == "user" then
+        return read_user_preset_values(find_user_preset(source.id))
+    end
+end
+
+local function select_copy_source(kind, id, name)
+    new_preset_source = { kind = kind, id = id, name = name }
 end
 
 local function actor_on_update()
@@ -943,6 +1014,233 @@ local function draw_settings_table(id, settings, use_slider)
     ImGui.EndTable()
 end
 
+local function draw_copy_source_selector()
+    ImGui.SetNextItemWidth(360)
+    if not ImGui.BeginCombo(
+        "##bodycam_copy_source",
+        new_preset_source.name,
+        ImGuiComboFlags.None) then
+        return
+    end
+
+    local selected = new_preset_source.kind == "current"
+    if ImGui.Selectable(
+        "Current Settings##copy_current",
+        selected,
+        ImGuiSelectableFlags.None,
+        vector2():set(0, 0)) then
+        select_copy_source("current", "current", "Current Settings")
+    end
+    if selected then
+        ImGui.SetItemDefaultFocus()
+    end
+
+    ImGui.Separator()
+    ImGui.TextDisabled("Built-in")
+    for _, preset in ipairs(builtin_presets) do
+        selected = new_preset_source.kind == "builtin"
+            and new_preset_source.id == preset.id
+        if ImGui.Selectable(
+            preset.name .. "##copy_builtin_" .. preset.id,
+            selected,
+            ImGuiSelectableFlags.None,
+            vector2():set(0, 0)) then
+            select_copy_source("builtin", preset.id, preset.name)
+        end
+        if selected then
+            ImGui.SetItemDefaultFocus()
+        end
+    end
+
+    if #user_presets > 0 then
+        ImGui.Separator()
+        ImGui.TextDisabled("User")
+        for _, preset in ipairs(user_presets) do
+            selected = new_preset_source.kind == "user"
+                and new_preset_source.id == preset.id
+            if ImGui.Selectable(
+                preset.name .. "##copy_user_" .. preset.id,
+                selected,
+                ImGuiSelectableFlags.None,
+                vector2():set(0, 0)) then
+                select_copy_source("user", preset.id, preset.name)
+            end
+            if selected then
+                ImGui.SetItemDefaultFocus()
+            end
+        end
+    end
+    ImGui.EndCombo()
+end
+
+local function draw_preset_name_input(id, hint)
+    ImGui.SetNextItemWidth(360)
+    local name, submitted = ImGui.InputTextWithHint(
+        id,
+        hint,
+        preset_dialog_name,
+        64,
+        ImGuiInputTextFlags.EnterReturnsTrue)
+    preset_dialog_name = name
+    return submitted
+end
+
+local function draw_new_preset_dialog()
+    local expanded = ImGui.BeginPopupModal(
+        "New Bodycam Preset",
+        true,
+        ImGuiWindowFlags.AlwaysAutoResize)
+    if not expanded then
+        return
+    end
+
+    ImGui.Text("Preset name")
+    if ImGui.IsWindowAppearing() then
+        ImGui.SetKeyboardFocusHere(0)
+    end
+    local submitted = draw_preset_name_input(
+        "##bodycam_new_preset_name",
+        "Enter a name")
+    ImGui.Spacing()
+    ImGui.Text("Copy from preset:")
+    draw_copy_source_selector()
+
+    if preset_dialog_message then
+        ImGui.Spacing()
+        ImGui.TextColored(
+            fcolor():set(1, 0.45, 0.35, 1),
+            preset_dialog_message)
+    end
+
+    ImGui.Spacing()
+    ImGui.Separator()
+    ImGui.Spacing()
+    if ImGui.Button("Create", vector2():set(110, 0)) or submitted then
+        preserve_pending_user_preset()
+        local values = copy_source_values(new_preset_source)
+        if values then
+            local preset, message = create_user_preset(
+                preset_dialog_name,
+                nil,
+                nil,
+                values)
+            if preset then
+                apply_user_preset(preset)
+                preset_message = "Preset created."
+                preset_dialog_message = nil
+                ImGui.CloseCurrentPopup()
+            else
+                preset_dialog_message = message
+            end
+        else
+            preset_dialog_message = "The source preset is unavailable."
+        end
+    end
+    ImGui.SameLine(0, 8)
+    if ImGui.Button("Cancel", vector2():set(110, 0)) then
+        preset_dialog_message = nil
+        ImGui.CloseCurrentPopup()
+    end
+    ImGui.EndPopup()
+end
+
+local function draw_rename_preset_dialog()
+    local expanded = ImGui.BeginPopupModal(
+        "Rename Bodycam Preset",
+        true,
+        ImGuiWindowFlags.AlwaysAutoResize)
+    if not expanded then
+        return
+    end
+
+    local preset = find_user_preset(rename_preset_id)
+    if not preset then
+        ImGui.TextDisabled("The selected preset is no longer available.")
+        if ImGui.Button("Close", vector2():set(110, 0)) then
+            ImGui.CloseCurrentPopup()
+        end
+        ImGui.EndPopup()
+        return
+    end
+
+    ImGui.Text("Preset name")
+    if ImGui.IsWindowAppearing() then
+        ImGui.SetKeyboardFocusHere(0)
+    end
+    local submitted = draw_preset_name_input(
+        "##bodycam_rename_preset_name",
+        "Enter a new name")
+
+    if preset_dialog_message then
+        ImGui.Spacing()
+        ImGui.TextColored(
+            fcolor():set(1, 0.45, 0.35, 1),
+            preset_dialog_message)
+    end
+
+    ImGui.Spacing()
+    ImGui.Separator()
+    ImGui.Spacing()
+    if ImGui.Button("Rename", vector2():set(110, 0)) or submitted then
+        local renamed, message = rename_user_preset(
+            preset,
+            preset_dialog_name)
+        if renamed then
+            preset_message = "Preset renamed."
+            preset_dialog_message = nil
+            ImGui.CloseCurrentPopup()
+        else
+            preset_dialog_message = message
+        end
+    end
+    ImGui.SameLine(0, 8)
+    if ImGui.Button("Cancel", vector2():set(110, 0)) then
+        preset_dialog_message = nil
+        ImGui.CloseCurrentPopup()
+    end
+    ImGui.EndPopup()
+end
+
+local function draw_delete_preset_dialog()
+    local expanded = ImGui.BeginPopupModal(
+        "Delete Bodycam Preset",
+        true,
+        ImGuiWindowFlags.AlwaysAutoResize)
+    if not expanded then
+        return
+    end
+
+    local preset = find_user_preset(delete_preset_id)
+    if preset then
+        ImGui.TextWrapped(
+            "Delete preset '" .. preset.name .. "'? This cannot be undone.")
+    else
+        ImGui.TextDisabled("The selected preset is no longer available.")
+    end
+
+    ImGui.Spacing()
+    ImGui.Separator()
+    ImGui.Spacing()
+    ImGui.BeginDisabled(not preset)
+    if ImGui.Button("Delete", vector2():set(110, 0)) then
+        delete_user_preset(preset)
+        preset_message = "Preset deleted."
+        ImGui.CloseCurrentPopup()
+    end
+    ImGui.EndDisabled()
+    ImGui.SameLine(0, 8)
+    if ImGui.Button("Cancel", vector2():set(110, 0)) then
+        ImGui.CloseCurrentPopup()
+    end
+    ImGui.EndPopup()
+end
+
+local function draw_preset_dialogs()
+    draw_new_preset_dialog()
+    draw_rename_preset_dialog()
+    draw_delete_preset_dialog()
+end
+
 local function draw_presets()
     if not load_user_presets() then
         ImGui.TextDisabled("Preset storage is unavailable.")
@@ -950,7 +1248,7 @@ local function draw_presets()
     end
 
     ImGui.TextDisabled("PRESET")
-    ImGui.SetNextItemWidth(300)
+    ImGui.SetNextItemWidth(320)
     if ImGui.BeginCombo("##bodycam_preset", selected_preset.name, ImGuiComboFlags.None) then
         ImGui.TextDisabled("Built-in")
         for _, preset in ipairs(builtin_presets) do
@@ -958,7 +1256,6 @@ local function draw_presets()
             if ImGui.Selectable(preset.name .. "##builtin_" .. preset.id, selected,
                 ImGuiSelectableFlags.None, vector2():set(0, 0)) then
                 apply_builtin_preset(preset)
-                new_preset_name = ""
                 preset_message = nil
             end
             if selected then
@@ -985,53 +1282,47 @@ local function draw_presets()
     end
 
     ImGui.SameLine(0, 8)
-    ImGui.SetNextItemWidth(220)
-    local name, changed = ImGui.InputTextWithHint(
-        "##bodycam_preset_name",
-        "New preset name",
-        new_preset_name,
-        ImGuiInputTextFlags.None,
-        64)
-    if changed then
-        new_preset_name = name
-    end
-
-    ImGui.SameLine(0, 8)
-    if ImGui.Button("Save New", vector2():set(90, 0)) then
-        local preset, message = create_user_preset(new_preset_name)
-        if preset then
-            selected_preset = preset
-            new_preset_name = preset.name
-            preset_message = "Saved to " .. preset_file
+    if ImGui.Button("New", vector2():set(72, 0)) then
+        preserve_pending_user_preset()
+        preset_dialog_name = ""
+        preset_dialog_message = nil
+        if selected_preset.kind == "builtin" or selected_preset.kind == "user" then
+            select_copy_source(
+                selected_preset.kind,
+                selected_preset.id,
+                selected_preset.name)
         else
-            preset_message = message
+            select_copy_source("current", "current", "Current Settings")
         end
+        ImGui.OpenPopup("New Bodycam Preset")
     end
 
     local is_user_preset = selected_preset.kind == "user"
     ImGui.SameLine(0, 8)
     ImGui.BeginDisabled(not is_user_preset)
-    if ImGui.Button("Update", vector2():set(80, 0)) then
+    if ImGui.Button("Update", vector2():set(78, 0)) then
         save_user_preset(selected_preset)
         preset_message = "Preset updated."
     end
     ImGui.SameLine(0, 8)
-    if ImGui.Button("Rename", vector2():set(80, 0)) then
-        preset_message = rename_user_preset(selected_preset, new_preset_name)
-            and "Preset renamed."
-            or "Enter a unique preset name."
+    if ImGui.Button("Rename", vector2():set(78, 0)) then
+        rename_preset_id = selected_preset.id
+        preset_dialog_name = selected_preset.name
+        preset_dialog_message = nil
+        ImGui.OpenPopup("Rename Bodycam Preset")
     end
     ImGui.SameLine(0, 8)
-    if ImGui.Button("Delete", vector2():set(80, 0)) then
-        delete_user_preset(selected_preset)
-        new_preset_name = ""
-        preset_message = "Preset deleted."
+    if ImGui.Button("Delete", vector2():set(78, 0)) then
+        delete_preset_id = selected_preset.id
+        preset_dialog_message = nil
+        ImGui.OpenPopup("Delete Bodycam Preset")
     end
     ImGui.EndDisabled()
 
     if preset_message then
         ImGui.TextDisabled(preset_message)
     end
+    draw_preset_dialogs()
 end
 
 local function draw_sections(tab_id, sections)

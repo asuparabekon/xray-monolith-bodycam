@@ -50,21 +50,16 @@ float4 svp_profiled_tunneling_shadow(float2 lens_tc, bool authored_inside)
 
 float2 svp_scope_tunneling_tc(float2 lens_tc)
 {
-	// The virtual eye can recenter for gameplay, but the scope tube remains
-	// displaced with the weapon axis. Remove optical magnification from the
-	// reticle displacement, then cap it at the optic's authored tube parallax.
 	if (ddy(lens_tc.y) < 0.0)
 		lens_tc.y = 1.0 - lens_tc.y;
 
-	if (svp_scope_alignment.z <= 0.5)
+	// The reticle and tube are rigid parts of the same optic. The reticle
+	// shader applies this alignment in texture space, producing this exact
+	// displacement in lens space.
+	if (svp_barrel_alignment.z <= 0.5)
 		return lens_tc;
 
-	float2 tube_offset = svp_scope_alignment.xy / max(svp_aperture.y, 1.0);
-	const float parallax_limit = max(svp_optic_profile.x, 0.0);
-	const float offset_length = length(tube_offset);
-	if (offset_length > parallax_limit && offset_length > 0.0001)
-		tube_offset *= parallax_limit / offset_length;
-	return lens_tc - tube_offset;
+	return lens_tc - svp_barrel_alignment.xy;
 }
 
 float svp_pupil_overlap(float separation, float exit_radius, float eye_radius)

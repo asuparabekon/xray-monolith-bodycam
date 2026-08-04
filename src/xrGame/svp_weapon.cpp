@@ -7,6 +7,7 @@
 #include "level.h"
 #include "player_hud.h"
 #include "../xrEngine/svp_gameplay_cvars.h"
+#include "svp_projectile_math.h"
 
 // pip weapon raise settled threshold, GetZRotatingFactor at or above this reads as fully aimed
 static const float SVP_SETTLED_ROT = 0.999f;
@@ -86,27 +87,29 @@ static bool svp_current_sight(const CSecondVPParams& viewport,
 		&& sight.direction.square_magnitude() > EPS;
 }
 
-static void svp_resolve_projectile_ray(const SPickParam& pick,
+static bool svp_resolve_projectile_ray(const SPickParam& pick,
 	const CSecondVPParams::SightSnapshot& sight, bool sight_valid,
-	float zero_m, const Fvector& muzzle, Fvector& position, Fvector& direction)
+	float zero_m, const Fvector& muzzle, Fvector& position, Fvector& direction,
+	Fvector& convergence_target)
 {
-	position.set(pick.defs.start);
-	direction.set(pick.defs.dir);
-	if (!sight_valid || zero_m <= 0.f)
-		return;
+	return SvpProjectile::ResolveRay(pick.defs.start, pick.defs.dir,
+		pick.barrel_blocked, sight.position, sight.direction, sight_valid,
+		zero_m, muzzle, position, direction, &convergence_target);
+}
 
-	if (!pick.barrel_blocked && muzzle.square_magnitude() > EPS)
-		position.set(muzzle);
+static float svp_effective_zero(CWeapon& weapon,
+	const CSecondVPParams::SightSnapshot& sight, bool sight_valid,
+	float configured_zero)
+{
+	if (!sight_valid || configured_zero <= 0.f)
+		return configured_zero;
 
-	Fvector zero_point;
-	zero_point.mad(sight.position, sight.direction, zero_m);
-	Fvector zero_direction;
-	zero_direction.sub(zero_point, position);
-	if (zero_direction.magnitude() > 1.f)
-	{
-		zero_direction.normalize();
-		direction.set(zero_direction);
-	}
+	collide::rq_result hit;
+	const bool found = Level().ObjectSpace.RayPick(sight.position,
+		sight.direction, configured_zero, collide::rqtBoth, hit,
+		weapon.H_Parent());
+	return SvpProjectile::ResolveConvergenceDistance(configured_zero,
+		found, found ? hit.range : configured_zero);
 }
 
 void CWeapon::UpdateSvpSwingEnvelope(CActor* pActor)
@@ -349,9 +352,12 @@ void CWeapon::PublishSvpWeaponPose()
 	pose.camera_right.set(Device.vCameraRight);
 	pose.camera_up.set(Device.vCameraTop);
 	pose.camera_forward.set(Device.vCameraDirection);
-	svp_resolve_projectile_ray(pp, sight, sight_ok, configured_zero,
-		pose.muzzle_pos, pose.fire_ray_pos, pose.fire_ray_dir);
-	pose.fire_ray_zero = configured_zero;
+	const float effective_zero =
+		svp_effective_zero(*this, sight, sight_ok, configured_zero);
+	pose.fire_ray_target_valid = svp_resolve_projectile_ray(
+		pp, sight, sight_ok, effective_zero, pose.muzzle_pos,
+		pose.fire_ray_pos, pose.fire_ray_dir, pose.fire_ray_target);
+	pose.fire_ray_zero = effective_zero;
 	pose.frame = Device.dwFrame;
 	pose.session = vp.GetSVPSession();
 	vp.PublishWeaponPose(pose);

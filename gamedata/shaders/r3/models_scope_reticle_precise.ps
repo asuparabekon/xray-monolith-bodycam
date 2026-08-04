@@ -19,6 +19,7 @@
 #include "common.h"
 #include "nv_utils.h"
 #include "thermal_utils.h"
+#include "mark_adjust.h"
 
 uniform float4 shader_scope_params;
 #include "svp_hooks_shadow.h"
@@ -39,6 +40,7 @@ uniform float4 shader_scope_params;
 #define RT_FLAT_SCREEN 8
 #define RT_DFP 9
 #define RT_DFP_ALT 10
+#define RT_MARK_MAGNIFIER 12
 
 #define IT_NONE 0
 #define IT_NV 1
@@ -76,7 +78,6 @@ uniform float4 s3ds_param_1;
 uniform float4 s3ds_param_2;
 uniform float4 s3ds_param_3;
 uniform float4 s3ds_param_4;
-uniform float4 markswitch_current;
 uniform float4 markswitch_color;
 uniform float4 shader_param_8;
 
@@ -392,7 +393,7 @@ float4 main(vf I) : SV_Target
 	float MAX_ZOOM_FOV = m_hud_fov_params.x * 0.75;
 	float REFLECTION_HUE = s3ds_param_2.x;
 	int MIN_ZOOM_1X = s3ds_param_2.z;
-	float ZOOM_FACTOR = s3ds_param_2.w;
+	float ZOOM_FACTOR = s3ds_param_2.w - fmod(s3ds_param_2.w, 0.01);
 	
 	int IMAGE_TYPE = s3ds_param_3.x;
 	int RETICLE_TYPE = s3ds_param_3.y;
@@ -463,6 +464,8 @@ float2 reticle_tc = project(I.tc0, V_tangent.xy * pip_k, RETICLE_PROJECT, RETICL
     float4 mark_texture = float4(0, 0, 0, 0);
 	if (reticle_tc.x >= 0 && reticle_tc.x <= 1 && reticle_tc.y >= 0 && reticle_tc.y <= 1)
 	{
+		if (RETICLE_TYPE == RT_MARK_MAGNIFIER)
+			reticle_tc = mark_adjust(reticle_tc);
 		mark_texture = s_base.Sample(smp_base, clamp(reticle_tc, 0, 1));
 	}
 
@@ -617,7 +620,8 @@ if (RETICLE_TYPE == RT_DFP_ALT)
 		const bool inside_excluded = RETICLE_TYPE == RT_SCREEN
 			|| RETICLE_TYPE == RT_FLAT_SCREEN
 			|| RETICLE_TYPE == RT_SPECTER
-			|| RETICLE_TYPE == RT_ACOG;
+			|| RETICLE_TYPE == RT_ACOG
+		|| RETICLE_TYPE == RT_MARK_MAGNIFIER;
 		const bool uses_authored_inside = svp_scope_uses_authored_inside(FFP, inside_excluded);
 		const float2 tube_pupil_tc = svp_scope_tunneling_tc(I.tc0);
 		shadow_texture = svp_profiled_tunneling_shadow(tube_pupil_tc, uses_authored_inside);
@@ -642,7 +646,8 @@ if (RETICLE_TYPE == RT_DFP_ALT)
 	const bool inside_excluded = RETICLE_TYPE == RT_SCREEN
 		|| RETICLE_TYPE == RT_FLAT_SCREEN
 		|| RETICLE_TYPE == RT_SPECTER
-		|| RETICLE_TYPE == RT_ACOG;
+		|| RETICLE_TYPE == RT_ACOG
+		|| RETICLE_TYPE == RT_MARK_MAGNIFIER;
 	const bool uses_authored_inside = svp_scope_uses_authored_inside(FFP, inside_excluded);
 	const bool renders_authored_inside = uses_authored_inside
 		&& (!true_pip || svp_physical_optics_active());
@@ -782,7 +787,7 @@ if (RETICLE_TYPE == RT_DFP_ALT)
 	final_scope_1 = rgba_blend(final_scope_1, vignette);
 	
 	float4 final_scope_2 = float4(0, 0, 0, 0);
-	if (RETICLE_TYPE != RT_ADDITIVE && (RETICLE_TYPE == RT_GIPERON || FFP))
+	if (RETICLE_TYPE != RT_ADDITIVE && RETICLE_TYPE != RT_MARK_MAGNIFIER && (RETICLE_TYPE == RT_GIPERON || FFP))
 	{
 		final_scope_2 = rgba_blend(final_scope_2, mark_texture);
 	}
@@ -792,7 +797,7 @@ if (RETICLE_TYPE == RT_DFP_ALT)
 	{
 		final_scope_2 = rgba_blend(final_scope_2, shadow_texture);
 	}
-	if (!(RETICLE_TYPE == RT_ADDITIVE || RETICLE_TYPE == RT_GIPERON || FFP))
+	if (!(RETICLE_TYPE == RT_ADDITIVE || RETICLE_TYPE == RT_MARK_MAGNIFIER || RETICLE_TYPE == RT_GIPERON || FFP))
 	{
 		final_scope_2 = rgba_blend(final_scope_2, mark_texture);
 	}
@@ -819,7 +824,7 @@ if (RETICLE_TYPE == RT_DFP_ALT)
 	// Result
 	
 	float3 final_scope = lerp(back, final_scope_1.rgb, final_scope_1.a);
-	if (RETICLE_TYPE == RT_ADDITIVE)
+	if (RETICLE_TYPE == RT_ADDITIVE || RETICLE_TYPE == RT_MARK_MAGNIFIER)
 	{
 		final_scope = saturate(final_scope + mark_texture.rgb * mark_texture.a);
 	}

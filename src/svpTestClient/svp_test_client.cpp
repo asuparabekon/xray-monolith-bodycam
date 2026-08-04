@@ -6,6 +6,7 @@
 #include "../xrGame/svp_optic_config_script.h"
 #include "../xrGame/svp_mags.h"
 #include "../xrGame/bodycam_movement_response.h"
+#include "../xrGame/svp_projectile_math.h"
 #include "../Layers/xrRenderPC_R4/svp_physical_optics.h"
 #include "../Layers/xrRender/svp_lens_detect_math.h"
 
@@ -815,13 +816,18 @@ void AddStateTests(Harness& harness)
 		pose.frame = 20;
 		pose.session = 4;
 		pose.optic_context_token = token;
+		pose.fire_ray_target.set(1.f, 2.f, 100.f);
 		pose.fire_ray_zero = 100.f;
+		pose.fire_ray_target_valid = true;
 		state.PublishWeaponPose(pose);
 		CSecondVPParams::WeaponPoseSnapshot pose_read;
 		CHECK(harness, state.ReadWeaponPose(pose_read));
 		CHECK(harness, pose_read.frame == 20);
 		CHECK(harness, pose_read.optic_context_token == token);
+		CHECK(harness, pose_read.fire_ray_target.similar(
+			pose.fire_ray_target));
 		CHECK(harness, pose_read.fire_ray_zero == 100.f);
+		CHECK(harness, pose_read.fire_ray_target_valid);
 		CHECK(harness, state.SnapshotExact(20, state.GetSVPSession(), 20));
 		CHECK(harness, state.SnapshotRecent(19, state.GetSVPSession(), 20));
 		CHECK(harness, !state.SnapshotRecent(18, state.GetSVPSession(), 20));
@@ -1550,6 +1556,132 @@ end
 	});
 }
 
+void AddProjectileTests(Harness& harness)
+{
+	harness.Run("projectile", "effective_convergence", [&]
+	{
+		CHECK_NEAR(harness,
+			SvpProjectile::ResolveConvergenceDistance(100.f, false, 0.f),
+			100.f, 0.0001f);
+		CHECK_NEAR(harness,
+			SvpProjectile::ResolveConvergenceDistance(100.f, true, 25.f),
+			25.f, 0.0001f);
+		CHECK_NEAR(harness,
+			SvpProjectile::ResolveConvergenceDistance(100.f, true, 0.5f),
+			2.f, 0.0001f);
+		CHECK_NEAR(harness,
+			SvpProjectile::ResolveConvergenceDistance(0.f, true, 25.f),
+			0.f, 0.0001f);
+	});
+
+	harness.Run("projectile", "fallback_paths", [&]
+	{
+		Fvector pick_position;
+		Fvector pick_direction;
+		Fvector sight_position;
+		Fvector sight_direction;
+		Fvector muzzle;
+		Fvector position;
+		Fvector direction;
+		pick_position.set(1.f, 2.f, 3.f);
+		pick_direction.set(0.f, 0.f, 1.f);
+		sight_position.set(0.f, 0.f, 0.f);
+		sight_direction.set(0.f, 0.f, 1.f);
+		muzzle.set(0.1f, 0.f, 0.f);
+
+		Fvector target;
+		target.set(9.f, 9.f, 9.f);
+		CHECK(harness, !SvpProjectile::ResolveRay(
+			pick_position, pick_direction, false,
+			sight_position, sight_direction, false, 25.f, muzzle,
+			position, direction, &target));
+		CHECK(harness, position.similar(pick_position));
+		CHECK(harness, direction.similar(pick_direction));
+		CHECK(harness, target.square_magnitude() <= EPS);
+
+		target.set(9.f, 9.f, 9.f);
+		CHECK(harness, !SvpProjectile::ResolveRay(
+			pick_position, pick_direction, false,
+			sight_position, sight_direction, true, 0.f, muzzle,
+			position, direction, &target));
+		CHECK(harness, position.similar(pick_position));
+		CHECK(harness, direction.similar(pick_direction));
+		CHECK(harness, target.square_magnitude() <= EPS);
+	});
+
+	harness.Run("projectile", "barrel_blocked", [&]
+	{
+		Fvector pick_position;
+		Fvector pick_direction;
+		Fvector sight_position;
+		Fvector sight_direction;
+		Fvector muzzle;
+		Fvector position;
+		Fvector direction;
+		Fvector target;
+		Fvector expected;
+		pick_position.set(1.f, 2.f, 3.f);
+		pick_direction.set(0.f, 0.f, 1.f);
+		sight_position.set(0.f, 0.f, 0.f);
+		sight_direction.set(0.f, 0.f, 1.f);
+		muzzle.set(0.1f, 0.f, 0.f);
+
+		SvpProjectile::ResolveRay(pick_position, pick_direction, true,
+			sight_position, sight_direction, true, 25.f, muzzle,
+			position, direction);
+		target.mad(sight_position, sight_direction, 25.f);
+		expected.sub(target, pick_position).normalize();
+		CHECK(harness, position.similar(pick_position));
+		CHECK(harness, direction.similar(expected));
+	});
+
+	harness.Run("projectile", "deadzone_motion_tracks_sight", [&]
+	{
+		Fvector fallback_position;
+		Fvector fallback_direction;
+		fallback_position.set(0.f, 0.f, 0.f);
+		fallback_direction.set(0.f, 0.f, 1.f);
+		for (int x = -8; x <= 8; ++x)
+		{
+			for (int y = -6; y <= 6; ++y)
+			{
+				Fvector sight_direction;
+				Fvector sight_position;
+				Fvector muzzle;
+				Fvector position;
+				Fvector direction;
+				Fvector target;
+				Fvector expected;
+				Fvector impact;
+				sight_direction.set(static_cast<float>(x) * 0.01f,
+					static_cast<float>(y) * 0.01f, 1.f);
+				sight_direction.normalize();
+				sight_position.set(static_cast<float>(x) * 0.002f,
+					static_cast<float>(y) * 0.002f, 0.f);
+				muzzle.set(sight_position.x + 0.03f,
+					sight_position.y - 0.05f, 0.6f);
+				const float effective_zero =
+					SvpProjectile::ResolveConvergenceDistance(100.f, true,
+						5.f + static_cast<float>(x + 8));
+
+				Fvector published_target;
+				CHECK(harness, SvpProjectile::ResolveRay(
+					fallback_position, fallback_direction, false,
+					sight_position, sight_direction, true, effective_zero,
+					muzzle, position, direction, &published_target));
+				target.mad(sight_position, sight_direction, effective_zero);
+				expected.sub(target, muzzle).normalize();
+				impact.mad(position, direction, position.distance_to(target));
+				CHECK(harness, position.similar(muzzle));
+				CHECK(harness, direction.similar(expected, 0.00001f));
+				CHECK(harness, published_target.similar(
+					target, 0.00001f));
+				CHECK(harness, impact.similar(target, 0.00001f));
+			}
+		}
+	});
+}
+
 bool ParseUnsigned(const std::string& value, std::uint64_t maximum,
 	std::uint64_t& parsed)
 {
@@ -1645,7 +1777,7 @@ bool ParseOptions(int argc, char** argv, Options& options,
 	}
 	const std::set<std::string> suites =
 	{
-		"all", "schema", "state", "concurrency", "magnification",
+		"all", "schema", "state", "projectile", "concurrency", "magnification",
 		"physical-optics", "lens-detection", "optic-api", "bodycam",
 		"scripts"
 	};
@@ -1685,7 +1817,7 @@ int main(int argc, char** argv)
 		std::cout
 			<< "svp-test-client [--suite name] [--format text|json]"
 			<< " [--repo path] [--seed value] [--iterations count] [--verbose]\n"
-			<< "suites schema state concurrency magnification physical-optics"
+			<< "suites schema state projectile concurrency magnification physical-optics"
 			<< " lens-detection optic-api bodycam scripts all\n";
 		return 0;
 	}
@@ -1694,6 +1826,7 @@ int main(int argc, char** argv)
 	AddScriptTests(harness);
 	AddSchemaTests(harness);
 	AddStateTests(harness);
+	AddProjectileTests(harness);
 	AddMagnificationTests(harness);
 	AddPhysicalOpticsTests(harness);
 	AddLensDetectionTests(harness);

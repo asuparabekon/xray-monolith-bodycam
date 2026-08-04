@@ -24,6 +24,24 @@
 #define RT_DFP_ALT 10
 #define RT_DFP_ALT2 11
 
+float dial_angle_fraction(float mag)
+{
+	const float mags[8] = {3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0};
+	const float fractions[8] = {0.0000, 0.2032, 0.3907, 0.5557, 0.6956, 0.8155, 0.9151, 1.0000};
+
+	mag = clamp(mag, mags[0], mags[7]);
+	for (int i = 0; i < 7; ++i)
+	{
+		if (mag <= mags[i + 1])
+		{
+			const float t = (mag - mags[i]) / (mags[i + 1] - mags[i]);
+			return lerp(fractions[i], fractions[i + 1], t);
+		}
+	}
+
+	return fractions[7];
+}
+
 float4 scope_custom_reticle(Scope S) {
 	float RETICLE_SIZE = s3ds_param_1.x;
 	float EYE_RELIEF = s3ds_param_1.y;
@@ -68,7 +86,7 @@ float4 scope_custom_reticle(Scope S) {
 	if (RETICLE_TYPE != RT_FLAT_SCREEN)
 	{
 		// fisheye off under true PiP, fake modes keep it
-		float2 fish = fisheye(S.tc0, (V_tangent.xy * mas_scale())) / current_zoom * pip_pin;
+		float2 fish = fisheye(S.tc0, (V_tangent.xy * svp_effective_mas(mas_scale()))) / current_zoom * pip_pin;
 		reticle_lens_tc += fish;
 		reticle_tc += fish;
 	}
@@ -153,7 +171,7 @@ float4 scope_custom_reticle(Scope S) {
 			if (dial_max > 1.0)
 			{
 				float x = saturate((current_zoom - 1.0) / (dial_max - 1.0));
-				zoom_part = saturate(-0.47300 * x * x + 1.45820 * x + 0.01229);
+				zoom_part = dial_angle_fraction(3.0 + 7.0 * x);
 			}
 		}
 		float angle = -PI * (zoom_part + shift_3x) / (1 + shift_3x);

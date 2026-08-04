@@ -62,7 +62,7 @@ float3 scope_custom_image(Scope s) {
 	if (RETICLE_TYPE != RT_FLAT_SCREEN)
 	{
 		// fisheye off under true PiP (w < -1.5), fake modes keep it
-		float2 fish = fisheye(s.tc0, (V_tangent.xy * mas_scale())) / current_zoom * (shader_scope_params.w < -1.5 ? 0.0 : 1.0);
+		float2 fish = fisheye(s.tc0, (V_tangent.xy * svp_effective_mas(mas_scale()))) / current_zoom * (shader_scope_params.w < -1.5 ? 0.0 : 1.0);
 		scope_tc += fish;
 		reticle_tc += fish;
 	}

@@ -81,16 +81,22 @@ float scope_custom_shadow(v_out I, Scope S) {
 	}
 	else
 	{
-		exit_pupil_tc = project(I.tc0, V_tangent.xy * mas_scale(), -EYE_RELIEF,
+		exit_pupil_tc = project(I.tc0, svp_shadow_swing(V_tangent.xy * svp_effective_mas(mas_scale())), -EYE_RELIEF,
 			EXIT_PUPIL * (SETTING(SETTINGS, ST_SEE_THROUGH) ? 1 : m_hud_params.x));
 		shadow_texture = sample_shadow(exit_pupil_tc, SHADOW_WIDTH + 0.02 * (current_zoom - 1));
 		if (!SETTING(SETTINGS, ST_PARALLAX_SHADOW))
 			shadow_texture *= 1 - m_hud_params.x;
+		shadow_texture = svp_shadow_soften(shadow_texture);
 	}
 	if (RETICLE_TYPE == RT_SCREEN || RETICLE_TYPE == RT_FLAT_SCREEN)
 	{
 		shadow_texture = float4(0, 0, 0, 0);
 	}
 
-	return rgba_blend( zoom_switch_shadow, shadow_texture).a;
+	const float shadow_alpha = rgba_blend(zoom_switch_shadow, shadow_texture).a;
+	if (svp_physical_optics_active())
+		return shadow_alpha;
+
+	const float field_stop = svp_field_stop_alpha(S.tc0);
+	return shadow_alpha + field_stop * (1.0 - shadow_alpha);
 }
