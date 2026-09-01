@@ -5,6 +5,9 @@
 #include "level.h"
 #include "ai_space.h"
 #include "script_engine.h"
+#include "player_hud.h"
+#include "HudItem.h"
+#include "../xrEngine/CameraBase.h"
 
 using namespace luabind;
 
@@ -156,6 +159,68 @@ static object bodycam_get_state()
 	return table;
 }
 
+// Free-aim aim ray for scripts (e.g. the Immersive Identification mod's target
+// acquisition). Returns two rays in world space:
+//   { valid=bool,
+//     pos_x/y/z, dir_x/y/z,           -- PRIMARY: gameplay aim (first-eye cam)
+//     bar_pos_x/y/z, bar_dir_x/y/z }  -- diagnostic: cosmetic weapon barrel
+// (all dirs unit length).
+//
+// The PRIMARY ray is the actor's real first-eye camera. Under bodycam the RENDER
+// camera (device().cam_dir, used by world2ui and the screen-centre pick) is a
+// swayed OVERRIDE of this, so only the first-eye camera reflects where the
+// player is actually AIMING -- HudItem::Ray() itself remaps the pick through
+// cam_FirstEye() for the same reason. The barrel ray (main-hand weapon's
+// per-frame pick, PP.defs) is the swaying weapon-model direction, NOT the aim;
+// it is exposed only for diagnostics. Pure reads, no side effects. valid=false
+// when there is no controlled actor.
+static object bodycam_get_fire_ray()
+{
+	lua_State* L = ai().script_engine().lua();
+	object t = newtable(L);
+	t["valid"] = false;
+
+	CActor* actor = smart_cast<CActor*>(Level().CurrentEntity());
+	if (!actor)
+		return t;
+
+	CCameraBase* eye = actor->cam_FirstEye();
+	if (!eye)
+		return t;
+
+	Fvector eye_dir = eye->vDirection;
+	eye_dir.normalize_safe();
+
+	t["valid"] = true;
+	t["pos_x"] = eye->vPosition.x;
+	t["pos_y"] = eye->vPosition.y;
+	t["pos_z"] = eye->vPosition.z;
+	t["dir_x"] = eye_dir.x;
+	t["dir_y"] = eye_dir.y;
+	t["dir_z"] = eye_dir.z;
+
+	// Diagnostic: cosmetic weapon barrel pick (swaying model direction).
+	if (g_player_hud)
+	{
+		attachable_hud_item* item = g_player_hud->attached_item(0);
+		if (!item)
+			item = g_player_hud->attached_item(1);
+		if (item && item->m_parent_hud_item)
+		{
+			const SPickParam& pp = item->m_parent_hud_item->GetPick();
+			Fvector bar_dir = pp.defs.dir;
+			bar_dir.normalize_safe();
+			t["bar_pos_x"] = pp.defs.start.x;
+			t["bar_pos_y"] = pp.defs.start.y;
+			t["bar_pos_z"] = pp.defs.start.z;
+			t["bar_dir_x"] = bar_dir.x;
+			t["bar_dir_y"] = bar_dir.y;
+			t["bar_dir_z"] = bar_dir.z;
+		}
+	}
+	return t;
+}
+
 #pragma optimize("s", on)
 void Bodycam::script_register(lua_State* L)
 {
@@ -173,6 +238,7 @@ void Bodycam::script_register(lua_State* L)
 		def("clear_viewmodel_profile", &bodycam_clear_viewmodel_profile),
 		def("dump", &bodycam_dump),
 		def("get_state", &bodycam_get_state),
+		def("get_fire_ray", &bodycam_get_fire_ray),
 		def("get_bindings", &bodycam_get_bindings)
 	];
 }
