@@ -471,6 +471,7 @@ public:
 	bool svp_nvg_pass();
 	void phase_fakescope(); //crookr
 	void phase_glitch(); // Immersive Identification dead-head glitch
+	void phase_svp_glitch(); // Immersive Identification in-scope redaction glitch
 	void phase_svp_markers(); // Immersive Identification in-scope markers
 	void phase_heatvision(); //--DSR-- HeatVision
 	void phase_3DSSReticle(); // Redotix99: for 3D Shader Based Scopes

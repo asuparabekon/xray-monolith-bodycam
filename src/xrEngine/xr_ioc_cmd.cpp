@@ -1011,8 +1011,13 @@ ENGINE_API float hit_modifier = 1.0f;
 // by CRenderTarget::phase_glitch (xrRenderPC_R4). Same xrEngine ENGINE_API
 // cross-module channel as the ps_r2_* render tunables above. II_GLITCH_MAX must
 // match the glitch_rects[] size in ii_glitch.ps and the cap in bodycam_script.cpp.
-ENGINE_API float g_ii_glitch_rects[16 * 4] = { 0.f };   // II_GLITCH_MAX * 4
+ENGINE_API float g_ii_glitch_rects[16 * 4] = { 0.f };   // II_GLITCH_MAX * 4 (main-camera normalised rects)
 ENGINE_API float g_ii_glitch_depths[16] = { 0.f };      // per-rect view-space depth (m); 0 = no depth test
+// Per-box WORLD data for the in-scope (SVP) redaction: the engine reprojects
+// these through the scope camera (main-camera normalised rects above can't be
+// reprojected). 6 floats/box: [0..2] world centre, [3] world half-width, [4]
+// world half-height (metres), [5] reserved. Written by bodycam.glitch_add.
+ENGINE_API float g_ii_glitch_world[16 * 6] = { 0.f };   // II_GLITCH_MAX * 6
 ENGINE_API int   g_ii_glitch_count = 0;                 // active rect count (0..II_GLITCH_MAX)
 ENGINE_API float g_ii_glitch_intensity = 0.f;           // master 0..1
 ENGINE_API int   g_ii_glitch_mode = 0;                  // 0 glitch, 1 pixelate, 2 black (ii_glitch.ps)

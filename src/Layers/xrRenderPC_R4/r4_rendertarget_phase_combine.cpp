@@ -101,6 +101,7 @@ float hclip(float v, float dim) { return 2.f * v / dim - 1.f; }
 // origin) and are passed straight to the shader as box UVs.
 extern ENGINE_API float g_ii_glitch_rects[16 * 4];   // II_GLITCH_MAX * 4
 extern ENGINE_API float g_ii_glitch_depths[16];      // per-rect view-space depth (m); 0 = no test
+extern ENGINE_API float g_ii_glitch_world[16 * 6];   // per-box world centre + half-extents (in-scope)
 extern ENGINE_API int   g_ii_glitch_count;
 extern ENGINE_API float g_ii_glitch_intensity;
 extern ENGINE_API int   g_ii_glitch_mode;
@@ -170,6 +171,89 @@ void CRenderTarget::phase_glitch()
 	HW.pContext->CopyResource(rt_Generic_0->pTexture->surface_get(), dest_rt->pTexture->surface_get());
 }
 
+// Immersive Identification: redaction glitch INSIDE the scope. Same shader as
+// phase_glitch, but the rects are reprojected through the SVP camera
+// (Device.matrices[1] + the scope basis) from the per-corpse WORLD boxes
+// (g_ii_glitch_world) -- the main-camera normalised rects can't be reused for the
+// scope's narrower view. Called from phase_svp_capture (this == TargetSVP), so
+// s_image (r2_RT_generic0) is the scope scene (SetActive remaps it) and
+// rt_Generic_0 is the image captured for the lens. No depth mask in-scope (the
+// viewmodel isn't in the scope view), so depths are 0.
+void CRenderTarget::phase_svp_glitch()
+{
+	int count = g_ii_glitch_count;
+	if (count > 16) count = 16;
+	if (count <= 0 || g_ii_glitch_intensity <= 0.f) return;
+	if (!s_ii_glitch) return;
+
+	Fmatrix vp;
+	vp.mul(Device.matrices[1].mProject, Device.matrices[1].mView);
+	const Fvector& cr = Device.m_SecondViewport.svp_right;
+	const Fvector& cu = Device.m_SecondViewport.svp_up;
+
+	// Reproject each world box's 4 camera-facing corners into SVP-normalised [0,1]
+	// rects; drop boxes with no world data (older submissions) or fully off-scope.
+	float rects[16 * 4];
+	int n = 0;
+	for (int i = 0; i < count; ++i)
+	{
+		const float* wd = &g_ii_glitch_world[i * 6];
+		float whw = wd[3], whh = wd[4];
+		if (whw <= 0.f || whh <= 0.f) continue;
+		float minx = 1e9f, miny = 1e9f, maxx = -1e9f, maxy = -1e9f;
+		bool ok = true;
+		for (int sx = -1; sx <= 1 && ok; sx += 2)
+			for (int sy = -1; sy <= 1 && ok; sy += 2)
+			{
+				Fvector4 clip;
+				vp.transform(clip, Fvector4().set(
+					wd[0] + cr.x * whw * sx + cu.x * whh * sy,
+					wd[1] + cr.y * whw * sx + cu.y * whh * sy,
+					wd[2] + cr.z * whw * sx + cu.z * whh * sy, 1.f));
+				if (clip.w <= EPS_S) { ok = false; break; }
+				float u = (clip.x / clip.w) * 0.5f + 0.5f;
+				float v = 0.5f - (clip.y / clip.w) * 0.5f;
+				if (u < minx) minx = u; if (u > maxx) maxx = u;
+				if (v < miny) miny = v; if (v > maxy) maxy = v;
+			}
+		if (!ok) continue;
+		if (maxx < 0.f || minx > 1.f || maxy < 0.f || miny > 1.f) continue;
+		rects[n * 4 + 0] = minx; rects[n * 4 + 1] = miny;
+		rects[n * 4 + 2] = maxx; rects[n * 4 + 3] = maxy;
+		++n;
+	}
+	if (n <= 0) return;
+
+	u32 Offset = 0;
+	u32 Ccol = color_rgba(0, 0, 0, 255);
+	float d_Z = EPS_S, d_W = 1.0f;
+	float w = float(Width), h = float(Height);   // SVP target extent
+
+	ref_rt& dest_rt = RImplementation.o.dx10_msaa ? rt_Generic : rt_Color;
+	u_setrt(dest_rt, nullptr, nullptr, nullptr);
+	RCache.set_CullMode(CULL_NONE);
+	RCache.set_Stencil(FALSE);
+
+	FVF::TL* pv = (FVF::TL*)RCache.Vertex.Lock(4, g_combine->vb_stride, Offset);
+	pv->set(0, h, d_Z, d_W, Ccol, 0.0f, 1.0f); pv++;
+	pv->set(0, 0, d_Z, d_W, Ccol, 0.0f, 0.0f); pv++;
+	pv->set(w, h, d_Z, d_W, Ccol, 1.0f, 1.0f); pv++;
+	pv->set(w, 0, d_Z, d_W, Ccol, 1.0f, 0.0f); pv++;
+	RCache.Vertex.Unlock(4, g_combine->vb_stride);
+
+	RCache.set_Element(s_ii_glitch->E[0]);
+	RCache.set_Geometry(g_combine);
+	RCache.set_c("glitch_params", g_ii_glitch_intensity, Device.fTimeGlobal, 10.0f, 0.006f);
+	RCache.set_c("glitch_count", float(n), float(g_ii_glitch_mode), 0.0f, 0.0f);
+	for (int i = 0; i < n; ++i)
+	{
+		RCache.set_ca("glitch_rects", i, rects[i * 4 + 0], rects[i * 4 + 1], rects[i * 4 + 2], rects[i * 4 + 3]);
+		RCache.set_ca("glitch_depths", i, 0.0f, 0.0f, 0.0f, 0.0f);   // no depth mask in-scope
+	}
+	RCache.Render(D3DPT_TRIANGLELIST, Offset, 0, 4, 0, 2);
+	HW.pContext->CopyResource(rt_Generic_0->pTexture->surface_get(), dest_rt->pTexture->surface_get());
+}
+
 // Immersive Identification: draw the in-scope identification markers. Called at
 // the tail of the SVP pass's phase_combine (gated svp_pass_now), so it draws over
 // the combined+tonemapped scope image, which is then captured and composited into
@@ -228,11 +312,10 @@ void CRenderTarget::phase_svp_markers()
 				Device.matrices[1].mProject._11, Device.matrices[1].mProject._22,
 				Device.m_SecondViewport.svp_cam_pos.x, Device.m_SecondViewport.svp_cam_pos.y, Device.m_SecondViewport.svp_cam_pos.z);
 		if (clip.w <= EPS_S) continue;                 // behind the scope camera
-		// NOTE: off-scope markers are intentionally still drawn (not culled) while
-		// Phase 1 is being validated, so a mis-projected marker is visible for
-		// diagnosis rather than silently dropped. Tighten to |ndc|<=1 once placement
-		// is confirmed in-scope.
-		if (ndx < -3.0f || ndx > 3.0f || ndy < -3.0f || ndy > 3.0f) continue;
+		// Off-scope cull: skip markers whose centre is outside the viewport (a
+		// small margin so a marker straddling the edge still half-shows). The lens
+		// disc mask in the composite trims anything past the glass.
+		if (ndx < -1.1f || ndx > 1.1f || ndy < -1.1f || ndy > 1.1f) continue;
 
 		float cx = (ndx * 0.5f + 0.5f) * w;
 		float cy = (0.5f - ndy * 0.5f) * h;            // NDC y-up -> screen y-down

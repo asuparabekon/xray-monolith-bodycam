@@ -248,27 +248,34 @@ static void bodycam_glitch_set_mode(int mode)
 }
 
 extern ENGINE_API float g_ii_glitch_depths[II_GLITCH_MAX];
+extern ENGINE_API float g_ii_glitch_world[II_GLITCH_MAX * 6];
 
 static int   s_ii_glitch_pending = 0;
 static float s_ii_glitch_pending_rects[II_GLITCH_MAX * 4];
 static float s_ii_glitch_pending_depths[II_GLITCH_MAX];
+static float s_ii_glitch_pending_world[II_GLITCH_MAX * 6];
 
 static void bodycam_glitch_begin()
 {
 	s_ii_glitch_pending = 0;
 }
 
-// depth = the box's view-space depth in metres (distance along the view axis).
-// The renderer skips any pixel whose scene depth is nearer than this, so the
-// effect never paints over the viewmodel / foreground geometry. depth <= 0 means
-// "no depth test" (the back-compat single-rect wrapper passes 0).
-static void bodycam_glitch_add(float x0, float y0, float x1, float y1, float depth)
+// (x0,y0,x1,y1) = the box in MAIN-camera normalised screen space (for the main
+// pass); depth = its view-space depth in metres (the shader skips pixels nearer
+// than it, masking the viewmodel/foreground). (wcx,wcy,wcz) + (whw,whh) = the box
+// WORLD centre + world half-width/height in metres, which the SVP pass reprojects
+// through the scope camera (the main-camera rect can't be). world args default to
+// 0 (no in-scope draw) for the back-compat wrapper.
+static void bodycam_glitch_add(float x0, float y0, float x1, float y1, float depth,
+	float wcx, float wcy, float wcz, float whw, float whh)
 {
 	if (s_ii_glitch_pending >= II_GLITCH_MAX) return;
 	if (!(x1 > x0 && y1 > y0)) return;   // skip degenerate rects
 	float* r = &s_ii_glitch_pending_rects[s_ii_glitch_pending * 4];
 	r[0] = x0; r[1] = y0; r[2] = x1; r[3] = y1;
 	s_ii_glitch_pending_depths[s_ii_glitch_pending] = depth;
+	float* wpad = &s_ii_glitch_pending_world[s_ii_glitch_pending * 6];
+	wpad[0] = wcx; wpad[1] = wcy; wpad[2] = wcz; wpad[3] = whw; wpad[4] = whh; wpad[5] = 0.f;
 	++s_ii_glitch_pending;
 }
 
@@ -279,6 +286,8 @@ static void bodycam_glitch_commit(float intensity)
 		g_ii_glitch_rects[i] = s_ii_glitch_pending_rects[i];
 	for (int i = 0; i < s_ii_glitch_pending; ++i)
 		g_ii_glitch_depths[i] = s_ii_glitch_pending_depths[i];
+	for (int i = 0; i < s_ii_glitch_pending * 6; ++i)
+		g_ii_glitch_world[i] = s_ii_glitch_pending_world[i];
 	g_ii_glitch_count = s_ii_glitch_pending;
 	g_ii_glitch_intensity = intensity;
 	g_ii_glitch_active = (s_ii_glitch_pending > 0 && intensity > 0.f) ? 1 : 0;
@@ -286,11 +295,12 @@ static void bodycam_glitch_commit(float intensity)
 		Msg("[ii] bodycam.glitch ACTIVE count=%d intensity=%.2f", g_ii_glitch_count, intensity);
 }
 
-// Back-compat single-rect wrappers (older mod builds call these). depth 0 = no test.
+// Back-compat single-rect wrappers (older mod builds call these). depth 0 = no
+// test, world 0 = no in-scope draw.
 static void bodycam_set_glitch_rect(float x0, float y0, float x1, float y1, float intensity)
 {
 	bodycam_glitch_begin();
-	bodycam_glitch_add(x0, y0, x1, y1, 0.f);
+	bodycam_glitch_add(x0, y0, x1, y1, 0.f, 0.f, 0.f, 0.f, 0.f, 0.f);
 	bodycam_glitch_commit(intensity);
 }
 
