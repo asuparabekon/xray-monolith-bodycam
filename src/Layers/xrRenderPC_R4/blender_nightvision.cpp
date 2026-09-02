@@ -6,6 +6,8 @@ CBlender_nightvision::CBlender_nightvision() { description.CLS = 0; }
 CBlender_fakescope::CBlender_fakescope() { description.CLS = 0; } //crookr
 CBlender_ii_glitch::CBlender_ii_glitch() { description.CLS = 0; } // Immersive Identification
 CBlender_ii_glitch::~CBlender_ii_glitch() {}
+CBlender_ii_svp_marker::CBlender_ii_svp_marker() { description.CLS = 0; } // Immersive Identification
+CBlender_ii_svp_marker::~CBlender_ii_svp_marker() {}
 CBlender_heatvision::CBlender_heatvision() { description.CLS = 0;  } //--DSR-- Heatvision
 
 CBlender_nightvision::~CBlender_nightvision()
@@ -125,6 +127,18 @@ void CBlender_ii_glitch::Compile(CBlender_Compile& C)
 	C.r_dx10Texture("s_position", r2_RT_P);   // view-space position/depth, to mask the viewmodel + foreground
 	C.r_dx10Sampler("smp_base");
 	C.r_dx10Sampler("smp_nofilter");
+	C.r_End();
+}
+
+// Immersive Identification: in-scope marker sprite. Solid dot/ring/spinner drawn
+// per marker over the scope image -- no scene sampling, alpha-blended so it
+// overlays translucently. r_Pass alpha-blend params: SRCALPHA / INVSRCALPHA.
+void CBlender_ii_svp_marker::Compile(CBlender_Compile& C)
+{
+	IBlender::Compile(C);
+
+	C.r_Pass("stub_screen_space", "ii_svp_marker", FALSE, FALSE, FALSE,
+		TRUE, D3DBLEND_SRCALPHA, D3DBLEND_INVSRCALPHA);
 	C.r_End();
 }
 

@@ -1019,6 +1019,17 @@ ENGINE_API int   g_ii_glitch_mode = 0;                  // 0 glitch, 1 pixelate,
 ENGINE_API int   g_ii_glitch_active = 0;                // count > 0 && intensity > 0
 ENGINE_API int   g_ii_glitch_debug = 0;                 // console r__ii_glitch_debug: log to game log
 
+// Immersive Identification: in-scope (SVP/PiP) identification markers. A LIST of
+// WORLD-space markers submitted by the Lua svp_ui_markers_begin/add/commit
+// bindings (console_registrator_script.cpp) and drawn inside the scope by
+// CRenderTarget::phase_svp_markers (xrRenderPC_R4), projected through the SVP
+// camera (Device.matrices[1]). 12 floats/marker: [0..2] world x,y,z; [3..6] fill
+// r,g,b,a; [7] radius (fraction of the SVP viewport); [8..10] ring r,g,b; [11]
+// scanning flag. II_SVP_MARKER_MAX must match the shader + binding cap.
+ENGINE_API float g_ii_svp_markers[16 * 12] = { 0.f };   // II_SVP_MARKER_MAX * 12
+ENGINE_API int   g_ii_svp_marker_count = 0;             // active marker count (0..II_SVP_MARKER_MAX)
+ENGINE_API int   g_ii_svp_marker_debug = 0;             // console r__ii_svp_marker_debug: log to game log
+
 extern float g_dispersion_base;
 extern float g_dispersion_factor;
 extern int g_ai_unlimited_ammo;
@@ -1109,6 +1120,7 @@ void CCC_Register()
 	// Immersive Identification dead-head glitch debug (0/1): logs set_glitch_rect
 	// + phase_glitch activity to the game log.
 	CMD4(CCC_Integer, "r__ii_glitch_debug", &g_ii_glitch_debug, 0, 1);
+	CMD4(CCC_Integer, "r__ii_svp_marker_debug", &g_ii_svp_marker_debug, 0, 1);
 
     CMD4(CCC_Integer, "r_wallmarks_static", &r_wallmarks_static, 0, 1);
     CMD4(CCC_Integer, "r_wallmarks_dynamic", &r_wallmarks_dynamic, 0, 1);

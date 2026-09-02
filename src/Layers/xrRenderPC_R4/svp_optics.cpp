@@ -759,6 +759,12 @@ void CRenderTarget::stamp_svp_corner_mask()
 void CRenderTarget::phase_svp_capture()
 {
 	PIX_EVENT(PHASE_SCOPE_SVP_CAPTURE);
+
+	// Immersive Identification: draw in-scope identification markers into the
+	// combined scope image (rt_Generic_0) BEFORE it's captured into rt_secondVP
+	// below, so they appear inside the lens. matrices[1] is the SVP camera here
+	// (the same source this function uses for its DLSS view/proj).
+	phase_svp_markers();
 	if (ps_r__svp_dlss != 0)
 	{
 		// pip DLSS seam: assemble SvpDlssInputs from the SVP target + cached consts, then EvalSVP_DLSS (stub for now)

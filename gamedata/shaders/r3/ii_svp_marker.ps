@@ -1,0 +1,63 @@
+// ============================================================
+//  Immersive Identification -- in-scope (SVP/PiP) marker sprite
+// ------------------------------------------------------------
+//  Drawn per identification marker over the combined scope image, inside the
+//  SVP render pass (CRenderTarget::phase_svp_markers), before the lens
+//  composite -- so identified targets are visible THROUGH the scope. One small
+//  alpha-blended quad per marker; this shader shades it into a faction-fill
+//  disc + relation-colour ring, or a rotating arc while still scanning. No
+//  engine text (infeasible in this pass) -- a compact dot/ring, the minimal
+//  in-scope UI. Runtime-loaded gamedata, tune freely without an exe rebuild.
+//
+//  Constants from phase_svp_markers:
+//    svpm_fill   rgb = faction fill colour, .a = master alpha (fade * dist)
+//    svpm_ring   rgb = relation ring colour, .w = scanning flag (>0.5 = scanning)
+//    svpm_params .x  = time (s), drives the scanning arc
+// ============================================================
+
+#include "common.h"
+
+float4 svpm_fill;
+float4 svpm_ring;
+float4 svpm_params;
+
+float4 main(p_screen I, float4 pos2d : SV_POSITION) : SV_Target
+{
+	float2 p = I.tc0 * 2.0 - 1.0;   // quad-local, -1..1, centre 0
+	float d = length(p);
+	if (d > 1.0)
+		discard;                    // clip the quad corners to a disc
+
+	float alpha    = saturate(svpm_fill.a);
+	float t        = svpm_params.x;
+	float scanning = svpm_ring.w;
+
+	float3 col;
+	float  a;
+
+	if (scanning > 0.5)
+	{
+		// Rotating arc spinner: a bright ring segment sweeping around, matching
+		// the main HUD's "scanning" spinner. Relation isn't shown yet.
+		float ang   = atan2(p.y, p.x) / 6.2831853 + 0.5;   // 0..1 around the ring
+		float sweep = frac(t * 0.9);                         // rotation phase
+		float rel   = frac(ang - sweep);
+		float arc   = smoothstep(0.0, 0.12, rel) * (1.0 - smoothstep(0.32, 0.46, rel));
+		float ring  = smoothstep(0.55, 0.68, d) * (1.0 - smoothstep(0.92, 1.0, d));
+		col = float3(0.95, 0.98, 1.0);
+		a   = ring * arc * alpha;
+	}
+	else
+	{
+		// Revealed: solid faction-colour disc with a relation-colour rim ring.
+		float fillA = 1.0 - smoothstep(0.5, 0.66, d);            // filled centre, soft edge
+		float ringA = smoothstep(0.7, 0.8, d) * (1.0 - smoothstep(0.94, 1.0, d));
+		// dark hairline just inside the ring for contrast against a bright scope image
+		float dark  = smoothstep(0.63, 0.7, d) * (1.0 - smoothstep(0.7, 0.76, d));
+		col = lerp(svpm_fill.rgb, svpm_ring.rgb, saturate(ringA));
+		col *= (1.0 - 0.6 * dark);
+		a   = max(max(fillA * 0.8, ringA), dark * 0.5) * alpha;
+	}
+
+	return float4(col, saturate(a));
+}

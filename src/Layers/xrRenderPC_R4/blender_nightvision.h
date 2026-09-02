@@ -42,6 +42,20 @@ public:
 	virtual ~CBlender_ii_glitch();
 };
 
+// Immersive Identification: in-scope identification marker sprite (ii_svp_marker.ps)
+class CBlender_ii_svp_marker : public IBlender
+{
+public:
+	virtual LPCSTR getComment() { return "ii_svp_marker"; }
+	virtual BOOL canBeDetailed() { return FALSE; }
+	virtual BOOL canBeLMAPped() { return FALSE; }
+
+	virtual void Compile(CBlender_Compile& C);
+
+	CBlender_ii_svp_marker();
+	virtual ~CBlender_ii_svp_marker();
+};
+
 //--DSR-- HeatVision_start
 class CBlender_heatvision : public IBlender
 {

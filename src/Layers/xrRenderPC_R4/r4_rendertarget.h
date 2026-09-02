@@ -75,6 +75,7 @@ public:
 	IBlender* b_nightvision;
 	IBlender* b_fakescope; //crookr
 	IBlender* b_ii_glitch; // Immersive Identification dead-head glitch
+	IBlender* b_ii_svp_marker; // Immersive Identification in-scope markers
 	IBlender* b_heatvision; //--DSR-- HeatVision
 	IBlender* b_lut;
 	IBlender* b_smaa;
@@ -307,6 +308,7 @@ private:
 	ref_shader s_nightvision;
 	ref_shader s_fakescope; //crookr
 	ref_shader s_ii_glitch; // Immersive Identification dead-head glitch
+	ref_shader s_ii_svp_marker; // Immersive Identification in-scope markers
 	ref_shader s_heatvision; //--DSR-- HeatVision
 	ref_shader s_smaa;
 
@@ -469,6 +471,7 @@ public:
 	bool svp_nvg_pass();
 	void phase_fakescope(); //crookr
 	void phase_glitch(); // Immersive Identification dead-head glitch
+	void phase_svp_markers(); // Immersive Identification in-scope markers
 	void phase_heatvision(); //--DSR-- HeatVision
 	void phase_3DSSReticle(); // Redotix99: for 3D Shader Based Scopes
 	void phase_svp_capture(); // pip copy the SVP combined color into rt_secondVP for the lens to sample

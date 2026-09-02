@@ -170,6 +170,105 @@ void CRenderTarget::phase_glitch()
 	HW.pContext->CopyResource(rt_Generic_0->pTexture->surface_get(), dest_rt->pTexture->surface_get());
 }
 
+// Immersive Identification: draw the in-scope identification markers. Called at
+// the tail of the SVP pass's phase_combine (gated svp_pass_now), so it draws over
+// the combined+tonemapped scope image, which is then captured and composited into
+// the lens by phase_3DSSReticle. Each marker is a world point submitted by the Lua
+// svp_ui_markers_* bindings; we project it through the SVP camera (Device.
+// matrices[1], the scope view/proj) to scope-viewport pixels and draw a small
+// alpha-blended sprite quad there (fill disc + relation ring + scanning arc,
+// ii_svp_marker.ps). No engine text -- a compact dot/ring, extensible later.
+extern ENGINE_API float g_ii_svp_markers[16 * 12];   // II_SVP_MARKER_MAX * 12
+extern ENGINE_API int   g_ii_svp_marker_count;
+extern ENGINE_API int   g_ii_svp_marker_debug;
+
+void CRenderTarget::phase_svp_markers()
+{
+	int count = g_ii_svp_marker_count;
+	if (count <= 0) return;
+	if (count > 16) count = 16;
+	if (!s_ii_svp_marker) return;
+
+	// Draw into rt_Generic_0 -- the RT that phase_svp_capture copies into
+	// rt_secondVP for the lens to sample (svp_optics.cpp). The scope-viewport
+	// dimensions are Width/Height (the SVP target size), not Device.dwWidth/Height.
+	float w = float(Width);
+	float h = float(Height);
+
+	// SVP camera view*proj: matrices[1] is the scope camera at capture time --
+	// same source phase_svp_capture uses for its DLSS view_proj (svp_optics.cpp).
+	Fmatrix vp;
+	vp.mul(Device.matrices[1].mProject, Device.matrices[1].mView);
+
+	u_setrt(rt_Generic_0, nullptr, nullptr, nullptr);
+	RCache.set_CullMode(CULL_NONE);
+	RCache.set_Stencil(FALSE);
+	RCache.set_Element(s_ii_svp_marker->E[0]);
+
+	int drawn = 0;
+	float d_Z = EPS_S, d_W = 1.f;
+	u32 White = color_rgba(255, 255, 255, 255);
+
+	// One-shot diagnostic: dump the first marker's projection so we can see WHY a
+	// marker is rejected (behind-camera w<=0, or NDC far off-scope) vs. drawn.
+	static u32 s_diag = 0;
+	const bool diag = g_ii_svp_marker_debug && (Device.dwFrame - s_diag >= 30);
+	if (diag) s_diag = Device.dwFrame;
+
+	for (int i = 0; i < count; ++i)
+	{
+		const float* m = &g_ii_svp_markers[i * 12];
+		Fvector4 clip;
+		vp.transform(clip, Fvector4().set(m[0], m[1], m[2], 1.f));
+		float inv = (fabsf(clip.w) > EPS_S) ? (1.f / clip.w) : 0.f;
+		float ndx = clip.x * inv, ndy = clip.y * inv;
+		if (diag && i == 0)
+			Msg("[ii] svpmark world=(%.2f %.2f %.2f) clip=(%.3f %.3f w=%.3f) ndc=(%.3f %.3f) proj11/22=(%.3f %.3f) svpcam=(%.2f %.2f %.2f)",
+				m[0], m[1], m[2], clip.x, clip.y, clip.w, ndx, ndy,
+				Device.matrices[1].mProject._11, Device.matrices[1].mProject._22,
+				Device.m_SecondViewport.svp_cam_pos.x, Device.m_SecondViewport.svp_cam_pos.y, Device.m_SecondViewport.svp_cam_pos.z);
+		if (clip.w <= EPS_S) continue;                 // behind the scope camera
+		// NOTE: off-scope markers are intentionally still drawn (not culled) while
+		// Phase 1 is being validated, so a mis-projected marker is visible for
+		// diagnosis rather than silently dropped. Tighten to |ndc|<=1 once placement
+		// is confirmed in-scope.
+		if (ndx < -3.0f || ndx > 3.0f || ndy < -3.0f || ndy > 3.0f) continue;
+
+		float cx = (ndx * 0.5f + 0.5f) * w;
+		float cy = (0.5f - ndy * 0.5f) * h;            // NDC y-up -> screen y-down
+		float half = m[7] * h;                          // radius as a fraction of the viewport
+		if (half < 1.f) half = 1.f;
+
+		// Per-marker constants (AFTER set_Element -- the constant-table binding rule).
+		RCache.set_c("svpm_fill", m[3], m[4], m[5], m[6]);        // fill rgb + alpha
+		RCache.set_c("svpm_ring", m[8], m[9], m[10], m[11]);       // ring rgb + scanning flag
+		RCache.set_c("svpm_params", Device.fTimeGlobal, 0.f, 0.f, 0.f);
+
+		u32 Offset = 0;
+		FVF::TL* pv = (FVF::TL*)RCache.Vertex.Lock(4, g_combine->vb_stride, Offset);
+		pv->set(cx - half, cy + half, d_Z, d_W, White, 0.f, 1.f); pv++;
+		pv->set(cx - half, cy - half, d_Z, d_W, White, 0.f, 0.f); pv++;
+		pv->set(cx + half, cy + half, d_Z, d_W, White, 1.f, 1.f); pv++;
+		pv->set(cx + half, cy - half, d_Z, d_W, White, 1.f, 0.f); pv++;
+		RCache.Vertex.Unlock(4, g_combine->vb_stride);
+
+		RCache.set_Geometry(g_combine);
+		RCache.Render(D3DPT_TRIANGLELIST, Offset, 0, 4, 0, 2);
+		++drawn;
+	}
+
+	if (g_ii_svp_marker_debug)
+	{
+		static u32 s_last = 0;
+		if (Device.dwFrame - s_last >= 60)
+		{
+			s_last = Device.dwFrame;
+			Msg("[ii] phase_svp_markers count=%d drawn=%d shader=%s", count, drawn,
+				s_ii_svp_marker ? "loaded" : "NULL");
+		}
+	}
+}
+
 void CRenderTarget::phase_combine()
 {
 	PIX_EVENT(phase_combine);
@@ -1033,6 +1132,9 @@ void CRenderTarget::phase_combine()
 	}
 	tm_end(svp_stats::SEC_C_COMBINE2);
 	RCache.set_Stencil(FALSE);
+
+	// (Immersive Identification in-scope markers are drawn in phase_svp_capture,
+	// where the final scope image sits in rt_Generic_0 before the lens capture.)
 
 	if (RImplementation.o.dx11_hdr10) {
 		// TODO: we should be able to avoid a copy if both are enabled
