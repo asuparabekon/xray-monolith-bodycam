@@ -1005,6 +1005,20 @@ ENGINE_API float ps_r2_sun_shafts_min = 0.f;
 ENGINE_API float ps_r2_sun_shafts_value = 1.f;
 ENGINE_API float hit_modifier = 1.0f;
 
+// Immersive Identification: dead-body glitch post-process. A LIST of head rects
+// (normalised [0,1] screen space, top-left origin; x0,y0,x1,y1 per rect, one per
+// visible corpse) written by bodycam.glitch_begin/add/commit (xrGame) and read
+// by CRenderTarget::phase_glitch (xrRenderPC_R4). Same xrEngine ENGINE_API
+// cross-module channel as the ps_r2_* render tunables above. II_GLITCH_MAX must
+// match the glitch_rects[] size in ii_glitch.ps and the cap in bodycam_script.cpp.
+ENGINE_API float g_ii_glitch_rects[16 * 4] = { 0.f };   // II_GLITCH_MAX * 4
+ENGINE_API float g_ii_glitch_depths[16] = { 0.f };      // per-rect view-space depth (m); 0 = no depth test
+ENGINE_API int   g_ii_glitch_count = 0;                 // active rect count (0..II_GLITCH_MAX)
+ENGINE_API float g_ii_glitch_intensity = 0.f;           // master 0..1
+ENGINE_API int   g_ii_glitch_mode = 0;                  // 0 glitch, 1 pixelate, 2 black (ii_glitch.ps)
+ENGINE_API int   g_ii_glitch_active = 0;                // count > 0 && intensity > 0
+ENGINE_API int   g_ii_glitch_debug = 0;                 // console r__ii_glitch_debug: log to game log
+
 extern float g_dispersion_base;
 extern float g_dispersion_factor;
 extern int g_ai_unlimited_ammo;
@@ -1091,6 +1105,10 @@ void CCC_Register()
 
 	// Render device states
 	CMD4(CCC_Integer, "r__supersample", &ps_r__Supersample, 1, 4);
+
+	// Immersive Identification dead-head glitch debug (0/1): logs set_glitch_rect
+	// + phase_glitch activity to the game log.
+	CMD4(CCC_Integer, "r__ii_glitch_debug", &g_ii_glitch_debug, 0, 1);
 
     CMD4(CCC_Integer, "r_wallmarks_static", &r_wallmarks_static, 0, 1);
     CMD4(CCC_Integer, "r_wallmarks_dynamic", &r_wallmarks_dynamic, 0, 1);

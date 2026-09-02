@@ -4,6 +4,8 @@
 
 CBlender_nightvision::CBlender_nightvision() { description.CLS = 0; }
 CBlender_fakescope::CBlender_fakescope() { description.CLS = 0; } //crookr
+CBlender_ii_glitch::CBlender_ii_glitch() { description.CLS = 0; } // Immersive Identification
+CBlender_ii_glitch::~CBlender_ii_glitch() {}
 CBlender_heatvision::CBlender_heatvision() { description.CLS = 0;  } //--DSR-- Heatvision
 
 CBlender_nightvision::~CBlender_nightvision()
@@ -110,6 +112,22 @@ void CBlender_fakescope::Compile(CBlender_Compile& C) //crookr
 }
 
 //--DSR-- HeatVision_start
+// Immersive Identification: dead-head glitch stamp. Binds the scene colour RT
+// (r2_RT_generic0) as s_image and selects ii_glitch.ps over the fullscreen quad
+// vertex shader; region restriction is done engine-side via a scissor rect in
+// phase_glitch(). Mirrors CBlender_fakescope above, minus the extra scope inputs.
+void CBlender_ii_glitch::Compile(CBlender_Compile& C)
+{
+	IBlender::Compile(C);
+
+	C.r_Pass("stub_screen_space", "ii_glitch", FALSE, FALSE, FALSE);
+	C.r_dx10Texture("s_image", r2_RT_generic0);
+	C.r_dx10Texture("s_position", r2_RT_P);   // view-space position/depth, to mask the viewmodel + foreground
+	C.r_dx10Sampler("smp_base");
+	C.r_dx10Sampler("smp_nofilter");
+	C.r_End();
+}
+
 void CBlender_heatvision::Compile(CBlender_Compile& C) 
 {
 	IBlender::Compile(C);

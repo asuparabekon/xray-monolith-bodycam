@@ -89,6 +89,87 @@ void CRenderTarget::DoAsyncScreenshot()
 
 float hclip(float v, float dim) { return 2.f * v / dim - 1.f; }
 
+// Immersive Identification: dead-body glitch post-process. Distorts the scene
+// colour inside a LIST of screen rectangles (one head box per visible corpse)
+// supplied from Lua via bodycam.glitch_begin/add/commit. Mirrors phase_fakescope's
+// fullscreen-quad + copy-back idiom EXACTLY: draw fullscreen and let the shader
+// pass the scene through untouched outside every box. (A scissor would only write
+// the box regions of dest_rt, but CopyResource copies the whole RT back into the
+// scene -- so the area outside the boxes has to be a correct scene copy, which
+// means a fullscreen draw, not a scissored one. The region restriction lives in
+// ii_glitch.ps, which loops the rects.) Rects arrive normalised [0,1] (top-left
+// origin) and are passed straight to the shader as box UVs.
+extern ENGINE_API float g_ii_glitch_rects[16 * 4];   // II_GLITCH_MAX * 4
+extern ENGINE_API float g_ii_glitch_depths[16];      // per-rect view-space depth (m); 0 = no test
+extern ENGINE_API int   g_ii_glitch_count;
+extern ENGINE_API float g_ii_glitch_intensity;
+extern ENGINE_API int   g_ii_glitch_mode;
+extern ENGINE_API int   g_ii_glitch_active;
+extern ENGINE_API int   g_ii_glitch_debug;
+
+void CRenderTarget::phase_glitch()
+{
+	int count = g_ii_glitch_count;
+	if (count > 16) count = 16;
+
+	if (g_ii_glitch_debug)
+	{
+		static u32 s_last_frame = 0;
+		if (Device.dwFrame - s_last_frame >= 60)
+		{
+			s_last_frame = Device.dwFrame;
+			Msg("[ii] phase_glitch RUNNING count=%d intensity=%.2f shader=%s",
+				count, g_ii_glitch_intensity, s_ii_glitch ? "loaded" : "NULL");
+		}
+	}
+
+	if (count <= 0 || g_ii_glitch_intensity <= 0.f)
+		return;
+
+	u32 Offset = 0;
+	u32 C = color_rgba(0, 0, 0, 255);
+	float d_Z = EPS_S;
+	float d_W = 1.0f;
+	float w = float(Device.dwWidth);
+	float h = float(Device.dwHeight);
+
+	ref_rt& dest_rt = RImplementation.o.dx10_msaa ? rt_Generic : rt_Color;
+	u_setrt(dest_rt, nullptr, nullptr, nullptr);
+
+	RCache.set_CullMode(CULL_NONE);
+	RCache.set_Stencil(FALSE);
+
+	// Fullscreen quad in pixel space, UV 0..1.
+	FVF::TL* pv = (FVF::TL*)RCache.Vertex.Lock(4, g_combine->vb_stride, Offset);
+	pv->set(0, float(h), d_Z, d_W, C, 0.0f, 1.0f); pv++;
+	pv->set(0, 0, d_Z, d_W, C, 0.0f, 0.0f); pv++;
+	pv->set(float(w), float(h), d_Z, d_W, C, 1.0f, 1.0f); pv++;
+	pv->set(float(w), 0, d_Z, d_W, C, 1.0f, 0.0f); pv++;
+	RCache.Vertex.Unlock(4, g_combine->vb_stride);
+
+	RCache.set_Element(s_ii_glitch->E[0]);
+	RCache.set_Geometry(g_combine);
+
+	// Constants MUST be set AFTER set_Element -- set_Element binds the shader and
+	// its constant table, so set_c() before it writes into the previous pass's
+	// (stale) table and silently no-ops (the "pass runs, shader loaded, inputs
+	// valid, but nothing shows" bug). Order matches r4_rendertarget_accum_point.
+	RCache.set_c("glitch_params", g_ii_glitch_intensity, Device.fTimeGlobal, 10.0f, 0.006f);
+	RCache.set_c("glitch_count", float(count), float(g_ii_glitch_mode), 0.0f, 0.0f);
+	for (int i = 0; i < count; ++i)
+	{
+		const float* r = &g_ii_glitch_rects[i * 4];
+		RCache.set_ca("glitch_rects", i, r[0], r[1], r[2], r[3]);   // one head box per corpse
+		RCache.set_ca("glitch_depths", i, g_ii_glitch_depths[i], 0.0f, 0.0f, 0.0f);   // its view-space depth
+	}
+
+	RCache.Render(D3DPT_TRIANGLELIST, Offset, 0, 4, 0, 2);
+
+	// Copy the result back into the scene-colour RT so later passes see it,
+	// same as phase_fakescope.
+	HW.pContext->CopyResource(rt_Generic_0->pTexture->surface_get(), dest_rt->pTexture->surface_get());
+}
+
 void CRenderTarget::phase_combine()
 {
 	PIX_EVENT(phase_combine);
@@ -790,6 +871,18 @@ void CRenderTarget::phase_combine()
 		tm_beg(svp_stats::SEC_C_TAA);
 		phase_ssfx_taa();
 		tm_end(svp_stats::SEC_C_TAA);
+	}
+
+	// Immersive Identification dead-head glitch. Placed AFTER SMAA + TAA (not
+	// with the nightvision/fakescope FX above) on purpose: TAA's temporal
+	// history rectification clamps out a sudden per-frame glitch as an artifact
+	// (a stable overlay like fakescope survives, a churning glitch does not).
+	// Here rt_Generic_0 already holds the final post-AA scene that the combine_2
+	// pass below samples (s_image = r2_RT_generic0), so the distortion survives
+	// straight to the screen. Skipped during the SVP pass like the FX above.
+	if (g_ii_glitch_active && !svp_pass_now)
+	{
+		phase_glitch();
 	}
 
 	// pip clear the scope capture maps at the main-pass tail after every consumer (lens composite,
