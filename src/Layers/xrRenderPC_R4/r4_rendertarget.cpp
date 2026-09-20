@@ -475,8 +475,8 @@ CRenderTarget::CRenderTarget(LPCSTR name, u32 width, u32 height)
 	b_gasmask_dudv = xr_new<CBlender_gasmask_dudv>();
 	b_nightvision = xr_new<CBlender_nightvision>();
 	b_fakescope = xr_new<CBlender_fakescope>(); //crookr
-	b_ii_glitch = xr_new<CBlender_ii_glitch>(); // Immersive Identification
-	b_ii_svp_marker = xr_new<CBlender_ii_svp_marker>(); // Immersive Identification
+	b_bodycam_redaction = xr_new<CBlender_bodycam_redaction>(); // Bodycam
+	b_bodycam_svp_marker = xr_new<CBlender_bodycam_svp_marker>(); // Bodycam
 	b_heatvision = xr_new<CBlender_heatvision>(); //--DSR-- HeatVision
 	b_lut = xr_new<CBlender_lut>();
 	b_smaa = xr_new<CBlender_smaa>();
@@ -800,8 +800,8 @@ CRenderTarget::CRenderTarget(LPCSTR name, u32 width, u32 height)
 	s_nightvision.create(b_nightvision, "r2\\nightvision");
 
 	s_fakescope.create(b_fakescope, "r2\\fakescope"); //crookr
-	s_ii_glitch.create(b_ii_glitch, "r3\\ii_glitch"); // Immersive Identification
-	s_ii_svp_marker.create(b_ii_svp_marker, "r3\\ii_svp_marker"); // Immersive Identification
+	s_bodycam_redaction.create(b_bodycam_redaction, "r3\\bodycam_redaction"); // Bodycam (redaction shader)
+	s_bodycam_svp_marker.create(b_bodycam_svp_marker, "r3\\bodycam_svp_marker"); // Bodycam
 
 	s_heatvision.create(b_heatvision, "r2\\heatvision"); //--DSR-- HeatVision
 	s_lut.create(b_lut, "r2\\lut");
@@ -1509,8 +1509,8 @@ CRenderTarget::~CRenderTarget()
 	xr_delete(b_gasmask_dudv);
 	xr_delete(b_nightvision);
 	xr_delete(b_fakescope); //crookr
-	xr_delete(b_ii_glitch); // Immersive Identification
-	xr_delete(b_ii_svp_marker); // Immersive Identification
+	xr_delete(b_bodycam_redaction); // Bodycam
+	xr_delete(b_bodycam_svp_marker); // Bodycam
 	xr_delete(b_heatvision); //--DSR-- HeatVision
 	xr_delete(b_lut);
 	xr_delete(b_smaa);

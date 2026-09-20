@@ -528,6 +528,7 @@ public:
 	void SetTipText(LPCSTR tip_text);
 	void SetTipTextDefault();
 	void SetNonscriptUsable(bool nonscript_usable);
+	void SetBodycamRedact(bool b); // Bodycam redaction-stencil flag
 	///////////////////////////////////////////////////////////////////////////////////////////
 	void set_fastcall(const ::luabind::functor<bool>& functor, const ::luabind::object& object);
 	void set_const_force(const Fvector& dir, float value, u32 time_interval);

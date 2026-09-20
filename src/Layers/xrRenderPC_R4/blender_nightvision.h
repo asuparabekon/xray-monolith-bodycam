@@ -28,32 +28,32 @@ public:
 	virtual ~CBlender_fakescope();
 };
 
-// Immersive Identification: dead-head glitch stamp (ii_glitch.ps)
-class CBlender_ii_glitch : public IBlender
+// Bodycam: redaction stamp (bodycam_redaction.ps)
+class CBlender_bodycam_redaction : public IBlender
 {
 public:
-	virtual LPCSTR getComment() { return "ii_glitch"; }
+	virtual LPCSTR getComment() { return "bodycam_redaction"; }
 	virtual BOOL canBeDetailed() { return FALSE; }
 	virtual BOOL canBeLMAPped() { return FALSE; }
 
 	virtual void Compile(CBlender_Compile& C);
 
-	CBlender_ii_glitch();
-	virtual ~CBlender_ii_glitch();
+	CBlender_bodycam_redaction();
+	virtual ~CBlender_bodycam_redaction();
 };
 
-// Immersive Identification: in-scope identification marker sprite (ii_svp_marker.ps)
-class CBlender_ii_svp_marker : public IBlender
+// Bodycam: in-scope identification marker sprite (bodycam_svp_marker.ps)
+class CBlender_bodycam_svp_marker : public IBlender
 {
 public:
-	virtual LPCSTR getComment() { return "ii_svp_marker"; }
+	virtual LPCSTR getComment() { return "bodycam_svp_marker"; }
 	virtual BOOL canBeDetailed() { return FALSE; }
 	virtual BOOL canBeLMAPped() { return FALSE; }
 
 	virtual void Compile(CBlender_Compile& C);
 
-	CBlender_ii_svp_marker();
-	virtual ~CBlender_ii_svp_marker();
+	CBlender_bodycam_svp_marker();
+	virtual ~CBlender_bodycam_svp_marker();
 };
 
 //--DSR-- HeatVision_start

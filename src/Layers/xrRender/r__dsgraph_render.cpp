@@ -310,11 +310,30 @@ void CDSGraphManager::r_dsgraph_render_graph(RenderQueueArray& queues, u32 _prio
             }
 
 			auto& item = packet.item;
+			bool ii_tag = false; // Bodycam: redaction stencil tag active for this item
 			if (!static_geometry)
 			{
 				RCache.set_xform_world(*item.pMatrix);
 				RImplementation.apply_object(item.pObject);
 				RImplementation.apply_lmaterial();
+
+				// Tag this corpse's pixels with the redaction stencil bit (0x40 added
+				// to the plain 0x01 scene bit). MAIN opaque scene pass on the main
+				// target only; occluded pixels fail the depth test and aren't tagged
+				// (free occlusion). Set AFTER apply so shader state doesn't clobber it.
+				// R4-only: this shared file compiles for R1..R4, but TargetMain (and
+				// the whole bodycam redaction) only exist in R4. PHASE_NORMAL lives in
+				// IRender_interface, so qualify it.
+#if RENDER == R_R4
+				extern ENGINE_API int g_bodycam_redact_stencil;
+				ii_tag = g_bodycam_redact_stencil
+					&& RImplementation.phase == IRender_interface::PHASE_NORMAL
+					&& RImplementation.Target == RImplementation.TargetMain
+					&& item.pObject && item.pObject->renderable_bodycam_redact();
+				if (ii_tag)
+					RCache.set_Stencil(TRUE, D3DCMP_ALWAYS, 0x41, 0xff, 0x7f,
+					                   D3DSTENCILOP_KEEP, D3DSTENCILOP_REPLACE, D3DSTENCILOP_KEEP);
+#endif
 			}
 
 			float LOD = calcLOD(svp_ssa(item.ssa), item.pVisual->vis.sphere.R);
@@ -322,6 +341,10 @@ void CDSGraphManager::r_dsgraph_render_graph(RenderQueueArray& queues, u32 _prio
 			RCache.LOD.set_LOD(LOD);
 #endif
 			item.pVisual->Render(LOD);
+
+			if (ii_tag) // restore the plain scene stencil for the next item
+				RCache.set_Stencil(TRUE, D3DCMP_ALWAYS, 0x01, 0xff, 0x7f,
+				                   D3DSTENCILOP_KEEP, D3DSTENCILOP_REPLACE, D3DSTENCILOP_KEEP);
 		}
 
 		if (_clear)

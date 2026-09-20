@@ -1005,35 +1005,38 @@ ENGINE_API float ps_r2_sun_shafts_min = 0.f;
 ENGINE_API float ps_r2_sun_shafts_value = 1.f;
 ENGINE_API float hit_modifier = 1.0f;
 
-// Immersive Identification: dead-body glitch post-process. A LIST of head rects
+// Bodycam: dead-body redaction post-process. A LIST of head rects
 // (normalised [0,1] screen space, top-left origin; x0,y0,x1,y1 per rect, one per
-// visible corpse) written by bodycam.glitch_begin/add/commit (xrGame) and read
-// by CRenderTarget::phase_glitch (xrRenderPC_R4). Same xrEngine ENGINE_API
-// cross-module channel as the ps_r2_* render tunables above. II_GLITCH_MAX must
-// match the glitch_rects[] size in ii_glitch.ps and the cap in bodycam_script.cpp.
-ENGINE_API float g_ii_glitch_rects[16 * 4] = { 0.f };   // II_GLITCH_MAX * 4 (main-camera normalised rects)
-ENGINE_API float g_ii_glitch_depths[16] = { 0.f };      // per-rect view-space depth (m); 0 = no depth test
+// visible corpse) written by bodycam.redaction_begin/add/commit (xrGame) and read
+// by CRenderTarget::phase_redaction (xrRenderPC_R4). Same xrEngine ENGINE_API
+// cross-module channel as the ps_r2_* render tunables above. BODYCAM_REDACTION_MAX must
+// match the redaction_rects[] size in bodycam_redaction.ps and the cap in bodycam_script.cpp.
+ENGINE_API float g_bodycam_redaction_rects[16 * 4] = { 0.f };   // BODYCAM_REDACTION_MAX * 4 (main-camera normalised rects)
+ENGINE_API float g_bodycam_redaction_depths[16] = { 0.f };      // per-rect view-space depth (m); 0 = no depth test
 // Per-box WORLD data for the in-scope (SVP) redaction: the engine reprojects
 // these through the scope camera (main-camera normalised rects above can't be
 // reprojected). 6 floats/box: [0..2] world centre, [3] world half-width, [4]
-// world half-height (metres), [5] reserved. Written by bodycam.glitch_add.
-ENGINE_API float g_ii_glitch_world[16 * 6] = { 0.f };   // II_GLITCH_MAX * 6
-ENGINE_API int   g_ii_glitch_count = 0;                 // active rect count (0..II_GLITCH_MAX)
-ENGINE_API float g_ii_glitch_intensity = 0.f;           // master 0..1
-ENGINE_API int   g_ii_glitch_mode = 0;                  // 0 glitch, 1 pixelate, 2 black (ii_glitch.ps)
-ENGINE_API int   g_ii_glitch_active = 0;                // count > 0 && intensity > 0
-ENGINE_API int   g_ii_glitch_debug = 0;                 // console r__ii_glitch_debug: log to game log
+// world half-height (metres), [5] reserved. Written by bodycam.redaction_add.
+ENGINE_API float g_bodycam_redaction_world[16 * 6] = { 0.f };   // BODYCAM_REDACTION_MAX * 6
+ENGINE_API int   g_bodycam_redaction_count = 0;                 // active rect count (0..BODYCAM_REDACTION_MAX)
+ENGINE_API float g_bodycam_redaction_intensity = 0.f;           // master 0..1
+ENGINE_API int   g_bodycam_redaction_mode = 0;                  // 0 redaction, 1 pixelate, 2 black (bodycam_redaction.ps)
+ENGINE_API int   g_bodycam_redaction_active = 0;                // count > 0 && intensity > 0
+ENGINE_API int   g_bodycam_redaction_debug = 0;                 // console r__bodycam_redaction_debug: log to game log
 
-// Immersive Identification: in-scope (SVP/PiP) identification markers. A LIST of
+// Bodycam: in-scope (SVP/PiP) identification markers. A LIST of
 // WORLD-space markers submitted by the Lua svp_ui_markers_begin/add/commit
 // bindings (console_registrator_script.cpp) and drawn inside the scope by
 // CRenderTarget::phase_svp_markers (xrRenderPC_R4), projected through the SVP
 // camera (Device.matrices[1]). 12 floats/marker: [0..2] world x,y,z; [3..6] fill
 // r,g,b,a; [7] radius (fraction of the SVP viewport); [8..10] ring r,g,b; [11]
-// scanning flag. II_SVP_MARKER_MAX must match the shader + binding cap.
-ENGINE_API float g_ii_svp_markers[16 * 12] = { 0.f };   // II_SVP_MARKER_MAX * 12
-ENGINE_API int   g_ii_svp_marker_count = 0;             // active marker count (0..II_SVP_MARKER_MAX)
-ENGINE_API int   g_ii_svp_marker_debug = 0;             // console r__ii_svp_marker_debug: log to game log
+// scanning flag. BODYCAM_SVP_MARKER_MAX must match the shader + binding cap.
+ENGINE_API float g_bodycam_svp_markers[16 * 12] = { 0.f };   // BODYCAM_SVP_MARKER_MAX * 12
+ENGINE_API int   g_bodycam_svp_marker_count = 0;             // active marker count (0..BODYCAM_SVP_MARKER_MAX)
+ENGINE_API int   g_bodycam_svp_marker_debug = 0;             // console r__bodycam_svp_marker_debug: log to game log
+ENGINE_API int   g_bodycam_redact_stencil = 1;               // r__bodycam_redact_stencil: tag corpse pixels for silhouette redaction
+ENGINE_API int   g_bodycam_redact_corpse_mode = -1;          // corpse silhouette redaction: -1 off, 0 pixelate, 1 black (set from Lua)
+ENGINE_API float g_bodycam_redact_corpse_intensity = 0.f;    // corpse silhouette redaction strength 0..1
 
 extern float g_dispersion_base;
 extern float g_dispersion_factor;
@@ -1122,10 +1125,11 @@ void CCC_Register()
 	// Render device states
 	CMD4(CCC_Integer, "r__supersample", &ps_r__Supersample, 1, 4);
 
-	// Immersive Identification dead-head glitch debug (0/1): logs set_glitch_rect
-	// + phase_glitch activity to the game log.
-	CMD4(CCC_Integer, "r__ii_glitch_debug", &g_ii_glitch_debug, 0, 1);
-	CMD4(CCC_Integer, "r__ii_svp_marker_debug", &g_ii_svp_marker_debug, 0, 1);
+	// Bodycam dead-head redaction debug (0/1): logs set_redaction_rect
+	// + phase_redaction activity to the game log.
+	CMD4(CCC_Integer, "r__bodycam_redaction_debug", &g_bodycam_redaction_debug, 0, 1);
+	CMD4(CCC_Integer, "r__bodycam_svp_marker_debug", &g_bodycam_svp_marker_debug, 0, 1);
+	CMD4(CCC_Integer, "r__bodycam_redact_stencil", &g_bodycam_redact_stencil, 0, 1);
 
     CMD4(CCC_Integer, "r_wallmarks_static", &r_wallmarks_static, 0, 1);
     CMD4(CCC_Integer, "r_wallmarks_dynamic", &r_wallmarks_dynamic, 0, 1);

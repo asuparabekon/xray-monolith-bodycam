@@ -130,20 +130,34 @@ float svp_detected_obj_mm()
 	return d.mm > 0.f ? d.mm : -1.f;
 }
 
-// Immersive Identification: in-scope identification markers. Lua builds a list of
+// Current PiP scope magnification (1.0 = 1x, up to ~8x), -1 when not looking
+// through a magnifying PiP scope. svp_mag is the engine's own "zoom scaled
+// trigger" value (svp_state.h), set from g_pip_scope_magnification.
+float svp_scope_magnification()
+{
+	// svp_mag is set while the SVP optics pass runs but is NOT reset on unscope, so it
+	// holds the last scope's value at hipfire. Gate on the scope being ACTIVE so we
+	// report -1 (not scoped) once the PiP viewport is down -- fixes the "stuck mag" bug.
+	if (!Device.m_SecondViewport.IsSVPActive())
+		return -1.f;
+	float m = Device.m_SecondViewport.svp_mag;
+	return m > 0.01f ? m : -1.f;
+}
+
+// Bodycam: in-scope identification markers. Lua builds a list of
 // WORLD-space markers each frame; CRenderTarget::phase_svp_markers (xrRenderPC_R4)
 // projects them through the SVP camera and draws them inside the scope. Same
-// begin/add/commit staging as the bodycam glitch batch so the render thread only
+// begin/add/commit staging as the bodycam redaction batch so the render thread only
 // ever sees a complete list. Inert (no draw) when the list is empty. 12 floats
-// per marker -- see g_ii_svp_markers in xr_ioc_cmd.cpp.
-#define II_SVP_MARKER_MAX 16
+// per marker -- see g_bodycam_svp_markers in xr_ioc_cmd.cpp.
+#define BODYCAM_SVP_MARKER_MAX 16
 
-extern ENGINE_API float g_ii_svp_markers[II_SVP_MARKER_MAX * 12];
-extern ENGINE_API int   g_ii_svp_marker_count;
-extern ENGINE_API int   g_ii_svp_marker_debug;
+extern ENGINE_API float g_bodycam_svp_markers[BODYCAM_SVP_MARKER_MAX * 12];
+extern ENGINE_API int   g_bodycam_svp_marker_count;
+extern ENGINE_API int   g_bodycam_svp_marker_debug;
 
 static int   s_svp_marker_pending = 0;
-static float s_svp_marker_pending_buf[II_SVP_MARKER_MAX * 12];
+static float s_svp_marker_pending_buf[BODYCAM_SVP_MARKER_MAX * 12];
 
 static void svp_ui_markers_begin()
 {
@@ -156,7 +170,7 @@ static void svp_ui_markers_add(float wx, float wy, float wz,
 	float fr, float fg, float fb, float a, float radius,
 	float rr, float rg, float rb, bool scanning)
 {
-	if (s_svp_marker_pending >= II_SVP_MARKER_MAX) return;
+	if (s_svp_marker_pending >= BODYCAM_SVP_MARKER_MAX) return;
 	if (a <= 0.f || radius <= 0.f) return;   // nothing to draw
 	float* m = &s_svp_marker_pending_buf[s_svp_marker_pending * 12];
 	m[0] = wx; m[1] = wy; m[2] = wz;
@@ -170,10 +184,10 @@ static void svp_ui_markers_add(float wx, float wy, float wz,
 static void svp_ui_markers_commit()
 {
 	for (int i = 0; i < s_svp_marker_pending * 12; ++i)
-		g_ii_svp_markers[i] = s_svp_marker_pending_buf[i];
-	g_ii_svp_marker_count = s_svp_marker_pending;
-	if (g_ii_svp_marker_debug && s_svp_marker_pending > 0)
-		Msg("[ii] svp_ui_markers commit count=%d", s_svp_marker_pending);
+		g_bodycam_svp_markers[i] = s_svp_marker_pending_buf[i];
+	g_bodycam_svp_marker_count = s_svp_marker_pending;
+	if (g_bodycam_svp_marker_debug && s_svp_marker_pending > 0)
+		Msg("[bodycam] svp_ui_markers commit count=%d", s_svp_marker_pending);
 }
 
 #pragma optimize("s",on)
@@ -188,6 +202,7 @@ void console_registrator::script_register(lua_State* L)
 		def("svp_ui_markers_commit", &svp_ui_markers_commit),
 		def("svp_detected_offset", &svp_detected_offset),
 		def("svp_detected_obj_mm", &svp_detected_obj_mm),
+		def("svp_scope_magnification", &svp_scope_magnification),
 		def("svp_optic_api_version", &svp_optic_api_version),
 		def("svp_optic_api_info", &svp_optic_api_info),
 		def("svp_optic_api_has_capability", &svp_optic_api_has_capability),

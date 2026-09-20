@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="windows-1251"?>
+<string_table>
+	<string id="ui_mcm_menu_bcredact"><text>Скрытие лиц</text></string>
+	<string id="ui_mcm_bcr_title"><text>Скрытие лиц</text></string>
+
+	<string id="ui_mcm_bcr_enabled"><text>Скрывать лица</text></string>
+	<string id="ui_mcm_bcr_enabled_desc"><text>Накладывать искажение только на ЛИЦО каждого гуманоидного персонажа в пределах дальности — ЖИВОГО или мёртвого. Не зависит от идентификации — не нужно целиться в персонажа или идентифицировать его. Рамка располагается перед головой, над лицом. Требуется специальная сборка игрового движка с поддержкой нагрудной камеры; без неё функция не работает.</text></string>
+
+	<string id="ui_mcm_bcr_style"><text>Стиль скрытия</text></string>
+	<string id="ui_mcm_bcr_style_desc"><text>Способ скрытия лица: пикселизированная мозаика или сплошная чёрная рамка.</text></string>
+	<string id="bcredact_style_lst_pixelate"><text>Пикселизация</text></string>
+	<string id="bcredact_style_lst_black"><text>Чёрная рамка</text></string>
+
+	<string id="ui_mcm_bcr_padding"><text>Отступ скрытия лица</text></string>
+	<string id="ui_mcm_bcr_padding_desc"><text>Дополнительное пространство вокруг рамки лица в виде доли её размера (0 = вплотную к лицу, 0,15 = на 15% больше с каждой стороны).</text></string>
+
+	<string id="ui_mcm_bcr_range"><text>Дальность скрытия (м)</text></string>
+	<string id="ui_mcm_bcr_range_desc"><text>Дальность действия скрытия лиц. Не зависит от максимальной дальности идентификации — скрытие пассивно и может действовать дальше, чем дальность идентификации. Удалённое лицо перестаёт отображаться, когда его размер на экране становится примерно меньше одного пикселя.</text></string>
+
+	<string id="ui_mcm_bcr_strength"><text>Сила скрытия</text></string>
+	<string id="ui_mcm_bcr_strength_desc"><text>Общая интенсивность эффекта скрытия.</text></string>
+
+	<string id="ui_mcm_bcr_in_scope"><text>Скрытие лиц в прицеле</text></string>
+	<string id="ui_mcm_bcr_in_scope_desc"><text>Также отображать эффект скрытия лиц мёртвых тел внутри линзы прицела с отдельным изображением. Не зависит от переключателя маркеров; скрытие в основном изображении не изменяется.</text></string>
+
+	<string id="ui_mcm_bcr_hide_main_ads"><text>Скрывать в основном виде при прицеливании</text></string>
+	<string id="ui_mcm_bcr_hide_main_ads_desc"><text>При прицеливании отключать цензуру в основном виде ради чистой картинки прицела. Цензура в прицеле, если включена, продолжает отрисовываться.</text></string>
+
+	<string id="ui_mcm_bcr_debug"><text>Отладочный лог</text></string>
+	<string id="ui_mcm_bcr_debug_desc"><text>Выводить строку в консоль при каждом включении и выключении цензуры, с числом отправленных областей лиц.</text></string>
+</string_table>

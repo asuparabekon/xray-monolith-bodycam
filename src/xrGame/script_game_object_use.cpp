@@ -47,6 +47,14 @@ void CScriptGameObject::SetNonscriptUsable(bool nonscript_usable)
 	else l_tpUseableScriptObject->set_nonscript_usable(nonscript_usable);
 }
 
+// Bodycam: flag/unflag this object for redaction-stencil tagging.
+void CScriptGameObject::SetBodycamRedact(bool b)
+{
+	CGameObject* o = smart_cast<CGameObject*>(&object());
+	if (o)
+		o->set_bodycam_redact(b);
+}
+
 
 Fvector CScriptGameObject::GetCurrentDirection()
 {

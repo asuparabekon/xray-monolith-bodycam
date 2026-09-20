@@ -1,0 +1,426 @@
+-- ======================================================================
+--  Bodycam: face redaction
+-- ======================================================================
+--  Censors the FACE of every humanoid in range with an engine post-process
+--  (pixelated mosaic or a solid black box). Fully passive: no aiming, no
+--  identification, no keypress.
+--
+--  The engine half ships in this same repo -- the bodycam.redaction_* bindings
+--  (src/xrGame/bodycam_script.cpp), CRenderTarget::phase_redaction and
+--  phase_svp_redaction (xrRenderPC_R4), and gamedata/shaders/r3/bodycam_redaction.ps.
+--  This script is only the driver: it picks the faces, projects a box onto each
+--  one, and submits the whole list as one atomic frame. On a stock exe the
+--  bodycam module isn't there and everything here no-ops.
+--
+--  Settings live in bodycam_face_redaction_mcm.script.
+-- ======================================================================
+
+-- Must match BODYCAM_REDACTION_MAX in bodycam_script.cpp, xr_ioc_cmd.cpp and
+-- bodycam_redaction.ps.
+local REDACTION_MAX = 16
+
+-- world2ui works in the engine's fixed 1024x768 virtual space whatever the real
+-- resolution is, so dividing a box in that space by 1024/768 gives the [0,1]
+-- screen UVs the shader wants.
+local UI_W, UI_H = 1024, 768
+
+DEFAULTS = {
+	enabled = false,
+	style = 1, -- index into STYLE_LIST
+	padding = 0.15, -- margin around the face box, as a fraction of its size
+	range = 100, -- metres; passive, so it reaches further than any aim-identify would
+	strength = 1.0,
+	in_scope = true, -- also redact inside a PiP scope's lens
+	hide_main_ads = false, -- while ADS, drop the main-view redaction (clean sight picture)
+	debug = false,
+}
+
+-- Index order IS the engine mode passed to the shader (index - 1): 0 pixelate,
+-- 1 black. Read by the MCM script to build the dropdown.
+STYLE_LIST = {
+	{ label = "pixelate" },
+	{ label = "black" },
+}
+
+-- MCM storage prefix; the menu is a single top-level leaf page.
+local MCM_PATH = "bcredact/"
+
+local C = {}
+
+-- Reused scratch so the per-frame path allocates nothing.
+local _v = { head = vector(), face_c = vector(), box_c = vector(), scratch = vector() }
+local _frame = { dev = nil }
+local _ads = { active = false }
+local _boxes = {} -- reused box list
+local _ids = {} -- cached humanoid ids in range
+local _last_sweep = 0
+local _dbg_active = false
+
+-- Membership cadence: iterate_nearest + a class check, no raycasts, so a face that
+-- walks into range starts redacting promptly. The per-frame feed re-projects this
+-- cached set every frame regardless, so boxes still track movement smoothly.
+local SWEEP_MS = 150
+
+local function safe_call(fn, ...)
+	if not fn then
+		return nil
+	end
+	local ok, v = pcall(fn, ...)
+	if ok then
+		return v
+	end
+end
+
+-- The custom bodycam engine module, or nil on a stock exe.
+local function binding()
+	local bc = rawget(_G, "bodycam")
+	if bc and bc.redaction_begin and bc.redaction_add and bc.redaction_commit then
+		return bc
+	end
+	return nil
+end
+
+local function dbg(msg)
+	if C.debug then
+		printf("[bodycam-redact] %s", msg)
+	end
+end
+
+-- --------------------------------------------------------------------------
+-- Geometry
+-- --------------------------------------------------------------------------
+
+local function bone_pos(obj, name)
+	if not obj.bone_id then
+		return nil
+	end
+	local id = safe_call(obj.bone_id, obj, name)
+	if not id or id == 65535 then
+		return nil
+	end
+	return safe_call(obj.bone_position, obj, id)
+end
+
+-- bip01_head sits at the SKULL BASE (top of the neck), not the face centre, so a
+-- box centred straight on it rides low over the neck. Lift it to mid-head.
+-- nil for monsters and any rig without a bip01_head -- they have no face to redact.
+local HEAD_LIFT = 0.09
+local function head_center(obj)
+	local p = bone_pos(obj, "bip01_head")
+	if not p then
+		return nil
+	end
+	-- A not-yet-loaded or detached rig can report a bone metres away from the object
+	-- origin; treat that as "no head" rather than projecting a box off into the level.
+	local base = safe_call(obj.position, obj)
+	if not base or p:distance_to_sqr(base) >= 9 then
+		return nil
+	end
+	local c = _v.head:set(p)
+	c.y = c.y + HEAD_LIFT
+	return c
+end
+
+local function project_world(pos)
+	local w2u = (game and game.world2ui) or (level and level.world2ui)
+	if not w2u then
+		return nil
+	end
+	local ui = w2u(_v.scratch:set(pos), false, false)
+	if not ui or ui.x < -9000 then
+		return nil
+	end
+	return ui.x, ui.y
+end
+
+-- View-space depth (metres along the view axis) of a world point. Matches the
+-- engine's s_position.z, so the shader can reject anything nearer than the face --
+-- the viewmodel, the player's hands, a foreground wall. 0 means "no depth test".
+local function view_depth(pos)
+	local dev = _frame.dev
+	local cp = dev and dev.cam_pos
+	local cd = dev and dev.cam_dir
+	if not cp or not cd then
+		return 0
+	end
+	local d = (pos.x - cp.x) * cd.x + (pos.y - cp.y) * cd.y + (pos.z - cp.z) * cd.z
+	return d > 0 and d or 0
+end
+
+-- Screen bbox (1024x768 virtual space) of a box with metric half-extents centred
+-- at `center`, as cx,cy,hw,hh,depth.
+--
+-- All FOUR corners are projected and bounded rather than offsetting along one axis
+-- and reading a single screen delta: the single-axis shortcut is only correct at
+-- screen centre, because under perspective an off-centre world offset projects
+-- DIAGONALLY and with non-uniform scale, so near the screen edges it mis-sizes and
+-- mis-centres the box. nil if the camera basis or any corner isn't available.
+local function screen_box(center, hw_m, hh_m)
+	local dev = _frame.dev
+	local cr = dev and dev.cam_right
+	local ct = dev and dev.cam_top
+	if not cr or not ct then
+		return nil
+	end
+	local minx, miny, maxx, maxy
+	for sx = -1, 1, 2 do
+		for sy = -1, 1, 2 do
+			local px, py = project_world(
+				_v.box_c:set(
+					center.x + cr.x * hw_m * sx + ct.x * hh_m * sy,
+					center.y + cr.y * hw_m * sx + ct.y * hh_m * sy,
+					center.z + cr.z * hw_m * sx + ct.z * hh_m * sy
+				)
+			)
+			if not px then
+				return nil
+			end
+			if not minx then
+				minx, miny, maxx, maxy = px, py, px, py
+			else
+				if px < minx then
+					minx = px
+				end
+				if px > maxx then
+					maxx = px
+				end
+				if py < miny then
+					miny = py
+				end
+				if py > maxy then
+					maxy = py
+				end
+			end
+		end
+	end
+	return (minx + maxx) * 0.5, (miny + maxy) * 0.5, (maxx - minx) * 0.5, (maxy - miny) * 0.5, view_depth(center)
+end
+
+-- The face box: tighter than the whole head and nudged FORWARD along the entity's
+-- facing so it sits over the front of the skull rather than centred on it.
+-- Returns the screen bbox plus the box's WORLD centre and world half-extents --
+-- the engine reprojects the latter through the scope camera for the in-scope pass.
+local FACE_HALF_W = 0.12
+local FACE_HALF_H = 0.15
+local FACE_FWD = 0.08
+local function face_box_for(obj)
+	local hc = head_center(obj)
+	if not hc then
+		return nil
+	end
+	local dir = safe_call(obj.direction, obj)
+	if dir then
+		hc = _v.face_c:set(hc.x + dir.x * FACE_FWD, hc.y + dir.y * FACE_FWD, hc.z + dir.z * FACE_FWD)
+	end
+	local cx, cy, hw, hh, depth = screen_box(hc, FACE_HALF_W, FACE_HALF_H)
+	if not cx then
+		return nil
+	end
+	-- NEGATING the depth flags this as a FACE box, which makes the shader switch to a
+	-- tight front-biased depth band so only the face front and sides are covered, not
+	-- the back of the head. The engine passes the value through untouched. The world
+	-- data stays positive -- the in-scope pass reprojects it normally.
+	return cx, cy, hw, hh, -(depth or 0), hc.x, hc.y, hc.z, FACE_HALF_W, FACE_HALF_H
+end
+
+-- --------------------------------------------------------------------------
+-- Membership
+-- --------------------------------------------------------------------------
+
+-- Deliberately NO line-of-sight check: the shader is depth-aware, so a face behind
+-- a wall simply produces no redacted pixels. Gating membership on db.actor:see was
+-- both redundant and the cause of a pop-in delay, since see() is smoothed with a
+-- grace window -- a face you turn towards took a beat to start redacting. Off-screen
+-- faces cost nothing, their box just doesn't project.
+local function update_membership(tg)
+	if tg - _last_sweep < SWEEP_MS then
+		return
+	end
+	_last_sweep = tg
+	if not db.actor or not level.iterate_nearest then
+		_ids = {}
+		return
+	end
+	local actor_id = db.actor:id()
+	local apos = safe_call(db.actor.position, db.actor)
+	if not apos then
+		return
+	end
+	local ids, n = {}, 0
+	pcall(level.iterate_nearest, apos, C.range or 100, function(obj)
+		-- Humanoids only, alive or dead -- they're the ones with a face.
+		if obj and obj:id() ~= actor_id and n < REDACTION_MAX and safe_call(IsStalker, obj) then
+			n = n + 1
+			ids[n] = obj:id()
+		end
+		return false -- keep scanning the whole set within range
+	end)
+	_ids = ids
+end
+
+-- --------------------------------------------------------------------------
+-- Submission
+-- --------------------------------------------------------------------------
+
+local function add_box(boxes, n, obj)
+	local cx, cy, hw, hh, depth, wcx, wcy, wcz, whw, whh = face_box_for(obj)
+	if not cx then
+		return n
+	end
+	-- Loosen the covered region off the model by a fraction of its size, so the
+	-- margin stays proportional at any distance. Applies to the screen rect and the
+	-- world half-extents alike.
+	local rp = 1 + (C.padding or 0)
+	n = n + 1
+	local b = boxes[n] or {}
+	b.cx, b.cy, b.hw, b.hh, b.depth = cx, cy, hw * rp, hh * rp, depth or 0
+	b.wcx, b.wcy, b.wcz = wcx or 0, wcy or 0, wcz or 0
+	b.whw, b.whh = (whw or 0) * rp, (whh or 0) * rp
+	boxes[n] = b
+	return n
+end
+
+-- Submits the whole list as one atomic frame. An empty list (or zero intensity)
+-- clears the effect, so this is safe to call unconditionally every frame.
+--
+-- Each box carries both a main-camera screen rect and its world centre/extents:
+-- the main pass uses the rect, the SVP pass reprojects the world box through the
+-- scope camera (a main-camera rect can't be reused there).
+local function submit(boxes, n, main_off)
+	local bc = binding()
+	if not bc then
+		return
+	end
+	-- Guarded: an older exe without this binding just stays on mode 0 (pixelate).
+	if bc.redaction_set_mode then
+		pcall(bc.redaction_set_mode, (C.style or 1) - 1)
+	end
+	local in_scope = C.in_scope ~= false
+	pcall(bc.redaction_begin)
+	for i = 1, n do
+		local b = boxes[i]
+		local x0, y0, x1, y1
+		if main_off then
+			-- Outside [0,1] the main shader finds no pixels, while the engine still
+			-- reprojects the world box for the scope pass.
+			x0, y0, x1, y1 = 2.0, 2.0, 2.001, 2.001
+		else
+			x0, y0 = (b.cx - b.hw) / UI_W, (b.cy - b.hh) / UI_H
+			x1, y1 = (b.cx + b.hw) / UI_W, (b.cy + b.hh) / UI_H
+		end
+		-- Zeroing the world extents makes the engine's SVP pass skip this box; the
+		-- main pass is unaffected either way.
+		pcall(
+			bc.redaction_add,
+			x0,
+			y0,
+			x1,
+			y1,
+			b.depth or 0,
+			in_scope and (b.wcx or 0) or 0,
+			in_scope and (b.wcy or 0) or 0,
+			in_scope and (b.wcz or 0) or 0,
+			in_scope and (b.whw or 0) or 0,
+			in_scope and (b.whh or 0) or 0
+		)
+	end
+	pcall(bc.redaction_commit, (n > 0) and (C.strength or 1.0) or 0.0)
+end
+
+local function clear()
+	local bc = binding()
+	if bc then
+		pcall(bc.redaction_begin)
+		pcall(bc.redaction_commit, 0.0)
+	end
+end
+
+local function feed()
+	local bc = binding()
+	if not bc then
+		return -- stock exe: nothing to feed
+	end
+	local boxes, n = _boxes, 0
+	for i = 1, #_ids do
+		if n >= REDACTION_MAX then
+			break
+		end
+		local obj = level.object_by_id(_ids[i])
+		if obj then
+			n = add_box(boxes, n, obj)
+		end
+	end
+
+	submit(boxes, n, C.hide_main_ads and _ads.active)
+
+	if C.debug then
+		local on = n > 0
+		if on ~= _dbg_active then
+			_dbg_active = on
+			dbg(on and string.format("ON: %d face box(es) strength=%.2f", n, C.strength or 1.0) or "OFF")
+		end
+	end
+end
+
+-- --------------------------------------------------------------------------
+-- Lifecycle
+-- --------------------------------------------------------------------------
+
+local function read_config()
+	for key, default in pairs(DEFAULTS) do
+		local v = default
+		if ui_mcm and ui_mcm.get then
+			local got = ui_mcm.get(MCM_PATH .. key)
+			if got ~= nil then
+				v = got
+			end
+		end
+		-- MCM can marshal a checkbox back as a NUMBER (0/1) rather than a boolean, and
+		-- 0 is truthy in Lua -- so a disabled toggle would read as enabled.
+		if type(default) == "boolean" and type(v) == "number" then
+			v = v ~= 0
+		end
+		C[key] = v
+	end
+end
+
+local function teardown()
+	_ids = {}
+	_dbg_active = false
+	clear()
+end
+
+local function actor_on_update()
+	if not db.actor then
+		return
+	end
+	if not C.enabled then
+		-- One clear on the disable edge, then nothing until it's switched back on.
+		if #_ids > 0 or _dbg_active then
+			teardown()
+		end
+		return
+	end
+	_frame.dev = device and device()
+	local tg = time_global()
+	update_membership(tg)
+	feed()
+	_frame.dev = nil
+end
+
+function on_option_change()
+	read_config()
+end
+
+function on_game_start()
+	read_config()
+	RegisterScriptCallback("actor_on_update", actor_on_update)
+	RegisterScriptCallback("on_option_change", on_option_change)
+	RegisterScriptCallback("actor_on_before_death", teardown)
+	RegisterScriptCallback("actor_on_weapon_zoom_in", function()
+		_ads.active = true
+	end)
+	RegisterScriptCallback("actor_on_weapon_zoom_out", function()
+		_ads.active = false
+	end)
+end

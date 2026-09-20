@@ -1,0 +1,62 @@
+-- ======================================================================
+--  Bodycam: face redaction -- MCM menu
+-- ======================================================================
+--  MCM only discovers on_mcm_load in scripts whose filename ends in
+--  "mcm.script", so the menu lives here. Defaults and the style list come from
+--  bodycam_face_redaction.script so there is a single source of truth.
+--
+--  A single top-level LEAF page (sh = true + gr on the top node), so every
+--  option stores under "bcredact/<id>".
+-- ======================================================================
+
+function on_mcm_load()
+	local d = (bodycam_face_redaction and bodycam_face_redaction.DEFAULTS) or {}
+
+	local style_content = {}
+	if bodycam_face_redaction and bodycam_face_redaction.STYLE_LIST then
+		for idx, e in ipairs(bodycam_face_redaction.STYLE_LIST) do
+			style_content[#style_content + 1] = { idx, e.label }
+		end
+	end
+
+	-- MCM resolves an option's CAPTION from "ui_mcm_" .. hint and its hover TOOLTIP
+	-- from "ui_mcm_" .. hint .. "_desc", so `hint` is the BARE base id -- suffixing it
+	-- with "_desc" shows the long description AS the caption and leaves no tooltip.
+	local function opt_check(id)
+		return { id = id, type = "check", val = 1, def = d[id], hint = "bcr_" .. id }
+	end
+	local function opt_track(id, min, max, step, prec)
+		return {
+			id = id,
+			type = "track",
+			val = 2,
+			min = min,
+			max = max,
+			step = step,
+			prec = prec,
+			def = d[id],
+			hint = "bcr_" .. id,
+		}
+	end
+	local function opt_list(id, content)
+		return { id = id, type = "list", val = 2, def = d[id], content = content, hint = "bcr_" .. id }
+	end
+
+	return {
+		id = "bcredact",
+		sh = true,
+		gr = {
+			{ id = "title", type = "slide", text = "ui_mcm_bcr_title", size = { 512, 50 }, spacing = 20 },
+			opt_check("enabled"),
+			opt_list("style", style_content),
+			opt_track("padding", 0, 1, 0.05, 2),
+			opt_track("range", 10, 300, 10),
+			opt_track("strength", 0.1, 1, 0.05, 2),
+			{ type = "line" },
+			opt_check("in_scope"),
+			opt_check("hide_main_ads"),
+			{ type = "line" },
+			opt_check("debug"),
+		},
+	}
+end

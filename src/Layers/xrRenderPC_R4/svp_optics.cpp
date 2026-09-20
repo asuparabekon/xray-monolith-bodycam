@@ -760,11 +760,11 @@ void CRenderTarget::phase_svp_capture()
 {
 	PIX_EVENT(PHASE_SCOPE_SVP_CAPTURE);
 
-	// Immersive Identification: redaction (under) then markers (over), drawn into
+	// Bodycam: redaction (under) then markers (over), drawn into
 	// the combined scope image (rt_Generic_0) BEFORE it's captured into rt_secondVP
 	// below, so both appear inside the lens. matrices[1] is the SVP camera here
 	// (the same source this function uses for its DLSS view/proj).
-	phase_svp_glitch();
+	phase_svp_redaction();
 	phase_svp_markers();
 	if (ps_r__svp_dlss != 0)
 	{

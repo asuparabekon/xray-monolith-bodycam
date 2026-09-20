@@ -390,6 +390,7 @@ class_<CScriptGameObject> script_register_game_object2(class_<CScriptGameObject>
 		.def("set_tip_text", &CScriptGameObject::SetTipText)
 		.def("set_tip_text_default", &CScriptGameObject::SetTipTextDefault)
 		.def("set_nonscript_usable", &CScriptGameObject::SetNonscriptUsable)
+		.def("set_bodycam_redact", &CScriptGameObject::SetBodycamRedact)
 
 		// Script Zone
 		.def("active_zone_contact", SAFE_WRAP(&CScriptGameObject::active_zone_contact))

@@ -26,6 +26,11 @@ public:
 	virtual BOOL renderable_ShadowGenerate() { return FALSE; };
 	virtual BOOL renderable_ShadowReceive() { return FALSE; };
 
+	// Bodycam: when true, this object's main-pass g-buffer pixels
+	// are tagged with the redaction stencil bit so the redaction post-effect hugs
+	// its exact silhouette. Default false = unaffected. Set on the mod's corpse set.
+	virtual bool renderable_bodycam_redact() const { return false; }
+
 	virtual float GetHotness() { return 0.0; }			//--DSR-- HeatVision
 	virtual float GetTransparency() { return 0.0; }		//--DSR-- HeatVision
 	virtual float GetGlowing() { return 0.0; }			//--DSR-- SilencerOverheat

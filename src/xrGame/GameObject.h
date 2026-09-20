@@ -205,6 +205,15 @@ public:
 
 	virtual void renderable_Render(IDSGraphManager* DM);
 	virtual void RenderAttachments(IDSGraphManager* DM);
+
+	// Bodycam: redaction stencil flag (set from Lua via
+	// game_object:set_bodycam_redact). Tagged in the g-buffer so the redaction effect
+	// hugs this object's silhouette. See src/xrEngine/IRenderable.h.
+private:
+	bool m_bodycam_redact = false;
+public:
+	void set_bodycam_redact(bool b) { m_bodycam_redact = b; }
+	virtual bool renderable_bodycam_redact() const override { return m_bodycam_redact; }
 	virtual void OnEvent(NET_Packet& P, u16 type);
 
 	virtual void Hit(SHit* pHDS)

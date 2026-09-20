@@ -1,0 +1,154 @@
+// ============================================================
+//  Bodycam -- redaction post-effect (bodycam_redaction.ps)
+// ------------------------------------------------------------
+//  Screen-space post pass that alters the real scene colour inside a LIST of
+//  rectangles (each a visible dead NPC's head box), for the Bodycam style.
+//  Runs over a FULLSCREEN quad (phase_redaction copies the whole target back into
+//  the scene RT, so no scissor): samples the scene via s_image + smp_base,
+//  tests each pixel against every active head box, and applies the selected
+//  effect inside the first one it hits; the scene passes through untouched
+//  outside all boxes (the region restriction lives HERE, not in a scissor).
+//
+//  Two effect variants, chosen by redaction_count.y (set from C++):
+//    0  pixelate  -- blocky mosaic "censor" of the region (default)
+//    1  black     -- solid black-out box
+//
+//  Shaders load at RUNTIME, so this file can be swapped/re-tuned without an exe
+//  rebuild. Effect strength is hardcoded here. From C++ we take:
+//    redaction_params.x  intensity     0..1 master strength
+//    redaction_count.x   active rects  0..BODYCAM_REDACTION_MAX (16)
+//    redaction_count.y   mode          0 pixelate / 1 black
+//    redaction_rects[i]  (u0,v0,u1,v1) head box i, scene UV space
+// ============================================================
+
+#include "common.h"
+
+#define BODYCAM_REDACTION_MAX 16   // keep in sync with xr_ioc_cmd.cpp / bodycam_script.cpp
+// Depth mask: the effect only draws where the scene surface is within `band` metres
+// of the box centre depth (rectDepth), on BOTH sides -- so a foreground occluder
+// (viewmodel, wall) in front is cut, AND the background/ground behind the corpse is
+// cut too, making the effect hug the body's depth slab instead of a flat rect over
+// everything. `band` is SIZE-ADAPTIVE: it scales with the box's on-screen size x
+// depth (an estimate of the object's own depth extent), so a big/close/angled body
+// -- whose near end (feet/backpack) is a metre-plus in front of its centre -- gets
+// a band wide enough to cover its whole depth, while a distant head stays tight.
+// REDACTION_BAND_MIN floors it (thin objects / precision slack); REDACTION_BAND_MAX caps
+// it so the foreground cut never fully vanishes. All runtime-loaded, tune freely.
+//   band = clamp(max(span.x, span.y) * rectDepth * K, MIN, MAX)
+#define REDACTION_BAND_MIN 0.45   // metres: floor on the half-band (thin/distant targets)
+#define REDACTION_BAND_MAX 2.5    // metres: cap so a huge close box still cuts some foreground
+#define REDACTION_BAND_K   0.8    // half-band per (screen-fraction * metre) -- object depth-extent proxy
+// FACE boxes are flagged by a NEGATIVE depth value (Lua's face_box_for negates it;
+// the engine passes it through untouched, so no rebuild). For those we use a tight,
+// FRONT-BIASED band centred on the face so only the face + sides are redacted, not
+// the back of the head (which sits ~0.2 m behind the face centre). FACE_FRONT
+// covers the nose protrusion toward the camera; FACE_BACK covers into the head just
+// far enough for the cheeks/sides, then stops before the back of the skull.
+#define FACE_FRONT 0.16   // metres redacted in front of the face centre
+#define FACE_BACK  0.11   // metres redacted behind it (into the head); beyond = back, cut
+
+float4 redaction_params;
+float4 redaction_count;
+float4 redaction_rects[BODYCAM_REDACTION_MAX];
+float4 redaction_depths[BODYCAM_REDACTION_MAX];   // .x = box view-space depth (m); 0 = no depth test
+// s_position (view-space position g-buffer, .z = linear depth) and screen_res
+// come from common.h -- used to skip pixels nearer than the corpse (the
+// viewmodel / foreground geometry), so the effect never draws over the gun/hands.
+
+// ---- mode 0: pixelate (mosaic censor of the head region) ----
+// uv = the current (body) pixel; rectDepth/band = the box's depth slab. Unlike the
+// per-pixel depth mask in main() (which decides IF the effect draws), pixelate
+// RESAMPLES the scene at each cell centre -- so a cell whose centre lands off the
+// body's depth slab (foreground gun/wall, or background ground) would pull that
+// colour into a mosaic block over the body. Guard that: if the cell centre is off
+// the slab, sample the current body pixel instead, so nothing smears into the
+// censor.
+float3 bodycam_pixelate(float2 uv, float2 rect_xy, float2 span, float2 luv, float rectDepth, float band, bool is_corpse)
+{
+	float2 suv;
+	if (is_corpse)
+	{
+		// CORPSE (stencil) path: no box to size cells from, so use a fixed screen-px
+		// mosaic. The stencil already masks to the silhouette, and rectDepth is 0
+		// (no cell depth-check needed).
+		float cs = max(4.0, screen_res.y * 0.012);        // ~13 px blocks at 1080p
+		suv = (floor(uv * screen_res.xy / cs) + 0.5) * cs / screen_res.xy;
+		return s_image.Sample(smp_base, clamp(suv, 0.0, 1.0)).rgb;
+	}
+	const float CELLS = 10.0;   // blocks across the box, each axis
+	float2 cell = (floor(luv * CELLS) + 0.5) / CELLS;      // cell centre, 0..1 box space
+	suv = clamp(rect_xy + cell * span, 0.0, 1.0);          // -> scene UV
+	if (rectDepth > 0.0)
+	{
+		float cellZ = s_position.Load(int3(suv * screen_res.xy, 0), 0).z;
+		if (cellZ > 0.001 && abs(cellZ - rectDepth) > band)
+			suv = uv;   // cell landed off the body's depth slab -> keep the real body pixel
+	}
+	return s_image.Sample(smp_base, suv).rgb;
+}
+
+float4 main(p_screen I, float4 pos2d : SV_POSITION) : SV_Target
+{
+	float2 uv = I.tc0;
+	float intensity = saturate(redaction_params.x);
+	int   n         = (int)(redaction_count.x + 0.5);
+	int   mode      = (int)(redaction_count.y + 0.5);
+	bool  is_corpse = redaction_count.z > 0.5; // CORPSE (stencil-masked) draw vs FACE (rect) draw
+	if (n > BODYCAM_REDACTION_MAX) n = BODYCAM_REDACTION_MAX;
+
+	float3 scene = s_image.Sample(smp_base, uv).rgb;
+	if (intensity <= 0.0)
+		return float4(scene, 1.0);
+
+	[loop]
+	for (int i = 0; i < n; ++i)
+	{
+		float4 rect = redaction_rects[i];
+		float2 span = max(rect.zw - rect.xy, float2(1e-4, 1e-4));
+		float2 luv  = (uv - rect.xy) / span;
+		if (luv.x >= 0.0 && luv.x <= 1.0 && luv.y >= 0.0 && luv.y <= 1.0)
+		{
+			// Depth mask: draw only where the scene surface at this pixel is within
+			// `band` metres of the box-centre depth (both sides) -- so a foreground
+			// occluder (viewmodel/wall) in front is cut AND the ground/background
+			// behind the corpse is cut, hugging the body's depth slab. band is
+			// size-adaptive (see the header) so it covers a close/angled body's full
+			// depth extent. `continue` (not bail) lets an overlapping box still win.
+			// Negative depth = a FACE box (front-only, tight band). Positive = a
+			// corpse/body box (size-adaptive two-sided slab). 0 = no depth test.
+			float rd = redaction_depths[i].x;
+			float rectDepth = abs(rd);
+			bool  isFace = rd < 0.0;
+			float band = isFace
+				? max(FACE_FRONT, FACE_BACK)
+				: clamp(max(span.x, span.y) * rectDepth * REDACTION_BAND_K, REDACTION_BAND_MIN, REDACTION_BAND_MAX);
+			if (rd != 0.0)
+			{
+				float sceneZ = s_position.Load(int3(uv * screen_res.xy, 0), 0).z;
+				if (sceneZ > 0.001)
+				{
+					bool off = isFace
+						? (sceneZ < rectDepth - FACE_FRONT || sceneZ > rectDepth + FACE_BACK) // only the face front + sides
+						: (abs(sceneZ - rectDepth) > band);                                   // body depth slab
+					if (off)
+						continue;
+				}
+			}
+
+			// Feather the box edges so it isn't a hard rectangle. The CORPSE path has
+			// no box (the stencil is the hard silhouette mask), so no feather there.
+			float edge = is_corpse ? 1.0
+				: smoothstep(0.0, 0.08, luv.x) * smoothstep(0.0, 0.08, 1.0 - luv.x)
+				* smoothstep(0.0, 0.08, luv.y) * smoothstep(0.0, 0.08, 1.0 - luv.y);
+
+			float3 effect;
+			float  blend;
+			if (mode == 1)   { effect = float3(0.0, 0.0, 0.0);              blend = edge * intensity; } // black box
+			else             { effect = bodycam_pixelate(uv, rect.xy, span, luv, rectDepth, band, is_corpse); blend = edge * intensity; } // pixelate (default)
+
+			return float4(lerp(scene, effect, blend), 1.0);
+		}
+	}
+
+	return float4(scene, 1.0);
+}

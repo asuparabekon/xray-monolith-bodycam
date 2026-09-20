@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="windows-1251"?>
+<string_table>
+	<string id="ui_mcm_menu_bcredact"><text>Face Redaction</text></string>
+	<string id="ui_mcm_bcr_title"><text>Face Redaction</text></string>
+
+	<string id="ui_mcm_bcr_enabled"><text>Redact faces</text></string>
+	<string id="ui_mcm_bcr_enabled_desc"><text>Draw a distortion over just the FACE of every humanoid in range, alive or dead. Fully passive: no need to aim at or identify anyone. The box sits over the front of the head. Requires the custom bodycam engine build; inert without it.</text></string>
+
+	<string id="ui_mcm_bcr_style"><text>Redaction style</text></string>
+	<string id="ui_mcm_bcr_style_desc"><text>How a face is redacted: a pixelated (mosaic) censor, or a solid black box.</text></string>
+	<string id="bcredact_style_lst_pixelate"><text>Pixelated</text></string>
+	<string id="bcredact_style_lst_black"><text>Black Box</text></string>
+
+	<string id="ui_mcm_bcr_padding"><text>Padding</text></string>
+	<string id="ui_mcm_bcr_padding_desc"><text>Extra margin around the face box, as a fraction of its size (0 = tight on the face, 0.15 = 15% larger each side).</text></string>
+
+	<string id="ui_mcm_bcr_range"><text>Range (m)</text></string>
+	<string id="ui_mcm_bcr_range_desc"><text>How far face redaction reaches. A distant face still stops once its box is under about a pixel on screen.</text></string>
+
+	<string id="ui_mcm_bcr_strength"><text>Strength</text></string>
+	<string id="ui_mcm_bcr_strength_desc"><text>Master intensity of the redaction effect.</text></string>
+
+	<string id="ui_mcm_bcr_in_scope"><text>Redaction in scope</text></string>
+	<string id="ui_mcm_bcr_in_scope_desc"><text>Also draw the redaction inside a PiP scope's lens. The main view is unaffected either way.</text></string>
+
+	<string id="ui_mcm_bcr_hide_main_ads"><text>Hide in main view while aiming</text></string>
+	<string id="ui_mcm_bcr_hide_main_ads_desc"><text>While aiming down sight, suppress the main-view redaction for a clean sight picture. In-scope redaction (if enabled) still draws.</text></string>
+
+	<string id="ui_mcm_bcr_debug"><text>Debug log</text></string>
+	<string id="ui_mcm_bcr_debug_desc"><text>Log a line to the console whenever redaction switches on or off, with the number of face boxes being submitted.</text></string>
+</string_table>

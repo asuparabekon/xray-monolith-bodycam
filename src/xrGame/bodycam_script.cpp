@@ -5,8 +5,6 @@
 #include "level.h"
 #include "ai_space.h"
 #include "script_engine.h"
-#include "player_hud.h"
-#include "HudItem.h"
 #include "../xrEngine/CameraBase.h"
 
 using namespace luabind;
@@ -170,10 +168,10 @@ static object bodycam_get_state()
 // camera (device().cam_dir, used by world2ui and the screen-centre pick) is a
 // swayed OVERRIDE of this, so only the first-eye camera reflects where the
 // player is actually AIMING -- HudItem::Ray() itself remaps the pick through
-// cam_FirstEye() for the same reason. The barrel ray (main-hand weapon's
-// per-frame pick, PP.defs) is the swaying weapon-model direction, NOT the aim;
-// it is exposed only for diagnostics. Pure reads, no side effects. valid=false
-// when there is no controlled actor.
+// cam_FirstEye() for the same reason. This is the ONLY aim source that reflects
+// free aim for a non-firearm held item (knife / binoculars), whose standard
+// ETraceTarget.Weapon trace is the cosmetic HUD-model transform, not the aim.
+// Pure reads, no side effects. valid=false when there is no controlled actor.
 static object bodycam_get_fire_ray()
 {
 	lua_State* L = ai().script_engine().lua();
@@ -198,66 +196,46 @@ static object bodycam_get_fire_ray()
 	t["dir_x"] = eye_dir.x;
 	t["dir_y"] = eye_dir.y;
 	t["dir_z"] = eye_dir.z;
-
-	// Diagnostic: cosmetic weapon barrel pick (swaying model direction).
-	if (g_player_hud)
-	{
-		attachable_hud_item* item = g_player_hud->attached_item(0);
-		if (!item)
-			item = g_player_hud->attached_item(1);
-		if (item && item->m_parent_hud_item)
-		{
-			const SPickParam& pp = item->m_parent_hud_item->GetPick();
-			Fvector bar_dir = pp.defs.dir;
-			bar_dir.normalize_safe();
-			t["bar_pos_x"] = pp.defs.start.x;
-			t["bar_pos_y"] = pp.defs.start.y;
-			t["bar_pos_z"] = pp.defs.start.z;
-			t["bar_dir_x"] = bar_dir.x;
-			t["bar_dir_y"] = bar_dir.y;
-			t["bar_dir_z"] = bar_dir.z;
-		}
-	}
 	return t;
 }
 
-// Immersive Identification: drive the dead-body glitch post-process. Builds a
+// Bodycam: drive the dead-body redaction post-process. Builds a
 // LIST of head rects (one per visible corpse) into the shared xrEngine globals
-// that CRenderTarget::phase_glitch() (xrRenderPC_R4) reads each frame. Rects are
+// that CRenderTarget::phase_redaction() (xrRenderPC_R4) reads each frame. Rects are
 // normalised [0,1] screen space (top-left origin). Usage from Lua each frame:
-//   bodycam.glitch_begin()
-//   bodycam.glitch_add(x0,y0,x1,y1)   -- once per visible corpse head box
-//   bodycam.glitch_commit(intensity)  -- publishes the list (0 intensity clears)
+//   bodycam.redaction_begin()
+//   bodycam.redaction_add(x0,y0,x1,y1)   -- once per visible corpse head box
+//   bodycam.redaction_commit(intensity)  -- publishes the list (0 intensity clears)
 // The begin/commit split makes the render thread see a complete list, never a
 // half-filled one. Same guarded, inert-without-this-exe pattern as get_fire_ray.
-#define II_GLITCH_MAX 16   // keep in sync with xr_ioc_cmd.cpp and ii_glitch.ps
+#define BODYCAM_REDACTION_MAX 16   // keep in sync with xr_ioc_cmd.cpp and bodycam_redaction.ps
 
-extern ENGINE_API float g_ii_glitch_rects[II_GLITCH_MAX * 4];
-extern ENGINE_API int   g_ii_glitch_count;
-extern ENGINE_API float g_ii_glitch_intensity;
-extern ENGINE_API int   g_ii_glitch_mode;
-extern ENGINE_API int   g_ii_glitch_active;
-extern ENGINE_API int   g_ii_glitch_debug;
+extern ENGINE_API float g_bodycam_redaction_rects[BODYCAM_REDACTION_MAX * 4];
+extern ENGINE_API int   g_bodycam_redaction_count;
+extern ENGINE_API float g_bodycam_redaction_intensity;
+extern ENGINE_API int   g_bodycam_redaction_mode;
+extern ENGINE_API int   g_bodycam_redaction_active;
+extern ENGINE_API int   g_bodycam_redaction_debug;
 
-// Effect variant applied inside every head box: 0 glitch, 1 pixelate, 2 black.
+// Effect variant applied inside every head box: 0 redaction, 1 pixelate, 2 black.
 // Separate from commit so older mod builds that don't call it just leave mode 0
-// (glitch) -- graceful degradation.
-static void bodycam_glitch_set_mode(int mode)
+// (redaction) -- graceful degradation.
+static void bodycam_redaction_set_mode(int mode)
 {
-	g_ii_glitch_mode = mode;
+	g_bodycam_redaction_mode = mode;
 }
 
-extern ENGINE_API float g_ii_glitch_depths[II_GLITCH_MAX];
-extern ENGINE_API float g_ii_glitch_world[II_GLITCH_MAX * 6];
+extern ENGINE_API float g_bodycam_redaction_depths[BODYCAM_REDACTION_MAX];
+extern ENGINE_API float g_bodycam_redaction_world[BODYCAM_REDACTION_MAX * 6];
 
-static int   s_ii_glitch_pending = 0;
-static float s_ii_glitch_pending_rects[II_GLITCH_MAX * 4];
-static float s_ii_glitch_pending_depths[II_GLITCH_MAX];
-static float s_ii_glitch_pending_world[II_GLITCH_MAX * 6];
+static int   s_bodycam_redaction_pending = 0;
+static float s_bodycam_redaction_pending_rects[BODYCAM_REDACTION_MAX * 4];
+static float s_bodycam_redaction_pending_depths[BODYCAM_REDACTION_MAX];
+static float s_bodycam_redaction_pending_world[BODYCAM_REDACTION_MAX * 6];
 
-static void bodycam_glitch_begin()
+static void bodycam_redaction_begin()
 {
-	s_ii_glitch_pending = 0;
+	s_bodycam_redaction_pending = 0;
 }
 
 // (x0,y0,x1,y1) = the box in MAIN-camera normalised screen space (for the main
@@ -266,48 +244,59 @@ static void bodycam_glitch_begin()
 // WORLD centre + world half-width/height in metres, which the SVP pass reprojects
 // through the scope camera (the main-camera rect can't be). world args default to
 // 0 (no in-scope draw) for the back-compat wrapper.
-static void bodycam_glitch_add(float x0, float y0, float x1, float y1, float depth,
+static void bodycam_redaction_add(float x0, float y0, float x1, float y1, float depth,
 	float wcx, float wcy, float wcz, float whw, float whh)
 {
-	if (s_ii_glitch_pending >= II_GLITCH_MAX) return;
+	if (s_bodycam_redaction_pending >= BODYCAM_REDACTION_MAX) return;
 	if (!(x1 > x0 && y1 > y0)) return;   // skip degenerate rects
-	float* r = &s_ii_glitch_pending_rects[s_ii_glitch_pending * 4];
+	float* r = &s_bodycam_redaction_pending_rects[s_bodycam_redaction_pending * 4];
 	r[0] = x0; r[1] = y0; r[2] = x1; r[3] = y1;
-	s_ii_glitch_pending_depths[s_ii_glitch_pending] = depth;
-	float* wpad = &s_ii_glitch_pending_world[s_ii_glitch_pending * 6];
+	s_bodycam_redaction_pending_depths[s_bodycam_redaction_pending] = depth;
+	float* wpad = &s_bodycam_redaction_pending_world[s_bodycam_redaction_pending * 6];
 	wpad[0] = wcx; wpad[1] = wcy; wpad[2] = wcz; wpad[3] = whw; wpad[4] = whh; wpad[5] = 0.f;
-	++s_ii_glitch_pending;
+	++s_bodycam_redaction_pending;
 }
 
-static void bodycam_glitch_commit(float intensity)
+static void bodycam_redaction_commit(float intensity)
 {
-	const int was_active = g_ii_glitch_active;
-	for (int i = 0; i < s_ii_glitch_pending * 4; ++i)
-		g_ii_glitch_rects[i] = s_ii_glitch_pending_rects[i];
-	for (int i = 0; i < s_ii_glitch_pending; ++i)
-		g_ii_glitch_depths[i] = s_ii_glitch_pending_depths[i];
-	for (int i = 0; i < s_ii_glitch_pending * 6; ++i)
-		g_ii_glitch_world[i] = s_ii_glitch_pending_world[i];
-	g_ii_glitch_count = s_ii_glitch_pending;
-	g_ii_glitch_intensity = intensity;
-	g_ii_glitch_active = (s_ii_glitch_pending > 0 && intensity > 0.f) ? 1 : 0;
-	if (g_ii_glitch_debug && g_ii_glitch_active && !was_active)
-		Msg("[ii] bodycam.glitch ACTIVE count=%d intensity=%.2f", g_ii_glitch_count, intensity);
+	const int was_active = g_bodycam_redaction_active;
+	for (int i = 0; i < s_bodycam_redaction_pending * 4; ++i)
+		g_bodycam_redaction_rects[i] = s_bodycam_redaction_pending_rects[i];
+	for (int i = 0; i < s_bodycam_redaction_pending; ++i)
+		g_bodycam_redaction_depths[i] = s_bodycam_redaction_pending_depths[i];
+	for (int i = 0; i < s_bodycam_redaction_pending * 6; ++i)
+		g_bodycam_redaction_world[i] = s_bodycam_redaction_pending_world[i];
+	g_bodycam_redaction_count = s_bodycam_redaction_pending;
+	g_bodycam_redaction_intensity = intensity;
+	g_bodycam_redaction_active = (s_bodycam_redaction_pending > 0 && intensity > 0.f) ? 1 : 0;
+	if (g_bodycam_redaction_debug && g_bodycam_redaction_active && !was_active)
+		Msg("[bodycam] bodycam.redaction ACTIVE count=%d intensity=%.2f", g_bodycam_redaction_count, intensity);
 }
 
 // Back-compat single-rect wrappers (older mod builds call these). depth 0 = no
 // test, world 0 = no in-scope draw.
-static void bodycam_set_glitch_rect(float x0, float y0, float x1, float y1, float intensity)
+static void bodycam_set_redaction_rect(float x0, float y0, float x1, float y1, float intensity)
 {
-	bodycam_glitch_begin();
-	bodycam_glitch_add(x0, y0, x1, y1, 0.f, 0.f, 0.f, 0.f, 0.f, 0.f);
-	bodycam_glitch_commit(intensity);
+	bodycam_redaction_begin();
+	bodycam_redaction_add(x0, y0, x1, y1, 0.f, 0.f, 0.f, 0.f, 0.f, 0.f);
+	bodycam_redaction_commit(intensity);
 }
 
-static void bodycam_clear_glitch()
+static void bodycam_clear_redaction()
 {
-	bodycam_glitch_begin();
-	bodycam_glitch_commit(0.f);
+	bodycam_redaction_begin();
+	bodycam_redaction_commit(0.f);
+}
+
+// Corpse silhouette redaction (stencil mask). mode: -1 off, 0 pixelate, 1 black.
+// The engine draws the effect where the redaction stencil bit is set (tagged in
+// the g-buffer), so it hugs the corpse silhouette. intensity 0 also disables.
+extern ENGINE_API int   g_bodycam_redact_corpse_mode;
+extern ENGINE_API float g_bodycam_redact_corpse_intensity;
+static void bodycam_redact_corpse(int mode, float intensity)
+{
+	g_bodycam_redact_corpse_mode = (intensity > 0.f) ? mode : -1;
+	g_bodycam_redact_corpse_intensity = intensity;
 }
 
 #pragma optimize("s", on)
@@ -329,11 +318,12 @@ void Bodycam::script_register(lua_State* L)
 		def("get_state", &bodycam_get_state),
 		def("get_fire_ray", &bodycam_get_fire_ray),
 		def("get_bindings", &bodycam_get_bindings),
-		def("set_glitch_rect", &bodycam_set_glitch_rect),
-		def("clear_glitch", &bodycam_clear_glitch),
-		def("glitch_begin", &bodycam_glitch_begin),
-		def("glitch_add", &bodycam_glitch_add),
-		def("glitch_commit", &bodycam_glitch_commit),
-		def("glitch_set_mode", &bodycam_glitch_set_mode)
+		def("set_redaction_rect", &bodycam_set_redaction_rect),
+		def("clear_redaction", &bodycam_clear_redaction),
+		def("redaction_begin", &bodycam_redaction_begin),
+		def("redaction_add", &bodycam_redaction_add),
+		def("redaction_commit", &bodycam_redaction_commit),
+		def("redaction_set_mode", &bodycam_redaction_set_mode),
+		def("redact_corpse", &bodycam_redact_corpse)
 	];
 }

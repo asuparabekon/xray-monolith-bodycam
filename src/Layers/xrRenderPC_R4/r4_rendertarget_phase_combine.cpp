@@ -89,42 +89,42 @@ void CRenderTarget::DoAsyncScreenshot()
 
 float hclip(float v, float dim) { return 2.f * v / dim - 1.f; }
 
-// Immersive Identification: dead-body glitch post-process. Distorts the scene
+// Bodycam: dead-body redaction post-process. Distorts the scene
 // colour inside a LIST of screen rectangles (one head box per visible corpse)
-// supplied from Lua via bodycam.glitch_begin/add/commit. Mirrors phase_fakescope's
+// supplied from Lua via bodycam.redaction_begin/add/commit. Mirrors phase_fakescope's
 // fullscreen-quad + copy-back idiom EXACTLY: draw fullscreen and let the shader
 // pass the scene through untouched outside every box. (A scissor would only write
 // the box regions of dest_rt, but CopyResource copies the whole RT back into the
 // scene -- so the area outside the boxes has to be a correct scene copy, which
 // means a fullscreen draw, not a scissored one. The region restriction lives in
-// ii_glitch.ps, which loops the rects.) Rects arrive normalised [0,1] (top-left
+// bodycam_redaction.ps, which loops the rects.) Rects arrive normalised [0,1] (top-left
 // origin) and are passed straight to the shader as box UVs.
-extern ENGINE_API float g_ii_glitch_rects[16 * 4];   // II_GLITCH_MAX * 4
-extern ENGINE_API float g_ii_glitch_depths[16];      // per-rect view-space depth (m); 0 = no test
-extern ENGINE_API float g_ii_glitch_world[16 * 6];   // per-box world centre + half-extents (in-scope)
-extern ENGINE_API int   g_ii_glitch_count;
-extern ENGINE_API float g_ii_glitch_intensity;
-extern ENGINE_API int   g_ii_glitch_mode;
-extern ENGINE_API int   g_ii_glitch_active;
-extern ENGINE_API int   g_ii_glitch_debug;
+extern ENGINE_API float g_bodycam_redaction_rects[16 * 4];   // BODYCAM_REDACTION_MAX * 4
+extern ENGINE_API float g_bodycam_redaction_depths[16];      // per-rect view-space depth (m); 0 = no test
+extern ENGINE_API float g_bodycam_redaction_world[16 * 6];   // per-box world centre + half-extents (in-scope)
+extern ENGINE_API int   g_bodycam_redaction_count;
+extern ENGINE_API float g_bodycam_redaction_intensity;
+extern ENGINE_API int   g_bodycam_redaction_mode;
+extern ENGINE_API int   g_bodycam_redaction_active;
+extern ENGINE_API int   g_bodycam_redaction_debug;
 
-void CRenderTarget::phase_glitch()
+void CRenderTarget::phase_redaction()
 {
-	int count = g_ii_glitch_count;
+	int count = g_bodycam_redaction_count;
 	if (count > 16) count = 16;
 
-	if (g_ii_glitch_debug)
+	if (g_bodycam_redaction_debug)
 	{
 		static u32 s_last_frame = 0;
 		if (Device.dwFrame - s_last_frame >= 60)
 		{
 			s_last_frame = Device.dwFrame;
-			Msg("[ii] phase_glitch RUNNING count=%d intensity=%.2f shader=%s",
-				count, g_ii_glitch_intensity, s_ii_glitch ? "loaded" : "NULL");
+			Msg("[bodycam] phase_redaction RUNNING count=%d intensity=%.2f shader=%s",
+				count, g_bodycam_redaction_intensity, s_bodycam_redaction ? "loaded" : "NULL");
 		}
 	}
 
-	if (count <= 0 || g_ii_glitch_intensity <= 0.f)
+	if (count <= 0 || g_bodycam_redaction_intensity <= 0.f)
 		return;
 
 	u32 Offset = 0;
@@ -148,20 +148,20 @@ void CRenderTarget::phase_glitch()
 	pv->set(float(w), 0, d_Z, d_W, C, 1.0f, 0.0f); pv++;
 	RCache.Vertex.Unlock(4, g_combine->vb_stride);
 
-	RCache.set_Element(s_ii_glitch->E[0]);
+	RCache.set_Element(s_bodycam_redaction->E[0]);
 	RCache.set_Geometry(g_combine);
 
 	// Constants MUST be set AFTER set_Element -- set_Element binds the shader and
 	// its constant table, so set_c() before it writes into the previous pass's
 	// (stale) table and silently no-ops (the "pass runs, shader loaded, inputs
 	// valid, but nothing shows" bug). Order matches r4_rendertarget_accum_point.
-	RCache.set_c("glitch_params", g_ii_glitch_intensity, Device.fTimeGlobal, 10.0f, 0.006f);
-	RCache.set_c("glitch_count", float(count), float(g_ii_glitch_mode), 0.0f, 0.0f);
+	RCache.set_c("redaction_params", g_bodycam_redaction_intensity, Device.fTimeGlobal, 10.0f, 0.006f);
+	RCache.set_c("redaction_count", float(count), float(g_bodycam_redaction_mode), 0.0f, 0.0f);
 	for (int i = 0; i < count; ++i)
 	{
-		const float* r = &g_ii_glitch_rects[i * 4];
-		RCache.set_ca("glitch_rects", i, r[0], r[1], r[2], r[3]);   // one head box per corpse
-		RCache.set_ca("glitch_depths", i, g_ii_glitch_depths[i], 0.0f, 0.0f, 0.0f);   // its view-space depth
+		const float* r = &g_bodycam_redaction_rects[i * 4];
+		RCache.set_ca("redaction_rects", i, r[0], r[1], r[2], r[3]);   // one head box per corpse
+		RCache.set_ca("redaction_depths", i, g_bodycam_redaction_depths[i], 0.0f, 0.0f, 0.0f);   // its view-space depth
 	}
 
 	RCache.Render(D3DPT_TRIANGLELIST, Offset, 0, 4, 0, 2);
@@ -171,20 +171,69 @@ void CRenderTarget::phase_glitch()
 	HW.pContext->CopyResource(rt_Generic_0->pTexture->surface_get(), dest_rt->pTexture->surface_get());
 }
 
-// Immersive Identification: redaction glitch INSIDE the scope. Same shader as
-// phase_glitch, but the rects are reprojected through the SVP camera
+// Bodycam: CORPSE silhouette redaction. Draws the effect over a
+// screen-covering quad but STENCIL-TESTED to the redaction bit (0x40), which was
+// written on the corpse's own pixels during the g-buffer pass (r__dsgraph_render).
+// So the effect hugs the exact corpse silhouette at any angle/pose -- no rect, no
+// depth band. Occlusion is free (occluded corpse pixels never got the stencil bit).
+// redaction_count.z = 1 flags the "corpse" path in the shader (fixed-px pixelate cells
+// + no box-edge feather, since the stencil is the hard mask). Style/strength from
+// Lua via bodycam.redact_corpse. Reuses s_bodycam_redaction (bodycam_redaction.ps).
+extern ENGINE_API int   g_bodycam_redact_corpse_mode;
+extern ENGINE_API float g_bodycam_redact_corpse_intensity;
+
+void CRenderTarget::phase_bodycam_corpse_redact()
+{
+	if (g_bodycam_redact_corpse_mode < 0 || g_bodycam_redact_corpse_intensity <= 0.f) return;
+	if (!s_bodycam_redaction) return;
+
+	u32 Offset = 0;
+	u32 Ccol = color_rgba(0, 0, 0, 255);
+	float d_Z = EPS_S, d_W = 1.0f;
+	float w = float(Device.dwWidth), h = float(Device.dwHeight);
+
+	ref_rt& dest_rt = RImplementation.o.dx10_msaa ? rt_Generic : rt_Color;
+	ID3DDepthStencilView* zb = RImplementation.o.dx10_msaa ? rt_MSAADepth->pZRT : HW.pBaseZB;
+	u_setrt(dest_rt, nullptr, nullptr, zb);   // bind the scene depth-stencil for the test
+	RCache.set_CullMode(CULL_NONE);
+	RCache.set_Z(FALSE);   // no depth test -- the stencil is the mask
+	RCache.set_Stencil(TRUE, D3DCMP_EQUAL, 0x40, 0x40, 0x00); // draw only where REDACT_BIT set
+
+	FVF::TL* pv = (FVF::TL*)RCache.Vertex.Lock(4, g_combine->vb_stride, Offset);
+	pv->set(0, h, d_Z, d_W, Ccol, 0.0f, 1.0f); pv++;
+	pv->set(0, 0, d_Z, d_W, Ccol, 0.0f, 0.0f); pv++;
+	pv->set(w, h, d_Z, d_W, Ccol, 1.0f, 1.0f); pv++;
+	pv->set(w, 0, d_Z, d_W, Ccol, 1.0f, 0.0f); pv++;
+	RCache.Vertex.Unlock(4, g_combine->vb_stride);
+
+	RCache.set_Element(s_bodycam_redaction->E[0]);
+	RCache.set_Geometry(g_combine);
+	RCache.set_c("redaction_params", g_bodycam_redact_corpse_intensity, Device.fTimeGlobal, 10.0f, 0.006f);
+	RCache.set_c("redaction_count", 1.0f, float(g_bodycam_redact_corpse_mode), 1.0f, 0.0f); // .z=1 corpse path
+	RCache.set_ca("redaction_rects", 0, -0.5f, -0.5f, 1.5f, 1.5f);  // covers screen; edge feather off-screen
+	RCache.set_ca("redaction_depths", 0, 0.0f, 0.0f, 0.0f, 0.0f);   // depth 0 = no band (stencil is the mask)
+
+	RCache.Render(D3DPT_TRIANGLELIST, Offset, 0, 4, 0, 2);
+	RCache.set_Stencil(FALSE);
+	RCache.set_Z(TRUE);
+
+	HW.pContext->CopyResource(rt_Generic_0->pTexture->surface_get(), dest_rt->pTexture->surface_get());
+}
+
+// Bodycam: redaction INSIDE the scope. Same shader as
+// phase_redaction, but the rects are reprojected through the SVP camera
 // (Device.matrices[1] + the scope basis) from the per-corpse WORLD boxes
-// (g_ii_glitch_world) -- the main-camera normalised rects can't be reused for the
+// (g_bodycam_redaction_world) -- the main-camera normalised rects can't be reused for the
 // scope's narrower view. Called from phase_svp_capture (this == TargetSVP), so
 // s_image (r2_RT_generic0) is the scope scene (SetActive remaps it) and
 // rt_Generic_0 is the image captured for the lens. No depth mask in-scope (the
 // viewmodel isn't in the scope view), so depths are 0.
-void CRenderTarget::phase_svp_glitch()
+void CRenderTarget::phase_svp_redaction()
 {
-	int count = g_ii_glitch_count;
+	int count = g_bodycam_redaction_count;
 	if (count > 16) count = 16;
-	if (count <= 0 || g_ii_glitch_intensity <= 0.f) return;
-	if (!s_ii_glitch) return;
+	if (count <= 0 || g_bodycam_redaction_intensity <= 0.f) return;
+	if (!s_bodycam_redaction) return;
 
 	Fmatrix vp;
 	vp.mul(Device.matrices[1].mProject, Device.matrices[1].mView);
@@ -197,7 +246,7 @@ void CRenderTarget::phase_svp_glitch()
 	int n = 0;
 	for (int i = 0; i < count; ++i)
 	{
-		const float* wd = &g_ii_glitch_world[i * 6];
+		const float* wd = &g_bodycam_redaction_world[i * 6];
 		float whw = wd[3], whh = wd[4];
 		if (whw <= 0.f || whh <= 0.f) continue;
 		float minx = 1e9f, miny = 1e9f, maxx = -1e9f, maxy = -1e9f;
@@ -241,37 +290,37 @@ void CRenderTarget::phase_svp_glitch()
 	pv->set(w, 0, d_Z, d_W, Ccol, 1.0f, 0.0f); pv++;
 	RCache.Vertex.Unlock(4, g_combine->vb_stride);
 
-	RCache.set_Element(s_ii_glitch->E[0]);
+	RCache.set_Element(s_bodycam_redaction->E[0]);
 	RCache.set_Geometry(g_combine);
-	RCache.set_c("glitch_params", g_ii_glitch_intensity, Device.fTimeGlobal, 10.0f, 0.006f);
-	RCache.set_c("glitch_count", float(n), float(g_ii_glitch_mode), 0.0f, 0.0f);
+	RCache.set_c("redaction_params", g_bodycam_redaction_intensity, Device.fTimeGlobal, 10.0f, 0.006f);
+	RCache.set_c("redaction_count", float(n), float(g_bodycam_redaction_mode), 0.0f, 0.0f);
 	for (int i = 0; i < n; ++i)
 	{
-		RCache.set_ca("glitch_rects", i, rects[i * 4 + 0], rects[i * 4 + 1], rects[i * 4 + 2], rects[i * 4 + 3]);
-		RCache.set_ca("glitch_depths", i, 0.0f, 0.0f, 0.0f, 0.0f);   // no depth mask in-scope
+		RCache.set_ca("redaction_rects", i, rects[i * 4 + 0], rects[i * 4 + 1], rects[i * 4 + 2], rects[i * 4 + 3]);
+		RCache.set_ca("redaction_depths", i, 0.0f, 0.0f, 0.0f, 0.0f);   // no depth mask in-scope
 	}
 	RCache.Render(D3DPT_TRIANGLELIST, Offset, 0, 4, 0, 2);
 	HW.pContext->CopyResource(rt_Generic_0->pTexture->surface_get(), dest_rt->pTexture->surface_get());
 }
 
-// Immersive Identification: draw the in-scope identification markers. Called at
+// Bodycam: draw the in-scope identification markers. Called at
 // the tail of the SVP pass's phase_combine (gated svp_pass_now), so it draws over
 // the combined+tonemapped scope image, which is then captured and composited into
 // the lens by phase_3DSSReticle. Each marker is a world point submitted by the Lua
 // svp_ui_markers_* bindings; we project it through the SVP camera (Device.
 // matrices[1], the scope view/proj) to scope-viewport pixels and draw a small
 // alpha-blended sprite quad there (fill disc + relation ring + scanning arc,
-// ii_svp_marker.ps). No engine text -- a compact dot/ring, extensible later.
-extern ENGINE_API float g_ii_svp_markers[16 * 12];   // II_SVP_MARKER_MAX * 12
-extern ENGINE_API int   g_ii_svp_marker_count;
-extern ENGINE_API int   g_ii_svp_marker_debug;
+// bodycam_svp_marker.ps). No engine text -- a compact dot/ring, extensible later.
+extern ENGINE_API float g_bodycam_svp_markers[16 * 12];   // BODYCAM_SVP_MARKER_MAX * 12
+extern ENGINE_API int   g_bodycam_svp_marker_count;
+extern ENGINE_API int   g_bodycam_svp_marker_debug;
 
 void CRenderTarget::phase_svp_markers()
 {
-	int count = g_ii_svp_marker_count;
+	int count = g_bodycam_svp_marker_count;
 	if (count <= 0) return;
 	if (count > 16) count = 16;
-	if (!s_ii_svp_marker) return;
+	if (!s_bodycam_svp_marker) return;
 
 	// Draw into rt_Generic_0 -- the RT that phase_svp_capture copies into
 	// rt_secondVP for the lens to sample (svp_optics.cpp). The scope-viewport
@@ -287,7 +336,7 @@ void CRenderTarget::phase_svp_markers()
 	u_setrt(rt_Generic_0, nullptr, nullptr, nullptr);
 	RCache.set_CullMode(CULL_NONE);
 	RCache.set_Stencil(FALSE);
-	RCache.set_Element(s_ii_svp_marker->E[0]);
+	RCache.set_Element(s_bodycam_svp_marker->E[0]);
 
 	int drawn = 0;
 	float d_Z = EPS_S, d_W = 1.f;
@@ -296,18 +345,18 @@ void CRenderTarget::phase_svp_markers()
 	// One-shot diagnostic: dump the first marker's projection so we can see WHY a
 	// marker is rejected (behind-camera w<=0, or NDC far off-scope) vs. drawn.
 	static u32 s_diag = 0;
-	const bool diag = g_ii_svp_marker_debug && (Device.dwFrame - s_diag >= 30);
+	const bool diag = g_bodycam_svp_marker_debug && (Device.dwFrame - s_diag >= 30);
 	if (diag) s_diag = Device.dwFrame;
 
 	for (int i = 0; i < count; ++i)
 	{
-		const float* m = &g_ii_svp_markers[i * 12];
+		const float* m = &g_bodycam_svp_markers[i * 12];
 		Fvector4 clip;
 		vp.transform(clip, Fvector4().set(m[0], m[1], m[2], 1.f));
 		float inv = (fabsf(clip.w) > EPS_S) ? (1.f / clip.w) : 0.f;
 		float ndx = clip.x * inv, ndy = clip.y * inv;
 		if (diag && i == 0)
-			Msg("[ii] svpmark world=(%.2f %.2f %.2f) clip=(%.3f %.3f w=%.3f) ndc=(%.3f %.3f) proj11/22=(%.3f %.3f) svpcam=(%.2f %.2f %.2f)",
+			Msg("[bodycam] svpmark world=(%.2f %.2f %.2f) clip=(%.3f %.3f w=%.3f) ndc=(%.3f %.3f) proj11/22=(%.3f %.3f) svpcam=(%.2f %.2f %.2f)",
 				m[0], m[1], m[2], clip.x, clip.y, clip.w, ndx, ndy,
 				Device.matrices[1].mProject._11, Device.matrices[1].mProject._22,
 				Device.m_SecondViewport.svp_cam_pos.x, Device.m_SecondViewport.svp_cam_pos.y, Device.m_SecondViewport.svp_cam_pos.z);
@@ -340,14 +389,14 @@ void CRenderTarget::phase_svp_markers()
 		++drawn;
 	}
 
-	if (g_ii_svp_marker_debug)
+	if (g_bodycam_svp_marker_debug)
 	{
 		static u32 s_last = 0;
 		if (Device.dwFrame - s_last >= 60)
 		{
 			s_last = Device.dwFrame;
-			Msg("[ii] phase_svp_markers count=%d drawn=%d shader=%s", count, drawn,
-				s_ii_svp_marker ? "loaded" : "NULL");
+			Msg("[bodycam] phase_svp_markers count=%d drawn=%d shader=%s", count, drawn,
+				s_bodycam_svp_marker ? "loaded" : "NULL");
 		}
 	}
 }
@@ -948,6 +997,22 @@ void CRenderTarget::phase_combine()
 		phase_ssfx_motion_blur();
 	}
 
+	// Bodycam dead-body/face redaction (pixelate/black). Runs BEFORE the scope lens
+	// composite (phase_3DSSReticle) so the lens + RETICLE draw on top of it -- the
+	// reticle-colour phase writes no depth, so if the redaction ran after it, its
+	// depth mask couldn't exclude the reticle and painted over it. The scene is in
+	// rt_Generic_0 here (phase_3DSSReticle composites into rt_Generic_0), which is
+	// what phase_redaction reads/writes. Skipped on the SVP pass (in-scope redaction is
+	// phase_svp_redaction). Now ahead of dof/lut/AA -- fine for a stable effect.
+	if (g_bodycam_redaction_active && !svp_pass)
+	{
+		phase_redaction();
+	}
+	if (!svp_pass)
+	{
+		phase_bodycam_corpse_redact();
+	}
+
 	// pip composite the lens once on the MAIN view only, whenever a 3DSS scope is aimed under true_pip
 	// (magnified or a 1x reflex/eyepiece was captured), true_pip off keeps the stock scope_3D_fake_enabled gate
 	if (this == RImplementation.TargetMain
@@ -1055,17 +1120,11 @@ void CRenderTarget::phase_combine()
 		tm_end(svp_stats::SEC_C_TAA);
 	}
 
-	// Immersive Identification dead-head glitch. Placed AFTER SMAA + TAA (not
-	// with the nightvision/fakescope FX above) on purpose: TAA's temporal
-	// history rectification clamps out a sudden per-frame glitch as an artifact
-	// (a stable overlay like fakescope survives, a churning glitch does not).
-	// Here rt_Generic_0 already holds the final post-AA scene that the combine_2
-	// pass below samples (s_image = r2_RT_generic0), so the distortion survives
-	// straight to the screen. Skipped during the SVP pass like the FX above.
-	if (g_ii_glitch_active && !svp_pass_now)
-	{
-		phase_glitch();
-	}
+	// (Bodycam redaction -- phase_redaction + phase_bodycam_corpse_redact -- moved
+	// UP to before phase_3DSSReticle so the scope lens/reticle composites ON TOP of
+	// it, instead of the redaction painting over the reticle. Safe: the redaction is
+	// stable pixelate/black now (the churning redaction that TAA clamped was removed), so
+	// it no longer needs to run after TAA.)
 
 	// pip clear the scope capture maps at the main-pass tail after every consumer (lens composite,
 	// nvg split, taa mask stamp), unconditional of the taa path, frame-start clear covers staleness
@@ -1216,7 +1275,7 @@ void CRenderTarget::phase_combine()
 	tm_end(svp_stats::SEC_C_COMBINE2);
 	RCache.set_Stencil(FALSE);
 
-	// (Immersive Identification in-scope markers are drawn in phase_svp_capture,
+	// (Bodycam in-scope markers are drawn in phase_svp_capture,
 	// where the final scope image sits in rt_Generic_0 before the lens capture.)
 
 	if (RImplementation.o.dx11_hdr10) {
