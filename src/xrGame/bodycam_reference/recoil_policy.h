@@ -39,10 +39,20 @@ struct RecoilAngles
 	double dispersionRadians = 0;
 	double maxVerticalRadians = 0;
 };
+// Typical dispersion / maximum vertical recoil ratio of each family's weapons in the host game.
+// A weapon at or above its family's ratio keeps the full gun recoil; lower ratios scale it down to .8.
+// Zero keeps the full gun recoil.
+struct RecoilBudgets
+{
+	double pistol = 0, smg = 0, rifle = 0, shotgun = 0, sniper = 0;
+};
 struct RecoilMetadata
 {
 	RecoilFamily family = RecoilFamily::Unknown;
 	RecoilAngles hip, aim;
+	RecoilBudgets budgets;
+	// Full-auto or burst fire: each shot sets the automatic pushback.
+	bool automatic = false;
 };
 struct RecoilPolicy
 {
@@ -51,17 +61,15 @@ struct RecoilPolicy
 	double GunPoseScale(bool aiming) const { return aiming ? aimScale : hipScale; }
 };
 
-inline double RecoilBudgetFraction(RecoilFamily family)
+inline double RecoilBudgetFraction(RecoilFamily family, const RecoilBudgets& budgets)
 {
-	// Typical dispersion / maximum vertical recoil ratio of the family's installed weapons, rounded.
-	// A weapon at or above it keeps the full gun recoil; lower ratios scale it down to .8.
 	switch (family)
 	{
-	case RecoilFamily::Pistol: return .04;
-	case RecoilFamily::Smg: return .01;
-	case RecoilFamily::Rifle: return .01;
-	case RecoilFamily::Shotgun: return .12;
-	case RecoilFamily::Sniper: return .05;
+	case RecoilFamily::Pistol: return budgets.pistol;
+	case RecoilFamily::Smg: return budgets.smg;
+	case RecoilFamily::Rifle: return budgets.rifle;
+	case RecoilFamily::Shotgun: return budgets.shotgun;
+	case RecoilFamily::Sniper: return budgets.sniper;
 	default: return 0;
 	}
 }
@@ -78,7 +86,7 @@ inline double RecoilGunPoseScale(const RecoilAngles& angles, double budget)
 
 inline RecoilPolicy BuildRecoilPolicy(const RecoilMetadata& metadata)
 {
-	const double budget = RecoilBudgetFraction(metadata.family);
+	const double budget = RecoilBudgetFraction(metadata.family, metadata.budgets);
 	return { RecoilGunPoseScale(metadata.hip, budget), RecoilGunPoseScale(metadata.aim, budget) };
 }
 

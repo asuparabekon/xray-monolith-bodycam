@@ -74,9 +74,13 @@ SwayIkResult ViewmodelPoseGraph::Evaluate(
 	if (input.attachWeight < 1)
 		targets.handL = BlendTransform(Multiply(inverseGun, skeleton_.Component(left.hand)), targets.handL, input.attachWeight);
 
-	auto locals = authored;
-	regrip_.Apply(locals, targets, input.regripSamples, input.regripAlpha);
-	skeleton_.ResetLocals(locals);
+	// Without a regrip the skeleton already holds the authored locals.
+	if (!(input.regripSamples.empty() || input.regripAlpha <= 0))
+	{
+		auto locals = authored;
+		regrip_.Apply(locals, targets, input.regripSamples, input.regripAlpha);
+		skeleton_.ResetLocals(locals);
+	}
 	targets.gun = ApplyRecoilPose(targets.gun, input.recoil);
 	if (input.coherent && input.applyMovementAdditives)
 	{

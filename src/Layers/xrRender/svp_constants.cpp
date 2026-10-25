@@ -20,7 +20,7 @@ extern Fvector4 ps_s3ds_param_4;
 
 static constexpr int S3DS_SEE_THROUGH_BIT = 1 << 2;
 
-// stale nvg patch shaders still declare this, a deterministic zero keeps them on authored behavior
+// the GAMMA compatibility patch night_vision.h still declares this, a deterministic zero keeps it on authored behavior
 static class svp_nvg_view_binder : public R_constant_setup
 {
 	virtual void setup(R_constant* C)
@@ -35,9 +35,6 @@ static class svp_control_binder : public R_constant_setup
 {
 	virtual void setup(R_constant* C)
 	{
-		extern int ps_r__svp_clean_optics;
-		extern int ps_r__svp_thermal_sim;
-		extern int ps_r__svp_chroma;
 		const float k = (ps_r__svp_clean_optics && Device.true_pip_on) ? 1.f : 0.f;
 		// chromatism kept when r__svp_chroma is on so real per-scope CA survives clean optics
 		const float ky = (ps_r__svp_clean_optics && !ps_r__svp_chroma && Device.true_pip_on) ? 1.f : 0.f;
@@ -81,8 +78,6 @@ static class svp_glass_binder : public R_constant_setup
 {
 	virtual void setup(R_constant* C)
 	{
-		extern float ps_r__svp_field_curve;
-		extern int ps_r__svp_autoflip_reticle;
 		if (Device.true_pip_on)
 			RCache.set_c(C, 0.f, ps_r__svp_field_curve, 0.f, ps_r__svp_autoflip_reticle ? 1.f : 0.f);
 		else
@@ -95,7 +90,6 @@ static class svp_nearblur_binder : public R_constant_setup
 {
 	virtual void setup(R_constant* C)
 	{
-		extern int ps_r__svp_nearblur_scatter;
 		RCache.set_c(C, ps_r__svp_nearblur_scatter ? 1.f : 0.f, 0.f, 0.f, 0.f);
 	}
 } binder_svp_nearblur;
@@ -105,8 +99,7 @@ static class svp_env_binder : public R_constant_setup
 {
 	virtual void setup(R_constant* C)
 	{
-		extern float ps_r__svp_veiling_glare;
-		if (!Device.true_pip_on)
+		if (!Device.true_pip_on || !g_pGamePersistent || !g_pGamePersistent->Environment().CurrentEnv)
 		{
 			RCache.set_c(C, 0.f, 0.f, 0.f, 0.f);
 			return;
@@ -119,7 +112,6 @@ static class svp_env_binder : public R_constant_setup
 		float glare = 0.f;
 		if (align > 0.f && ps_r__svp_veiling_glare > 0.f)
 		{
-			extern int ps_r__svp_glare_model;
 			float fall;
 			if (ps_r__svp_glare_model)
 			{
@@ -133,10 +125,6 @@ static class svp_env_binder : public R_constant_setup
 				fall = powf(align, 6.f);
 			glare = fall * (sun_luma > 1.f ? 1.f : sun_luma) * ps_r__svp_veiling_glare;
 		}
-		extern float ps_r__svp_rain_optic;
-		extern float ps_r__svp_rain_debug;
-		extern int ps_r__svp_uv_debug;
-		extern int ps_r__svp_autoflip;
 		float rain = (ps_r__svp_rain_optic > 0.f) ? desc.rain_density * ps_r__svp_rain_optic : 0.f;
 		// debug forces the droplets in any weather, the value stands in for the density product
 		if (ps_r__svp_rain_debug > 0.f)
@@ -155,13 +143,11 @@ extern float g_pip_scope_ratio;
 // pip [SVP-RETBIND] logs the values the reticle shader actually receives at bind time
 static void retbind_diag(const char* lane, float cur, float mn, float mx, float w)
 {
-	extern int ps_r__svp_diag;
 	if (!ps_r__svp_diag) return;
 	static u32 s_ms = 0;
 	if (Device.dwTimeGlobal - s_ms < 1000) return;
 	s_ms = Device.dwTimeGlobal;
 	extern Fvector4 ps_s3ds_param_1;
-	extern Fvector4 ps_s3ds_param_3;
 	PipMsg("[SVP-RETBIND] lane=%s cur=%.3f min=%.3f max=%.3f w=%.1f mag=%.3f ratio=%.3f eng_min=%.3f eng_max=%.3f rsize=%.2f rtype=%.0f lua=(%.2f,%.2f,%.2f,%.2f) hudy=%.2f fovp=(%.2f,%.2f)",
 		lane, cur, mn, mx, w, g_pip_scope_magnification, g_pip_scope_ratio,
 		g_pip_scope_min_mag, g_pip_scope_max_mag,
@@ -176,7 +162,7 @@ static class shader_scope_params : public R_constant_setup
 {
 	virtual void setup(R_constant* C)
 	{
-#if 1 // pip drive curMag/minMag so the reticle current_zoom lands on mag/min (matches the 2D reticle)
+		// pip drive curMag/minMag so the reticle current_zoom lands on mag/min (matches the 2D reticle)
 		if (Device.true_pip_on && g_pip_scope_magnification > 0.01f)
 		{
 			// curMag = ratio*scope bounds the exit-pupil shadow, minMag solved so current_zoom = mag/min
@@ -197,9 +183,7 @@ static class shader_scope_params : public R_constant_setup
 			retbind_diag("pip", cur, mn, mx, w);
 			RCache.set_c(C, cur, mn, mx, w);
 		}
-		else
-#endif
-		if (ps_shader_scope_params.y > 0.f)
+		else if (ps_shader_scope_params.y > 0.f)
 		{
 			retbind_diag("lua", ps_shader_scope_params.x, ps_shader_scope_params.y, ps_shader_scope_params.z, ps_shader_scope_params.w);
 			RCache.set_c(C, ps_shader_scope_params.x, ps_shader_scope_params.y, ps_shader_scope_params.z, ps_shader_scope_params.w);
@@ -230,7 +214,7 @@ static class ssfx_issvp : public R_constant_setup
 	}
 }    ssfx_issvp;
 
-// one table drives both registration and the startup guard so the two never drift
+// one table drives registration
 static const struct { const char* name; R_constant_setup* setup; } s_svp_binders[] = {
 	{ "shader_scope_params", &shader_scope_params }, // scope magnification
 	{ "svp_control", &binder_svp_control }, // pip clean-optics intent flags
@@ -244,31 +228,6 @@ static const struct { const char* name; R_constant_setup* setup; } s_svp_binders
 
 void RegisterSvpConstants(CBlender_Compile& dst)
 {
-	static bool s_validated = false;
-	if (!s_validated) { s_validated = true; ValidateSvpConstants(); }
 	for (const auto& b : s_svp_binders)
 		dst.r_Constant(b.name, b.setup);
-}
-
-// name-matched binders fail silently, so log the table health once at first use
-void ValidateSvpConstants()
-{
-	const int n = (int)(sizeof(s_svp_binders) / sizeof(s_svp_binders[0]));
-	int bad = 0;
-	for (int i = 0; i < n; ++i)
-	{
-		if (!s_svp_binders[i].setup)
-		{
-			Msg("! [SVP-GUARD] MISSING %s (null binder)", s_svp_binders[i].name);
-			++bad;
-			continue;
-		}
-		for (int j = 0; j < i; ++j)
-			if (0 == xr_strcmp(s_svp_binders[j].name, s_svp_binders[i].name))
-			{
-				Msg("! [SVP-GUARD] MISSING %s (duplicate registration)", s_svp_binders[i].name);
-				++bad;
-			}
-	}
-	Msg("[SVP-GUARD] binders ok (%d)", n - bad);
 }

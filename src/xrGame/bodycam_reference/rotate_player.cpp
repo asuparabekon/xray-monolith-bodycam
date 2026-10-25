@@ -1,4 +1,5 @@
 #include "rotate_player.h"
+#include "constants.h"
 #include "scalar_math.h"
 #include <algorithm>
 #include <cmath>
@@ -90,7 +91,7 @@ void RotateSequencePlayer::CopyInputs(RotateNodeInput input)
 }
 void RotateSequencePlayer::Initialize(RotateNodeInput input)
 {
-	state_.previousIndex = state_.nextIndex = -2;
+	state_.previousIndex = state_.nextIndex = kNoMarker;
 	state_.relevanceFlag = false;
 	CopyInputs(input);
 	state_.accumulator = 0;
@@ -100,7 +101,7 @@ RotateSequenceRecord RotateSequencePlayer::Update(double weight, double rootWeig
 {
 	const float w = float(weight), root = float(rootWeight);
 	state_.blendWeight = w;
-	state_.relevanceFlag = state_.relevanceFlag || w >= .99999f;
+	state_.relevanceFlag = state_.relevanceFlag || w >= kBlendFull;
 	CopyInputs(input);
 	state_.rateClampInitialized = true;
 	return { nodeId_, state_.playRate, w, root, state_.looping };

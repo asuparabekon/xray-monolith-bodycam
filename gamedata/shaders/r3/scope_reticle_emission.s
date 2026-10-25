@@ -1,4 +1,4 @@
--- MSDF reticle glow of a PiP lens, and of a reflex in its capture, added into $user$reticle_emission
+-- Atlas reticle glow of a PiP lens, and of a reflex in its capture, added into $user$reticle_emission
 -- (svp_reticle_emission.cpp)
 function normal(shader, t_base, t_second, t_detail)
 	shader:begin("scope_vertex", "scope_reticle_emission")

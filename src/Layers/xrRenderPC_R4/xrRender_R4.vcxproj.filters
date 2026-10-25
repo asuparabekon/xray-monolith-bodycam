@@ -405,6 +405,15 @@
     <ClInclude Include="r4_3dss_reticle.h">
       <Filter>Core_Target</Filter>
     </ClInclude>
+    <ClInclude Include="r4_reticle_vector.h">
+      <Filter>Core_Target</Filter>
+    </ClInclude>
+    <ClInclude Include="..\xrRender\reticle_vector\reticle_vector.h">
+      <Filter>Core_Target</Filter>
+    </ClInclude>
+    <ClInclude Include="..\xrRender\reticle_vector\reticle_vector_svg.h">
+      <Filter>Core_Target</Filter>
+    </ClInclude>
     <ClInclude Include="scope_vslr_capture.h">
       <Filter>Core_Target</Filter>
     </ClInclude>
@@ -916,6 +925,18 @@
       <Filter>Core_Target</Filter>
     </ClCompile>
     <ClCompile Include="r4_reticle_atlas.cpp">
+      <Filter>Core_Target</Filter>
+    </ClCompile>
+    <ClCompile Include="r4_reticle_vector.cpp">
+      <Filter>Core_Target</Filter>
+    </ClCompile>
+    <ClCompile Include="..\xrRender\reticle_vector\reticle_vector_svg.cpp">
+      <Filter>Core_Target</Filter>
+    </ClCompile>
+    <ClCompile Include="..\xrRender\reticle_vector\reticle_vector_build.cpp">
+      <Filter>Core_Target</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\3rd party\pugixml\pugixml.cpp">
       <Filter>Core_Target</Filter>
     </ClCompile>
     <ClCompile Include="r4_3dss_reticle.cpp">

@@ -252,18 +252,22 @@ public:
 	IC void occq_end(u32& ID) { HWOCC.occq_end(ID); }
 	IC R_occlusion::occq_result occq_get(u32& ID) { return HWOCC.occq_get(ID); }
 
+	// pip zero the lens lighting constants for an object without lighting
+	ICF void svp_clear_lens_object_light()
+	{
+		RCache.set_c("svp_lens_object_light", 0.f, 0.f, 0.f, 0.f);
+		RCache.set_c("scope_glass_probe_positive", 0.f, 0.f, 0.f, 0.f);
+		RCache.set_c("scope_glass_probe_negative", 0.f, 0.f, 0.f, 0.f);
+		RCache.set_c("svp_lens_probe_positive", 0.f, 0.f, 0.f, 0.f);
+		RCache.set_c("svp_lens_probe_negative", 0.f, 0.f, 0.f, 0.f);
+	}
+
 	ICF void apply_object(IRenderable* O)
 	{
 		RCache.bus_object.apply(O);
 		if (0 == O || 0 == O->renderable_ROS())
 		{
-			RCache.set_c("svp_lens_object_light", 0.f, 0.f, 0.f, 0.f);
-			RCache.set_c("scope_glass_sky_positive", 0.f, 0.f, 0.f, 0.f);
-			RCache.set_c("scope_glass_sky_negative", 0.f, 0.f, 0.f, 0.f);
-			RCache.set_c("scope_glass_probe_positive", 0.f, 0.f, 0.f, 0.f);
-			RCache.set_c("scope_glass_probe_negative", 0.f, 0.f, 0.f, 0.f);
-			RCache.set_c("svp_lens_probe_positive", 0.f, 0.f, 0.f, 0.f);
-			RCache.set_c("svp_lens_probe_negative", 0.f, 0.f, 0.f, 0.f);
+			svp_clear_lens_object_light();
 			return;
 		}
 		CROS_impl& LT = *((CROS_impl*)O->renderable_ROS());
@@ -275,9 +279,6 @@ public:
 		// The smoothed sun: the raw one is a 0/1 ray test that flickers under partial cover.
 		const float lens_sun = 0.75f * LT.get_sun();
 		RCache.set_c("svp_lens_object_light", lens_hemi, lens_sun, 1.f, 0.f);
-		const float* sky = LT.get_sky_visibility();
-		RCache.set_c("scope_glass_sky_positive", sky[0], sky[1], sky[2], 0.f);
-		RCache.set_c("scope_glass_sky_negative", sky[3], sky[4], sky[5], 0.f);
 		const float* lens_cube = LT.get_hemi_cube_target();
         RCache.set_c("scope_glass_probe_positive",
             lens_cube[CROS_impl::CUBE_FACE_POS_X],lens_cube[CROS_impl::CUBE_FACE_POS_Y],lens_cube[CROS_impl::CUBE_FACE_POS_Z],0.f);
@@ -474,6 +475,7 @@ public:
 	virtual void Render();
 	void renderViewports(BOOL bSUN); // pip main/scope pass scheduling
 	void renderGBuffer(bool clearGraph); // pip per-viewport gbuffer fill, clearGraph false keeps the graph for the SVP pass
+	void drainKeptGraph(); // pip drop the graph the main pass kept when the SVP pass is skipped
 	void renderSceneLighting(BOOL bSUN, bool svp); // pip shared lighting, generate shadows once, accumulate per viewport
 	void ResetSVPHistory(); // pip reset temporal resources after an SVP camera domain change
 	void share_main_smaps(); // pip: re-point the shadow atlas textures at the main maps for the SVP accumulate

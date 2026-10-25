@@ -1,5 +1,6 @@
 #include "locomotion_player_group.h"
 #include "constants.h"
+#include "cycle_layer.h"
 #include <algorithm>
 #include <stdexcept>
 namespace BodycamReference
@@ -17,7 +18,7 @@ BoundLocomotionRecord RegistrationRecord(const PlayerAssetBinding& asset, Player
 	sync.weight = float(context.weight);
 	return { asset.nodeId, std::move(sync), {}, 0, float(context.rootMotionWeight) };
 }
-void CheckRegistration(const PlayerAssetBinding& asset, PlayerGraphContext context)
+void CheckRegistration(const PlayerAssetBinding& asset)
 {
 	if (asset.assetIdentity.empty() || asset.nodeMarkerIdentity.empty() || asset.historyIdentity.empty())
 		throw std::invalid_argument("Player asset binding has an empty identity");
@@ -26,7 +27,7 @@ void CheckRegistration(const PlayerAssetBinding& asset, PlayerGraphContext conte
 bool RegisterBlendPlayer(LocomotionPlayerState& state, const PlayerAssetBinding& asset, PlayerGraphContext context,
 	const LocomotionPropertyState& properties, const std::function<void(BoundLocomotionRecord)>& emit)
 {
-	CheckRegistration(asset, context);
+	CheckRegistration(asset);
 	state.blendWeight = float(context.weight);
 	state.relevanceFlag = state.relevanceFlag || state.blendWeight >= kBlendFull;
 	const float x = float(properties.strideBlend), y = float(properties.walkRunBlend), rate = float(properties.standingPlayRate);
@@ -41,14 +42,14 @@ bool RegisterBlendPlayer(LocomotionPlayerState& state, const PlayerAssetBinding&
 bool RegisterSprintPlayer(SprintPlayerState& state, const PlayerAssetBinding& asset, PlayerGraphContext context,
 	const LocomotionPropertyState& properties, const std::function<void(BoundLocomotionRecord)>& emit)
 {
-	CheckRegistration(asset, context);
+	CheckRegistration(asset);
 	state.blendWeight = float(context.weight);
 	state.relevanceFlag = state.relevanceFlag || state.blendWeight >= kBlendFull;
 	const float playRate = float(properties.standingPlayRate);
 	if (!asset.valid || !asset.skeletonValid)
 		return false;
 	state.marker.time = std::clamp(state.marker.time, 0.f, kSprintCycleSeconds);
-	const float rate = playRate / (asset.nodeId == 423 ? .833f : 1.f);
+	const float rate = playRate / (asset.nodeId == kSprintPlayerNodes[1] ? .833f : 1.f);
 	state.rateClampInitialized = true;
 	auto record = RegistrationRecord(asset, context, SyncPlayerKind::Sequence);
 	record.recordRate = rate;

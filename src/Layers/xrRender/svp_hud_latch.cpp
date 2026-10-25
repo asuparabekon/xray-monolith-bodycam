@@ -23,9 +23,10 @@ using namespace R_dsgraph;
 struct SSvpMeshNearEntry { float tan_theta; float axial_min; };
 struct SSvpMeshNearTable
 {
-	u32 session = 0;
 	u32 epoch = u32(-1);
 	bool built = false;
+	float front = -1.f;
+	xr_vector<u8> through; // the bone mask the verts were built from
 	xr_vector<SSvpMeshNearEntry> entries; // sorted by angle, axial_min is the running minimum
 };
 static xr_map<const dxRender_Visual*, SSvpMeshNearTable> s_svp_mesh_near;
@@ -395,6 +396,12 @@ static float svp_cone_entry(const CFrustum& F, const Fvector* corner,
 		{ 0, 4 }, { 1, 5 }, { 2, 6 }, { 3, 7 }
 	};
 	float axial[8];
+	for (u32 c = 0; c < 8; ++c)
+	{
+		Fvector o;
+		o.sub(corner[c], origin);
+		axial[c] = o.dotproduct(axis);
+	}
 	float entry = -1.f;
 	for (int pi = 0; pi < F.p_count; ++pi)
 	{
@@ -404,9 +411,6 @@ static float svp_cone_entry(const CFrustum& F, const Fvector* corner,
 		for (u32 c = 0; c < 8; ++c)
 		{
 			cls[c] = P.classify(corner[c]);
-			Fvector o;
-			o.sub(corner[c], origin);
-			axial[c] = o.dotproduct(axis);
 			// the aabb test treats a positive classify as outside, behind the apex every plane
 			// alone admits mirror points that are not visibility so those are clamped out
 			if (cls[c] <= 0.f && axial[c] >= apex)
@@ -562,11 +566,12 @@ void CDSGraphManager::r_dsgraph_render_hud_svp()
 {
 	PROF_EVENT("r_dsgraph_render_hud_svp");
 	// same camera and projection as the world, real depth so the scene occludes the weapon
-	// sliver and vice versa (rmNear depth-fronting belonged to the retired separate camera)
+	// sliver and vice versa
 	RImplementation.rmNormal();
 	auto& graph = RGraph.mapHUD;
+	const bool objective_filter = svp_objective_hud_filter_ready();
 	// an empty weapon list still has to publish, otherwise the camera reads stale and floors itself
-	if (!graph.empty() || svp_objective_hud_filter_ready())
+	if (!graph.empty() || objective_filter)
 	{
 		std::sort(graph.begin(), graph.end());
 		const auto& vp = Device.m_SecondViewport;
@@ -576,7 +581,6 @@ void CDSGraphManager::r_dsgraph_render_hud_svp()
 		const float tube = _sqrt(len2);
 		// the near measure runs from the live camera plane, a clip-on front sits past the objective
 		const float measure_front = _max(tube, vp.svp_front_use_m);
-		const bool objective_filter = svp_objective_hud_filter_ready();
 		u32 admit_candidates = 0;
 		u32 admit_suppressed = 0;
 		u32 admit_clipon_unresolved = 0;
@@ -603,9 +607,8 @@ void CDSGraphManager::r_dsgraph_render_hud_svp()
 		float min_axial = -1.f;
 		CFrustum cone;
 		bool cone_ok = false;
-		if (objective_filter
-			&& Device.m_SecondViewport.SnapshotExact(Device.m_SecondViewport.svp_camera_frame,
-				Device.m_SecondViewport.svp_camera_session, Device.dwFrame))
+		// the filter already requires this frame's exact camera snapshot
+		if (objective_filter)
 		{
 			Fmatrix full;
 			full.mul(Device.matrices[1].mProject, Device.matrices[1].mView);
@@ -694,16 +697,20 @@ void CDSGraphManager::r_dsgraph_render_hud_svp()
 				s_svp_mesh_near.clear();
 			}
 			SSvpMeshNearTable& t = s_svp_mesh_near[V];
-			if (t.built && t.session == vp.GetSVPSession() && t.epoch == vp.svp_optic_epoch)
+			// the front moves with sway noise and the clip-on measure, a millimetre keeps the table
+			if (t.built && t.epoch == vp.svp_optic_epoch && _abs(t.front - measure_front) < 0.001f
+				&& t.through == through)
 				return t;
-			t.session = vp.GetSVPSession();
 			t.epoch = vp.svp_optic_epoch;
 			t.built = true;
+			t.front = measure_front;
+			t.through = through;
 			t.entries.clear();
 			xr_vector<Fvector> verts;
 			sk->SVP_MeshVertsWorld(pose, through, verts);
 			t.entries.reserve(verts.size());
-			const Fvector apex = vp.objective.m_W.c;
+			Fvector apex;
+			apex.mad(cone_origin, cone_axis, measure_front);
 			for (const Fvector& w : verts)
 			{
 				Fvector o;
@@ -754,7 +761,7 @@ void CDSGraphManager::r_dsgraph_render_hud_svp()
 		};
 		auto measure_near = [&](dxRender_Visual* V, Fmatrix* M, const SSvpHudAdmission& a, u8 role)
 		{
-			if (!a.box_valid || !cone_ok || a.axial_hi <= tube)
+			if (!a.box_valid || !cone_ok || a.axial_hi <= measure_front)
 				return;
 			LPCSTR rn = near_dump ? svp_hud_role_name(role) : "";
 			float bb[6] = { a.box_w.min.x, a.box_w.min.y, a.box_w.min.z,
@@ -785,7 +792,7 @@ void CDSGraphManager::r_dsgraph_render_hud_svp()
 						lo = _min(lo, d);
 						hi = _max(hi, d);
 					}
-					if (hi <= tube)
+					if (hi <= measure_front)
 					{
 						// a behind verdict from a lying obb hides forward children, the verts arbitrate
 						if (through.empty())

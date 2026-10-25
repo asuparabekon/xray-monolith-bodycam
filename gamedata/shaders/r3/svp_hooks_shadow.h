@@ -1,4 +1,3 @@
-// PIP_HOOK svp_hooks_shadow 20260715
 // true pip logic for the 3DSS shadow chunk, rides mod.db0, the compat patch includes it
 
 #ifndef SVP_HOOKS_SHADOW_H
@@ -139,7 +138,7 @@ float4 svp_merge_black_shadow(float4 persistent_shadow, float4 transient_shadow)
 // and a symmetric ring cannot form at center
 float2 svp_shadow_swing(float2 off)
 {
-	if (shader_scope_params.w < -1.5)
+	if (SVP_TRUE_PIP)
 		off += svp_exposure.zw;
 	return off;
 }
@@ -148,7 +147,7 @@ float2 svp_shadow_swing(float2 off)
 // swing sweeps in a dark crescent that fades back out quickly
 float4 svp_shadow_soften(float4 shadow)
 {
-	if (shader_scope_params.w < -1.5)
+	if (SVP_TRUE_PIP)
 	{
 		shadow.rgb = 0;
 		shadow.a *= saturate((svp_glass4.w - 0.3) / 0.35);
@@ -160,7 +159,7 @@ float4 svp_shadow_soften(float4 shadow)
 // onset rides the capped pupil penumbra and the ramp completes at the rim
 float svp_field_stop_alpha(float2 lens_tc)
 {
-	if (shader_scope_params.w < -1.5)
+	if (SVP_TRUE_PIP)
 	{
 		float onset = svp_glass3.y;
 		float band = 1.0 - onset;

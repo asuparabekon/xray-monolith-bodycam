@@ -6,6 +6,8 @@ namespace BodycamReference
 {
 // Half of an angle in degrees, in radians.
 constexpr double kHalfDegreesToRadians=3.14159265358979323846/360.;
+// The HUD FOV the engine draws at hud_fov 1, in degrees; psHUD_FOV scales it.
+constexpr float kHudFovDegrees=83.f;
 // How much larger the HUD is drawn at engineFov than at unobstructedFov: what
 // the engine's near-wall FOV change does to the picture.
 inline float NearwallProjectionScale(float engineFov,float unobstructedFov)

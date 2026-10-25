@@ -47,9 +47,12 @@ void UpdateArmPoseSpring(SVec3& current, SVec3& velocity, const SVec3& target, f
 constexpr float kCrouchIntentScale = 0.45f;
 constexpr float kSprintIntentScale = 1.35f;
 
+// Half a turn per 30 fps frame: a snap of the aim cannot read as a faster throw.
+constexpr float kMaxMouseSpeed = 30.f * kPi;
+
 void UpdateInputSignals(const InputSignalSettings& settings, InputSignals& signals, const SimulationInput& input)
 {
-	const float safe_dt = std::clamp(input.dt, 1.f / 240.f, 1.f / 30.f);
+	const float safe_dt = std::max(input.dt, 1.f / 240.f);
 	if (!signals.mouse_aim_initialized)
 	{
 		signals.mouse_aim_yaw = input.mouse_aim_yaw;
@@ -71,8 +74,8 @@ void UpdateInputSignals(const InputSignalSettings& settings, InputSignals& signa
 			signals.mouse_aim_yaw = SmoothAngle(previous_yaw, input.mouse_aim_yaw, settings.mouse_filter, input.dt);
 			signals.mouse_aim_pitch = SmoothAngle(previous_pitch, input.mouse_aim_pitch, settings.mouse_filter, input.dt);
 		}
-		signals.mouse_speed.Set(AngleDifference(signals.mouse_aim_yaw, previous_yaw) / safe_dt,
-			AngleDifference(signals.mouse_aim_pitch, previous_pitch) / safe_dt, 0.f);
+		signals.mouse_speed.Set(std::clamp(AngleDifference(signals.mouse_aim_yaw, previous_yaw) / safe_dt, -kMaxMouseSpeed, kMaxMouseSpeed),
+			std::clamp(AngleDifference(signals.mouse_aim_pitch, previous_pitch) / safe_dt, -kMaxMouseSpeed, kMaxMouseSpeed), 0.f);
 	}
 
 	SVec3 move_target;
@@ -302,7 +305,7 @@ void NotifyFireImpulseOfShot(
 
 	const float side = signals.mouse_speed.x >= 0.f ? -1.f : 1.f;
 	state.impulse_pos.Add(0.f, -settings.kick_drop * p, -settings.kick_back * p);
-	state.impulse_rot.Add(-settings.kick_pitch * p, 0.f, settings.kick_roll * side * p);
+	state.impulse_rot.Add(0.f, settings.kick_pitch * p, settings.kick_roll * side * p);
 	ClampVector(state.impulse_pos, settings.pos_cap);
 	ClampVector(state.impulse_rot, settings.rot_cap);
 }

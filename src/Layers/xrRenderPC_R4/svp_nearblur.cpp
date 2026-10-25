@@ -21,7 +21,6 @@ bool CRenderTarget::svp_nearblur_pass()
 {
 	// pip near-field defocus replaces the plain copy in the realism mode, an uncoupled display
 	// and a live thermal sensor keep full depth of field so they take the plain copy
-	extern float ps_r__svp_near_blur;
 	if (ps_r__svp_near_blur > 0.01f && scope_svp_enabled >= 2 && svp_optic_eye_coupled()
 		&& !svp_thermal_overlay_active()
 		&& rt_Position && rt_secondVP->pRT)
@@ -60,7 +59,6 @@ bool CRenderTarget::svp_nearblur_pass()
 			// near-field defocus by the real thin-lens CoC of the objective aperture
 			// y = k in px*m (CoC px = k * (1/z - 1/focus))
 			{
-				extern float ps_r__svp_focus_m;
 				const float omm = svp_objective_mm();
 				const float A = (omm > 0.01f) ? omm * 0.001f : 0.024f; // typical 24mm when no per-scope data
 				const float vfov = (Device.m_SecondViewport.svp_fov > 0.01f) ? Device.m_SecondViewport.svp_fov : 0.35f;
@@ -79,8 +77,6 @@ bool CRenderTarget::svp_nearblur_pass()
 				const float maxR = _min(coc_near, 0.5f * _min(w, h));
 				RCache.set_c("svp_nearblur_params", focus, k, maxR, md);
 				// pip one-shot proof that the pass ran, throttled while r__svp_diag is on
-				extern int ps_r__svp_diag;
-				extern int ps_r__svp_nearblur_scatter;
 				static u32 s_nb_ms = 0;
 				if (ps_r__svp_diag && Device.dwTimeGlobal - s_nb_ms > 1000)
 				{

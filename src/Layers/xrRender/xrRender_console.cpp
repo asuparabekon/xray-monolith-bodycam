@@ -130,12 +130,17 @@ float ps_r__Detail_l_ambient = 0.9f;
 float ps_r__Detail_l_aniso = 0.25f;
 float ps_r__Detail_density = 0.3f;
 float ps_r__Detail_height = 1.0f;
-// radius-relative grass density falloff, full density inside 'knee' then a power curve to zero at
-// the radius edge, knee >= 1 disables it
-float ps_r__Detail_density_knee = 1.00f;
-float ps_r__Detail_density_curve = 2.00f;
-// dx11 hardware instancing for grass, read once at level load, 0 keeps the baked-copies path
-int ps_r__detail_instancing = 1;
+int ps_r__detail_shadow_cull = 1;
+int ps_r__detail_rows = 1;
+int ps_r__detail_inst = 1;
+int ps_r__detail_inst_res = 1;
+int ps_r__detail_merge = 1;
+int ps_r__detail_occ = 1;
+int ps_r__detail_occ_first = 1;
+int ps_r__detail_thin = 0;
+float ps_r__detail_thin_start = 50.f;
+float ps_r__detail_thin_keep = 0.25f;
+float ps_r__detail_thin_band = 4.f;
 float ps_r__Detail_rainbow_hemi = 0.75f;
 
 float ps_r__Tree_w_rot = 10.0f;
@@ -525,9 +530,6 @@ int ps_r__light_lean = 0;
 int ps_r__device_state_interval = 1;
 int ps_r__smap_null_ps = 1;
 int ps_r__sun_lod_skip = 1;
-int ps_r__sun_grass_runs = 1;
-int ps_r__sun_grass_cull = 1;
-int ps_r__grass_smap_element = 1;
 int ps_r__cb_dirty_list = 1;
 
 //AVO: detail draw radius
@@ -1418,9 +1420,17 @@ void xrRender_initconsole()
 	CMD4(CCC_Float, "r__detail_density", &ps_current_detail_density/*&ps_r__Detail_density*/, 0.04f/*.2f*/, 1.f);
 	//AVO: extended from 0.2 to 0.04 and replaced variable
 	CMD4(CCC_Float, "r__detail_height", &ps_current_detail_height, 0.5f, 2.0f);
-	CMD4(CCC_Float, "r__detail_density_knee", &ps_r__Detail_density_knee, 0.0f, 1.0f);
-	CMD4(CCC_Float, "r__detail_density_curve", &ps_r__Detail_density_curve, 0.25f, 12.0f);
-	CMD4(CCC_Integer, "r__detail_instancing", &ps_r__detail_instancing, 0, 1);
+	CMD4(CCC_Integer, "r__detail_shadow_cull", &ps_r__detail_shadow_cull, 0, 1);
+	CMD4(CCC_Integer, "r__detail_rows", &ps_r__detail_rows, 0, 1);
+	CMD4(CCC_Integer, "r__detail_inst", &ps_r__detail_inst, 0, 1);
+	CMD4(CCC_Integer, "r__detail_inst_res", &ps_r__detail_inst_res, 0, 1);
+	CMD4(CCC_Integer, "r__detail_merge", &ps_r__detail_merge, 0, 1);
+	CMD4(CCC_Integer, "r__detail_occ", &ps_r__detail_occ, 0, 1);
+	CMD4(CCC_Integer, "r__detail_occ_first", &ps_r__detail_occ_first, 0, 1);
+	CMD4(CCC_Integer, "r__detail_thin", &ps_r__detail_thin, 0, 1);
+	CMD4(CCC_Float, "r__detail_thin_start", &ps_r__detail_thin_start, 1.f, 250.f);
+	CMD4(CCC_Float, "r__detail_thin_keep", &ps_r__detail_thin_keep, 0.f, 1.f);
+	CMD4(CCC_Float, "r__detail_thin_band", &ps_r__detail_thin_band, 1.f, 250.f);
 	CMD4(CCC_Integer, "r__tree_ib_reorder", &ps_r__tree_ib_reorder, 0, 1);
 
 #ifdef DEBUG
@@ -1911,9 +1921,6 @@ void xrRender_initconsole()
 	CMD4(CCC_Integer, "r__device_state_interval", &ps_r__device_state_interval, 1, 30);
 	CMD4(CCC_Integer, "r__smap_null_ps", &ps_r__smap_null_ps, 0, 1);
 	CMD4(CCC_Integer, "r__sun_lod_skip", &ps_r__sun_lod_skip, 0, 1);
-	CMD4(CCC_Integer, "r__sun_grass_runs", &ps_r__sun_grass_runs, 0, 1);
-	CMD4(CCC_Integer, "r__sun_grass_cull", &ps_r__sun_grass_cull, 0, 1);
-	CMD4(CCC_Integer, "r__grass_smap_element", &ps_r__grass_smap_element, 0, 1);
 	CMD4(CCC_Integer, "r__cb_dirty_list", &ps_r__cb_dirty_list, 0, 2);
 	CMD3(CCC_Mask, "r__use_precompiled_shaders", &psDeviceFlags2, rsPrecompiledShaders); //Alundaio
 	CMD3(CCC_Mask, "r__enable_grass_shadow", &psDeviceFlags2, rsGrassShadow); //Alundaio

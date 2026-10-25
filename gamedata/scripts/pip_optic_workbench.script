@@ -5,7 +5,6 @@ local USER_FILE = "pip_optics_user.ltx"
 local SNIPPET_FILE = "pip_optics_user_snippets.txt"
 local USER_TAG = "user:pip_optics_user.ltx"
 local EDIT_TAG = "editor:live"
-local FIXTURE_PREFIX = "^pip_api_fixture"
 local TABLE_FLAGS = ImGuiTableFlags and
     (ImGuiTableFlags.RowBg + ImGuiTableFlags.BordersInnerV) or 0
 local FIXED_COLUMN = ImGuiTableColumnFlags and ImGuiTableColumnFlags.WidthFixed or 0
@@ -170,7 +169,9 @@ local function flush_bump()
     end
 end
 
+-- the publisher polls this every reconcile, so a pending drag lands with the ui closed
 function editor_epoch()
+    flush_bump()
     return epoch
 end
 
@@ -216,10 +217,6 @@ local function current_profile()
     if ok and type(profile) == "table" then
         return profile
     end
-end
-
-local function is_fixture(context)
-    return type(context) == "string" and string.find(context, FIXTURE_PREFIX) ~= nil
 end
 
 -- persistent key for the user file, the scope section when one is attached
@@ -437,9 +434,19 @@ local function user_entries(key)
     return entries
 end
 
+local unpublished_logged = {}
+
 local function write_field(config, name, value, tag)
     local descriptor = descriptor_map and descriptor_map[name]
     if not descriptor or config[name] == nil then
+        if tag == USER_TAG then
+            local section = tostring(identity_key(config))
+            local seen = section .. "|" .. name
+            if not unpublished_logged[seen] then
+                unpublished_logged[seen] = true
+                printf("![SVP-EDIT] user field not published section=%s field=%s", section, name)
+            end
+        end
         return false
     end
     config[name] = copy_value(value)
@@ -450,9 +457,6 @@ end
 -- publisher choke point, runs on the composed typed table before apply
 function overlay_apply(config)
     if type(config) ~= "table" then
-        return config
-    end
-    if is_fixture(config.context) then
         return config
     end
     if #ensure_descriptors() == 0 then
@@ -644,15 +648,6 @@ local function stop_session(reason)
     status_text = "session closed " .. tostring(reason)
 end
 
-local function sorted_sections(values)
-    local names = {}
-    for name in pairs(values) do
-        names[#names + 1] = name
-    end
-    table.sort(names)
-    return names
-end
-
 local function sorted_keys(values)
     local names = {}
     for name in pairs(values) do
@@ -671,7 +666,7 @@ local function write_user_file(values)
         return false
     end
     local lines = { "; pip optics workbench overrides, written by the in game editor\n" }
-    for _, section in ipairs(sorted_sections(values)) do
+    for _, section in ipairs(sorted_keys(values)) do
         local entries = values[section]
         if next(entries) then
             lines[#lines + 1] = string.format("\n[%s]\n", section)
@@ -796,9 +791,13 @@ local function tooltip_text(name, descriptor)
     return table.concat(parts, "\n")
 end
 
-local function show_tooltip(text)
+-- a descriptor turns text into the field name, the row text is built only on hover
+local function show_tooltip(text, descriptor)
     if not ImGui.BeginItemTooltip() then
         return
+    end
+    if descriptor then
+        text = tooltip_text(text, descriptor)
     end
     ImGui.PushTextWrapPos(420)
     ImGui.TextWrapped(text)
@@ -920,7 +919,7 @@ local function draw_row(profile, name, descriptor)
     ImGui.TableNextRow(0, 0)
     ImGui.TableNextColumn()
     ImGui.Text(labels[name] or name)
-    show_tooltip(tooltip_text(name, descriptor))
+    show_tooltip(name, descriptor)
     ImGui.TableNextColumn()
     draw_value(name, descriptor)
     ImGui.TableNextColumn()
@@ -1176,7 +1175,13 @@ local function draw_global_optics()
     end
 end
 
+-- descriptors never change once loaded, so the grouping is built once
+local grouped_cache
+
 local function grouped_names()
+    if grouped_cache then
+        return grouped_cache
+    end
     local seen = {}
     local result = {}
     for _, group in ipairs(groups) do
@@ -1198,6 +1203,7 @@ local function grouped_names()
     if #rest > 0 then
         result[#result + 1] = { "Other fields", rest }
     end
+    grouped_cache = result
     return result
 end
 
@@ -1229,10 +1235,6 @@ local function draw_body()
         end
         ImGui.TextDisabled("No active scope profile")
         ImGui.TextDisabled("Aim through a scope with picture in picture enabled")
-        return
-    end
-    if is_fixture(profile.context) then
-        ImGui.TextDisabled("Fixture context active, editing is disabled")
         return
     end
     if session and session.context ~= profile.context then

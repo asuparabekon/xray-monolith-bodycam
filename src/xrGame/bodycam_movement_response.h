@@ -24,8 +24,8 @@ struct MovementInertiaOutput
 {
 	Fvector accel = { 0.f, 0.f, 0.f };
 	float target_speed = 0.f; // m/s
-	float actual_speed = 0.f; // m/s
-	float speed_fraction = 0.f; // Actual over target, 0..1.
+	float filtered_speed = 0.f; // m/s, the commanded speed after inertia
+	float speed_fraction = 0.f; // Filtered over target, 0..1.
 };
 
 MovementInertiaOutput UpdateMovementInertia(

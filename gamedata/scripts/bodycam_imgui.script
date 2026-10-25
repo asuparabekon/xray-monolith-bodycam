@@ -8,6 +8,8 @@ local preset_index_section = "bodycam_presets"
 local preset_section_prefix = "bodycam_preset_"
 local max_user_presets = 64
 local max_preset_name_length = 48
+local zero_size = vector2():set(0, 0)
+local nav_row_size = vector2():set(0, 32)
 local preset_name_buffer_size = 64
 local preset_save_delay_ms = 500
 local preset_apply_guard_ms = 50
@@ -374,6 +376,12 @@ local feature_tabs = {
         },
     },
 }
+for _, feature in ipairs(feature_tabs) do
+    if feature.toggle then
+        feature.toggle_id = "bodycam_toggle_" .. feature.name
+        feature.toggle_settings = { feature.toggle }
+    end
+end
 
 local diagnostics_sections = {
     {
@@ -524,6 +532,7 @@ local function load_bindings()
     bindings = {}
     for _, binding in ipairs(bodycam.get_bindings()) do
         if string.sub(binding.name, 1, 10) ~= "reference_" and binding.name ~= "scope_effects_enable" then
+            binding.widget_id = "##" .. binding.name
             table.insert(bindings, binding)
             binding_by_name[binding.name] = binding
         end
@@ -703,14 +712,8 @@ local function delete_user_preset(preset)
     end
 
     local ini = preset_storage()
-    for _, binding in ipairs(bindings) do
-        if ini:line_exist(preset.section, binding.name) then
-            ini:remove_line(preset.section, binding.name)
-        end
-    end
-    -- Older presets carry a motion_mode line; nothing reads it.
-    if ini:line_exist(preset.section, "motion_mode") then
-        ini:remove_line(preset.section, "motion_mode")
+    if ini:section_exist(preset.section) then
+        ini:remove_section(preset.section)
     end
     ini:remove_line(preset_index_section, preset.id)
     ini:save()
@@ -815,19 +818,36 @@ local function select_copy_source(kind, id, name)
     new_preset_source = { kind = kind, id = id, name = name }
 end
 
-local shared_options_loaded = false
 local shared_options_section = "bodycam_shared_features"
+-- The value the ini copy holds; nil until loaded.
+local scope_effects_saved = nil
 
+-- The ini copy survives the stock exe dropping the bodycam cvars from user.ltx, which leaves the cvar at its
+-- default (on). An off cvar can only come from user.ltx or the console, so it wins over the ini copy.
 local function load_shared_options()
-    if shared_options_loaded then
+    if scope_effects_saved ~= nil then
         return
     end
-    shared_options_loaded = true
 
+    scope_effects_saved = true
     local ini = preset_storage()
     if ini:line_exist(shared_options_section, "scope_effects_enable") then
-        bodycam.set_bool("scope_effects_enable",
-            ini:r_value(shared_options_section, "scope_effects_enable", 1, true))
+        scope_effects_saved = ini:r_value(shared_options_section, "scope_effects_enable", 1, true)
+        if bodycam.get_bool("scope_effects_enable", true) then
+            bodycam.set_bool("scope_effects_enable", scope_effects_saved)
+        end
+    end
+end
+
+-- Writes every change of the cvar (menu, console or user.ltx) through to the ini copy.
+local function sync_shared_options()
+    load_shared_options()
+    local value = bodycam.get_bool("scope_effects_enable", true)
+    if value ~= scope_effects_saved then
+        scope_effects_saved = value
+        local ini = preset_storage()
+        ini:w_value(shared_options_section, "scope_effects_enable", value)
+        ini:save()
     end
 end
 
@@ -853,14 +873,12 @@ local function draw_scope_effects()
     show_tooltip("Draws the lens, tunnel, exit pupil, reflections and light ghosts in scopes. GAMMA still sets zoom and reticles.")
     if changed then
         bodycam.set_bool("scope_effects_enable", value)
-        local ini = preset_storage()
-        ini:w_value(shared_options_section, "scope_effects_enable", value)
-        ini:save()
+        sync_shared_options()
     end
 end
 
 local function actor_on_update()
-    load_shared_options()
+    sync_shared_options()
     if preset_save_due_time and time_global() >= preset_save_due_time then
         save_user_preset(selected_preset)
     end
@@ -906,9 +924,9 @@ local function draw_binding(binding, label)
     local current = get_binding(binding)
     local changed, value
     if binding.type == "bool" then
-        changed, value = ImGui.Checkbox("##" .. binding.name, current)
+        changed, value = ImGui.Checkbox(binding.widget_id, current)
     else
-        changed, value = ImGui.SliderFloat("##" .. binding.name, current, binding.min, binding.max,
+        changed, value = ImGui.SliderFloat(binding.widget_id, current, binding.min, binding.max,
             float_format(binding), ImGuiSliderFlags.None)
     end
     local reset = ImGui.IsItemClicked(ImGuiMouseButton.Right)
@@ -923,7 +941,7 @@ local function draw_binding(binding, label)
 end
 
 local function draw_settings_table(id, settings)
-    if not ImGui.BeginTable(id, 2, ImGuiTableFlags.None, vector2():set(0, 0), 0) then
+    if not ImGui.BeginTable(id, 2, ImGuiTableFlags.None, zero_size, 0) then
         return
     end
 
@@ -946,7 +964,7 @@ local function draw_preset_entries(id_prefix, selection, on_pick)
         for _, preset in ipairs(presets) do
             local selected = selection.kind == kind and selection.id == preset.id
             if ImGui.Selectable(preset.name .. "##" .. id_prefix .. kind .. "_" .. preset.id, selected,
-                ImGuiSelectableFlags.None, vector2():set(0, 0)) then
+                ImGuiSelectableFlags.None, zero_size) then
                 on_pick(kind, preset)
             end
             if selected then
@@ -976,7 +994,7 @@ local function draw_copy_source_selector()
         "Current Settings##copy_current",
         selected,
         ImGuiSelectableFlags.None,
-        vector2():set(0, 0)) then
+        zero_size) then
         select_copy_source("current", "current", "Current Settings")
     end
     if selected then
@@ -1253,7 +1271,7 @@ local function draw_navigation()
             feature.name .. "##bodycam_nav_" .. index,
             selected_feature == index,
             ImGuiSelectableFlags.None,
-            vector2():set(0, 32))
+            nav_row_size)
         if clicked then
             selected_feature = index
         end
@@ -1267,7 +1285,7 @@ local function draw_navigation()
         "Diagnostics##bodycam_nav_diagnostics",
         selected_feature == diagnostics_index,
         ImGuiSelectableFlags.None,
-        vector2():set(0, 32))
+        nav_row_size)
     if clicked then
         selected_feature = diagnostics_index
     end
@@ -1291,7 +1309,7 @@ local function draw_lag_model()
     ImGui.SetNextItemWidth(180)
     if ImGui.BeginCombo("Lag Model", selected == "follow" and lag_models[2].name or lag_models[1].name, ImGuiComboFlags.None) then
         for _, model in ipairs(lag_models) do
-            if ImGui.Selectable(model.name, selected == model.id, ImGuiSelectableFlags.None, vector2():set(0, 0)) then
+            if ImGui.Selectable(model.name, selected == model.id, ImGuiSelectableFlags.None, zero_size) then
                 bodycam.set_bool("camera_continuous_follow_enable", model.id == "follow")
                 schedule_user_preset_save()
             end
@@ -1310,7 +1328,7 @@ local function draw_selected_feature()
     local feature = feature_tabs[selected_feature]
     if feature then
         if feature.toggle then
-            draw_settings_table("bodycam_toggle_" .. feature.name, { feature.toggle })
+            draw_settings_table(feature.toggle_id, feature.toggle_settings)
             ImGui.Spacing()
         end
         if feature.lag_model then
@@ -1328,7 +1346,7 @@ local function draw_selected_feature()
 end
 
 local function draw_bodycam_settings()
-    load_shared_options()
+    sync_shared_options()
     draw_scope_effects()
     ImGui.Separator()
     ImGui.Spacing()
@@ -1336,7 +1354,7 @@ local function draw_bodycam_settings()
         "bodycam_settings_layout",
         2,
         ImGuiTableFlags.BordersInnerV,
-        vector2():set(0, 0),
+        zero_size,
         0) then
         return
     end

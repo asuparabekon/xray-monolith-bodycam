@@ -6,12 +6,12 @@
 #if defined(USE_DX11)
 #include "r4_3dss_reticle.h"
 #include "svp_stats.h"
-u32 CRenderTarget::draw_reflex(bool svp, bool msdf_light)
+u32 CRenderTarget::draw_reflex(bool svp, bool reticle_light)
 {
 	PIX_EVENT_F("RENDER_REFLEX_SIGHTS x%u", (u32)RImplementation.GMBase.RGraph.mapReflexHUDSorted.size());
 	// 3DSS reticle glow, out of bloom (a reflex in the capture has the caller's glow targets)
 	const bool reflex_glow = !svp && !RImplementation.GMBase.RGraph.mapReflexHUDSorted.empty();
-	C3DSSReticleGlow reticle_glow(reflex_glow ? this : nullptr, msdf_light);
+	C3DSSReticleGlow reticle_glow(reflex_glow ? this : nullptr, reticle_light);
 	reticle_glow.note(RImplementation.GMBase.RGraph.mapReflexHUDSorted);
 
 	Fmatrix FTold = Device.mFullTransform;
@@ -29,7 +29,6 @@ u32 CRenderTarget::draw_reflex(bool svp, bool msdf_light)
 	}
 	RImplementation.rmNear();
 
-	extern int ps_r__svp_diag;
 	static u32 s_node_diag_ms = 0;
 	const bool node_diag = svp && ps_r__svp_diag && Device.dwTimeGlobal - s_node_diag_ms > 1000;
 	if (node_diag)
@@ -314,7 +313,6 @@ bool CRenderTarget::draw_hybrid_reflex()
 		state = drawn ? HybridState::Drawn : HybridState::NoDraw;
 	}
 
-	extern int ps_r__svp_diag;
 	static u32 s_diag_ms = 0;
 	static u32 s_last_state = u32(-1);
 	static int s_last_type = -2;

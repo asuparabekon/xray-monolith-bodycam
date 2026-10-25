@@ -1,11 +1,23 @@
 #pragma once
+#include <string>
 #include <string_view>
+#include <vector>
 namespace BodycamReference
 {
-// The crouch additive script layer also lowers the gun when looking up. Reference poses pitch
-// and stance itself, so the layer is not applied while Reference drives the hands.
-inline bool ApplyScriptLayer(bool reference, std::string_view name)
+// Script layers (.anm names) the host skips while Reference drives the hands, because Reference poses
+// what they would add itself. Every other layer, and every layer outside Reference, applies.
+struct ScriptLayerPolicy
 {
-	return !reference || (name != "liz\\liz_hands_crouch_additive.anm" && name != "liz/liz_hands_crouch_additive.anm");
-}
+	std::vector<std::string> referenceSkipped;
+
+	bool Apply(bool reference, std::string_view name) const
+	{
+		if (!reference)
+			return true;
+		for (const auto& skipped : referenceSkipped)
+			if (name == skipped)
+				return false;
+		return true;
+	}
+};
 }

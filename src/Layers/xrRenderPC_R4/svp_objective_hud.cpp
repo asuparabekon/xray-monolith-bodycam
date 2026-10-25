@@ -41,7 +41,6 @@ static void svp_objective_hud_bypass(LPCSTR reason)
 {
 	s_svp_objective_hud.active = false;
 	s_svp_objective_hud.frame = u32(-1);
-	extern int ps_r__svp_cop_diag;
 	static u32 s_bypass_diag_ms = 0;
 	if (ps_r__svp_cop_diag && Device.dwTimeGlobal - s_bypass_diag_ms > 1000)
 	{
@@ -54,8 +53,6 @@ void CRenderTarget::svp_objective_hud_prepare(bool svp_follows)
 {
 	s_svp_objective_hud = SSvpObjectiveHudState();
 
-	extern int ps_r__svp_weapon_continuity;
-	extern int scope_svp_enabled;
 	auto& vp = Device.m_SecondViewport;
 	if (!svp_follows || scope_svp_enabled < 2 || !Device.true_pip_on || !vp.IsSVPActive())
 		return;
@@ -142,7 +139,6 @@ void CRenderTarget::svp_objective_hud_report()
 {
 	if (!svp_objective_hud_current())
 		return;
-	extern int ps_r__svp_cop_diag;
 	static u32 s_diag_ms = 0;
 	if (ps_r__svp_cop_diag && Device.dwTimeGlobal - s_diag_ms > 1000)
 	{

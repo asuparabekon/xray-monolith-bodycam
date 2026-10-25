@@ -338,6 +338,7 @@ void CRender::renderGBuffer(bool clearGraph)
 		ID3D11Resource* zbuffer_res;
 		HW.pBaseZB->GetResource(&zbuffer_res);
 		HW.pContext->CopyResource(RImplementation.Target->rt_tempzb->pSurface, zbuffer_res);
+		_RELEASE(zbuffer_res);
 	}
 
 	if (RImplementation.o.dx10_msaa)
@@ -462,12 +463,12 @@ void CRender::renderGBuffer(bool clearGraph)
 			// keep the grass visible set on the main drain when the SVP pass draws it second
 			extern bool g_svp_defer_detail_clear;
 			g_svp_defer_detail_clear = (!svp_pass && !clearGraph && !ps_r__svp_skip_grass);
-			// the scope grass draws only the slot ranges the scope cone keeps
+			// the scope grass draws only the slot spans the scope view keeps
 			if (svp_pass)
-				Details->hw_Run_Begin_Scope(svp_full);
+				Details->svp_Begin(svp_full);
 			Details->Render();
 			if (svp_pass)
-				Details->hw_Run_End();
+				Details->svp_End();
 			g_svp_defer_detail_clear = false;
 		}
 		if (!svp_pass) Target->phase_scope_glass_deferred();
@@ -533,7 +534,10 @@ void CRender::renderGBuffer(bool clearGraph)
 		// pip the SVP skips its own SSS pass, r__svp_sss_sun computes it so the scope sun keeps the contact term
 		if (RImplementation.o.ssfx_sss && (!Device.m_SecondViewport.IsSVPFrame() || (svp_pass && ps_r__svp_sss_sun)))
 		{
-			static bool sss_rendered, sss_extended_rendered;
+			// the main and SVP targets own separate SSS buffers, so each keeps its own clear-once flags
+			static bool sss_rendered_of[2], sss_extended_rendered_of[2];
+			bool& sss_rendered = sss_rendered_of[svp_pass];
+			bool& sss_extended_rendered = sss_extended_rendered_of[svp_pass];
 
 			// SSS Shadows
 			if (ps_ssfx_sss_quality.z > 0)

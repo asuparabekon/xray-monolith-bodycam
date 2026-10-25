@@ -43,7 +43,6 @@ bool svp_electronic_image_active()
 // pip a fresh forward body ahead of the objective, published by the hud drain
 bool svp_clipon_resolved()
 {
-	extern int ps_r__svp_clipon;
 	auto& vp = Device.m_SecondViewport;
 	return ps_r__svp_clipon && _valid(vp.svp_clipon_axial) && vp.svp_clipon_axial > 0.f && vp.svp_hud_min_frame != u32(-1) &&
 		Device.dwFrame >= vp.svp_hud_min_frame && Device.dwFrame - vp.svp_hud_min_frame <= 8 &&
@@ -69,7 +68,6 @@ extern int ps_r__svp_aperture;
 extern int ps_r__svp_photo_model;
 extern int ps_r__svp_authored_optics;
 extern int ps_r__svp_diag;
-extern int ps_r__svp_reticle_fit;
 extern float ps_r__svp_eyebox;
 extern float ps_r__svp_twilight;
 extern float ps_s3ds_transmission;
@@ -534,6 +532,8 @@ static void svp_bind_aperture(float pupil_mm)
 	const SSvpLensAlignment alignment = svp_project_weapon_to_lens();
 	RCache.set_c("svp_barrel_alignment", alignment.projectile);
 	RCache.set_c("svp_scope_alignment", alignment.scope);
+	// ads reflection dead zone, z enables it, w is the reflection visibility once aligned
+	RCache.set_c("svp_lens_deadzone", 0.f, 0.f, 1.f, 1.f);
 	svp_log_aperture_state(eye, aperture_eye_offset_mm, exit_pupil_mm, pupil_mm, alignment);
 }
 
@@ -541,7 +541,7 @@ void svp_bind_lens_constants()
 {
 	RCache.set_c("scope_svp", (int)Device.m_SecondViewport.IsSVPActive());
 	RCache.set_c("scope_debug", (int)scope_debug);
-	// the projection that placed the PiP image, MSDF reticles map lens UV to world angle through it
+	// the projection that placed the PiP image, atlas reticles map lens UV to world angle through it
 	if (Device.m_SecondViewport.IsSVPActive())
 	{
 		const Fmatrix& P = Device.matrices[1].mProject;
@@ -565,8 +565,6 @@ void svp_bind_lens_constants()
 		float kg = 2.f * Device.m_SecondViewport.eyepiece.radius / dist;
 		clamp(kg, 0.02f, 3.f);
 		// y = true-scale parallax, the real reticle shift is ~0.15 mrad at full eye deflection
-		extern float ps_r__svp_parallax;
-		extern float g_pip_scope_magnification;
 		extern float g_pip_scope_ratio;
 		float par = 0.f;
 		if (ps_r__svp_parallax > 0.f && g_pip_scope_magnification > 0.01f)
@@ -590,22 +588,15 @@ void svp_bind_lens_constants()
 	}
 	// pip scope-local exposure, x = 0 off else 2^bias
 	{
-		extern int ps_r__svp_local_exposure;
-		extern float ps_r__svp_exposure_bias;
 		// y = exit-pupil twilight dimming, exit pupil (ocular*ratio shrunk by zoom) vs the
 		// env-adapted eye pupil squared, electronic sights exempt
-		extern float ps_r__svp_twilight;
-		extern Fvector4 ps_s3ds_param_1;
 		extern Fvector4 ps_s3ds_param_3;
-		extern float g_pip_scope_magnification;
-		extern float g_pip_scope_min_mag;
 		// nvg on = the tube gain owns the scope brightness, our exposure lifts stand down
 		extern Fvector4 ps_dev_param_8;
 		const bool nvg_on = ps_dev_param_8.x >= 1.f;
 		// env-adapted eye pupil (mm), shared by the twilight dimming and the eyebox
 		float envb = 0.f, pupil_mm = 0.f;
-		extern int ps_r__svp_photo_model;
-		if (g_pGamePersistent)
+		if (g_pGamePersistent && g_pGamePersistent->Environment().CurrentEnv)
 		{
 			CEnvDescriptor& E = *g_pGamePersistent->Environment().CurrentEnv;
 			envb = 0.299f * E.sun_color.x + 0.587f * E.sun_color.y + 0.114f * E.sun_color.z +
@@ -649,7 +640,6 @@ void svp_bind_lens_constants()
 				const float dr = _min(ep_mm / pupil_mm, 1.f);
 				const float d = ps_r__svp_photo_model ? dr * dr : dr;
 				dim = 1.f + (_max(d, 0.6f) - 1.f) * _min(ps_r__svp_twilight, 1.f);
-				extern int ps_r__svp_diag;
 				if (ps_r__svp_diag)
 				{
 					static u32 s_twl_ms = 0;
@@ -668,10 +658,6 @@ void svp_bind_lens_constants()
 				svp_update_eyebox_limit(pupil_mm);
 			else
 			{
-				extern float ps_r__svp_eyebox;
-				extern int ps_r__svp_authored_optics;
-				extern float g_pip_scope_magnification;
-				extern int ps_r__svp_diag;
 				const float eb_omm = svp_objective_mm();
 				if (ps_r__svp_eyebox > 0.f && ps_r__svp_authored_optics && eb_omm > 0.01f && g_pip_scope_magnification > 0.01f &&
 					pupil_mm > EPS)
@@ -679,7 +665,7 @@ void svp_bind_lens_constants()
 					const float ep_r = eb_omm * 0.0005f / g_pip_scope_magnification;
 					const float p_r = pupil_mm * 0.0005f;
 					// full-blackout half angle for the sight anchor bound, arm = authored eye relief
-					const float eb_arm = _max(ps_s3ds_param_1.y * 0.01f, 0.05f);
+					const float eb_arm = _max(svp_eye_relief_mm() * 0.001f, 0.05f);
 					Device.m_SecondViewport.svp_eyebox_rad = atanf((ep_r + p_r) / eb_arm);
 				}
 				else
@@ -707,8 +693,6 @@ void svp_bind_lens_constants()
 		float sw_k = 0.f;
 		const float shadow_g = Device.m_SecondViewport.svp_shadow_gain;
 		{
-			extern float g_pip_scope_magnification;
-			extern Fvector4 ps_s3ds_param_1;
 			st = (g_pip_scope_magnification > 0.01f) ? (g_pip_scope_magnification - 1.f) / 7.f : 0.f;
 			clamp(st, 0.f, 1.f);
 			Device.m_SecondViewport.svp_mag = _max(g_pip_scope_magnification, 0.f);
@@ -718,7 +702,7 @@ void svp_bind_lens_constants()
 			float z_eff = ps_s3ds_param_1.z * (3.0f + (snug - 3.0f) * gp);
 			if (z_eff < 0.08f)
 				z_eff = 0.08f;
-			sw_k = 0.4f * z_eff / _max(ps_s3ds_param_1.y, 0.05f);
+			sw_k = 0.4f * z_eff / _max(svp_eye_relief_mm() * 0.1f, 0.05f);
 		}
 		RCache.set_c("svp_exposure", (ps_r__svp_local_exposure && !nvg_on) ? powf(2.f, ps_r__svp_exposure_bias) : 0.f, nvg_on ? 0.f : dim,
 			Device.m_SecondViewport.svp_swing_x * shadow_g * sw_k, Device.m_SecondViewport.svp_swing_y * shadow_g * sw_k);
@@ -726,18 +710,15 @@ void svp_bind_lens_constants()
 		svp_bind_aperture(pupil_mm);
 		// pip glass2: x = lens coating strength, y = heat mirage (sun elevation + magnification)
 		{
-			extern float ps_r__svp_coating;
-			extern float ps_r__svp_mirage;
-			extern float g_pip_scope_magnification;
 			float mirage = 0.f;
-			if (ps_r__svp_mirage > 0.f && g_pip_scope_magnification > 0.01f && g_pGamePersistent)
+			if (ps_r__svp_mirage > 0.f && g_pip_scope_magnification > 0.01f && g_pGamePersistent &&
+				g_pGamePersistent->Environment().CurrentEnv)
 			{
 				CEnvDescriptor& Em = *g_pGamePersistent->Environment().CurrentEnv;
 				const float heat = _max(-Em.sun_dir.y, 0.f); // high overhead sun heats the ground
 				const float clear = 1.f - _min(Em.rain_density, 1.f);
 				const float magf = _min(_max((g_pip_scope_magnification - 2.f) / 6.f, 0.f), 1.f);
 				mirage = ps_r__svp_mirage * heat * clear * magf;
-				extern int ps_r__svp_diag;
 				if (ps_r__svp_diag)
 				{
 					static u32 s_mir_ms = 0;
@@ -757,25 +738,20 @@ void svp_bind_lens_constants()
 			RCache.set_c("svp_glass2", ps_r__svp_coating, mirage, 0.f, vcrop);
 			Device.m_SecondViewport.svp_panel_vcrop = vcrop; // pip binocular bracket mapping reads it
 			// pip glass3: x = sharpen amount, y = field-stop onset, z = sharpen radial falloff, w = sharpen inner crisp radius
-			extern float ps_r__svp_sharpen, ps_r__svp_sharpen_falloff, ps_r__svp_sharpen_inner;
 			// pip field-stop onset, a stop at the field edge blurred by the viewing aperture
 			// which is the exit pupil capped by the eye pupil, 1 = off
 			float fs_onset = 1.f;
 			{
-				extern int ps_r__svp_field_stop;
-				extern float g_pip_scope_magnification;
-				extern Fvector4 ps_s3ds_param_1;
 				const float fs_omm = svp_objective_mm();
 				const float fs_fov = Device.m_SecondViewport.svp_fov;
 				if (ps_r__svp_field_stop && fs_omm > 0.01f && g_pip_scope_magnification > 0.01f && fs_fov > 0.01f && pupil_mm > EPS)
 				{
 					const float ep_r = fs_omm * 0.0005f / g_pip_scope_magnification;
 					const float ap_r = _min(ep_r, pupil_mm * 0.0005f);
-					const float er = _max(ps_s3ds_param_1.y * 0.01f, 0.05f);
+					const float er = _max(svp_eye_relief_mm() * 0.001f, 0.05f);
 					const float app_half = g_pip_scope_magnification * fs_fov * 0.5f;
 					const float penumbra = _min(atanf(ap_r / er) / app_half, 1.f);
 					fs_onset = 1.f - 0.5f * penumbra;
-					extern int ps_r__svp_diag;
 					if (ps_r__svp_diag)
 					{
 						static u32 s_fs_ms = 0;
@@ -789,7 +765,6 @@ void svp_bind_lens_constants()
 			}
 			RCache.set_c("svp_glass3", ps_r__svp_sharpen, fs_onset, ps_r__svp_sharpen_falloff, ps_r__svp_sharpen_inner);
 			// pip glass4: x = nvg bleach roll-off, y = nvg auto-gain, w = shadow swing envelope
-			extern float ps_r__svp_nvg_bleach, ps_r__svp_nvg_sensitivity;
 			RCache.set_c("svp_glass4", ps_r__svp_nvg_bleach, ps_r__svp_nvg_sensitivity, 0.f, shadow_g);
 		}
 	}

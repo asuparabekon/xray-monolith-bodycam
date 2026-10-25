@@ -46,10 +46,10 @@ void CBodycam::ClearHudOutput()
 	m_arm_pose = ArmPose();
 }
 
-void CBodycam::SetMovementSpeed(float target_speed, float actual_speed, float speed_fraction)
+void CBodycam::SetMovementSpeed(float target_speed, float filtered_speed, float speed_fraction)
 {
 	m_movement_target_speed = target_speed;
-	m_movement_actual_speed = actual_speed;
+	m_movement_filtered_speed = filtered_speed;
 	m_movement_speed_fraction = speed_fraction;
 }
 
@@ -73,16 +73,18 @@ void CBodycam::Reset(const CCameraBase* camera, float ads_blend)
 	m_camera_rig.Reset(yaw, pitch);
 }
 
+// The deltas are camera angles; the aim, simulation and rig keep the negated
+// heading and pitch of the camera direction.
 void CBodycam::AddMouseLookDelta(float yaw_delta, float pitch_delta)
 {
-	AddMouseAimDelta(m_mouse_aim, yaw_delta, pitch_delta);
+	AddMouseAimDelta(m_mouse_aim, -yaw_delta, -pitch_delta);
 }
 
 void CBodycam::RebaseLookDelta(float yaw_delta, float pitch_delta)
 {
-	RebaseMouseAim(m_mouse_aim, yaw_delta, pitch_delta);
-	RebaseSimulationLook(m_state, yaw_delta, pitch_delta);
-	m_camera_rig.Rebase(yaw_delta, pitch_delta);
+	RebaseMouseAim(m_mouse_aim, -yaw_delta, -pitch_delta);
+	RebaseSimulationLook(m_state, -yaw_delta, -pitch_delta);
+	m_camera_rig.Rebase(-yaw_delta, -pitch_delta);
 }
 
 void CBodycam::SetViewmodelProfile(const Fvector& pos, const Fvector& rot, float blend_speed)
@@ -115,7 +117,7 @@ const Fvector kSprintBobPivot = { 0.f, -0.12f, 0.35f };
 void CBodycam::ApplySprintBob(BodycamReference::SprintBobInput input)
 {
 	const RuntimeConfig& config = GetConfig();
-	if (!config.sim.sprint.enable || config.sprint_start.gun_bob <= 0.f)
+	if (!SprintBobEnabled())
 	{
 		m_sprint_bob.Reset();
 		return;
@@ -155,7 +157,7 @@ const CameraComposition& CBodycam::Update(const ActorFrame& frame, CameraRigHost
 	const CameraRigSettings camera_settings{ config.camera, config.head, config.footstep, config.sim.sprint.enable };
 	const bool follow_lag = camera_settings.FollowLag();
 	CameraRigInput camera = frame.camera;
-	camera.inertia_speed = m_movement_actual_speed;
+	camera.inertia_speed = m_movement_filtered_speed;
 	const MouseAim mouse_aim = ResolveMouseAim(m_mouse_aim, camera.aim_yaw, camera.aim_pitch);
 
 	SimulationInput input;
@@ -238,8 +240,8 @@ void CBodycam::Dump(bool ads, u32 mstate) const
 		m_viewmodel_profile.enabled, m_viewmodel_profile.target_pos.x, m_viewmodel_profile.target_pos.y, m_viewmodel_profile.target_pos.z,
 		m_viewmodel_profile.target_rot.x, m_viewmodel_profile.target_rot.y, m_viewmodel_profile.target_rot.z,
 		m_viewmodel_profile.blend_speed);
-	Msg("* bodycam movement target=%0.3f actual=%0.3f fraction=%0.3f inertia=%d ads_disable=%d accel=%0.3f decel=%0.3f",
-		m_movement_target_speed, m_movement_actual_speed, m_movement_speed_fraction, config.movement_inertia.enable,
+	Msg("* bodycam movement target=%0.3f filtered=%0.3f fraction=%0.3f inertia=%d ads_disable=%d accel=%0.3f decel=%0.3f",
+		m_movement_target_speed, m_movement_filtered_speed, m_movement_speed_fraction, config.movement_inertia.enable,
 		config.movement_inertia.disable_ads, config.movement_inertia.accel_time, config.movement_inertia.decel_time);
 	Msg("* bodycam lowering enabled=%d target=%0.3f amount=%0.3f holster=%0.3f timers fire=%0.3f ads=%0.3f combat=%0.3f pos[%0.4f %0.4f %0.4f] rot[%0.3f %0.3f %0.3f]",
 		config.sim.lowering.enable, state.lowering.target, state.lowering.amount, state.lowering.holster, state.lowering.fire_recovery,

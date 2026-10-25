@@ -549,7 +549,7 @@ private:
     CActor* m_reference_actor = nullptr;
     friend class BodycamReference::EngineFrameAdapter;
     bool m_reference_profile_attempted = false;
-    // The mode request under which the Reference character failed to load; it loads again on the next request.
+    // The mode request under which a Reference frame failed; Reference starts again on the next request.
     std::optional<std::uint64_t> m_reference_failed_request;
     // The mode request under which the scope effects profile failed to load.
     std::optional<std::uint64_t> m_reference_optics_failed_request;

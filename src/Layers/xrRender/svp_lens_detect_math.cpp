@@ -3,7 +3,7 @@
 #include <algorithm>
 #include "svp_lens_detect_math.h"
 
-// stage-E tube-march tuning, design-intent per the doc A3.2 spec
+// stage-E tube-march tuning
 static const float TUBE_SLAB_M         = 0.005f;  // 5 mm march step
 static const float TUBE_RADIUS_SCALE   = 3.0f;    // cylinder radius = this x eye radius
 static const int   TUBE_EMPTY_RUN      = 3;       // consecutive empty slabs terminate the march
@@ -210,7 +210,7 @@ svp_v4 svp_lens_offset_from_centers(const svp_v3& axis_dir, const svp_v3& eye_c,
 	return o;
 }
 
-// stage-E tube march, doc A3.2, recovers the objective from the housing when Stage D found only the ocular
+// stage-E tube march, recovers the objective from the housing when Stage D found only the ocular
 bool svp_tube_march_objective(const std::vector<svp_v3>& all_verts,
                               const svp_v3& eye_center, const svp_v3& eye_normal,
                               float eye_radius, SDiscFit& obj_out)
@@ -269,7 +269,7 @@ bool svp_tube_march_objective(const std::vector<svp_v3>& all_verts,
 	if (hit_cap) return false;
 
 	float mouth_t = (float)mouth_slab * TUBE_SLAB_M;
-	if (mouth_t < TUBE_MIN_LENGTH || mouth_t > TUBE_MAX_LENGTH) return false;
+	if (mouth_t < TUBE_MIN_LENGTH) return false;
 	if ((float)max_mid_gap * TUBE_SLAB_M > TUBE_MAX_MID_GAP_M) return false;
 
 	// gather the terminal-slab ring
@@ -287,7 +287,6 @@ bool svp_tube_march_objective(const std::vector<svp_v3>& all_verts,
 			ring_n++;
 		}
 	}
-	if (ring_n <= 0) return false;
 
 	// concentricity gate on the mouth centroid
 	svp_v3 center = { ring_sum.x / ring_n, ring_sum.y / ring_n, ring_sum.z / ring_n };
@@ -316,7 +315,7 @@ bool svp_tube_march_objective(const std::vector<svp_v3>& all_verts,
 	return true;
 }
 
-// sv98 fixture, doc 3.1 and Addendum 2, synthesizes a 379-point ocular disc and checks the fit
+// sv98 fixture, synthesizes a 379-point ocular disc and checks the fit
 bool svp_lens_detect_selftest()
 {
 	const svp_v3 center = { 0.000517f, 0.09351f, 0.016879f };

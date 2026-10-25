@@ -1,7 +1,8 @@
 # First-Person Transform API
 
-The `first_person` module exposes finalized native first-person transforms. Lua remains
-responsible for deciding how those transforms are consumed.
+The `first_person` module gives Lua the camera, HUD, weapon and sight transforms of the current
+frame. The sources run from the raw aim, through the camera before Bodycam, to the final rendered
+camera.
 
 ## Transform sources
 
@@ -55,5 +56,5 @@ empty, or the requested bone does not exist. It never retains a Lua game object.
 |---|---|
 | `get_pose(source, slot, bone, output_pose)` | Copy a current transform into `output_pose`; returns `false` when unavailable. |
 
-HUD firedeps are calculated lazily when a script requests one of their sources and are
-reused for further requests made during the same frame.
+The HUD fire and shell-ejection points are calculated on the first request in a frame and
+reused for later requests in the same frame.

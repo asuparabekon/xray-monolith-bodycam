@@ -14,6 +14,7 @@
 #include "../xrEngine/device.h"
 #include "../xrEngine/svp_gameplay_cvars.h"
 #include "../Layers/xrRender/svp_console.h"
+#include "../xrCore/svp_log.h"
 #include "ai_space.h"
 #include "script_engine.h"
 #endif
@@ -50,7 +51,7 @@ namespace
 #if defined(SVP_TEST_CLIENT)
 #define SVP_CONFIG_LOG(...) ((void)0)
 #else
-#define SVP_CONFIG_LOG(...) Msg(__VA_ARGS__)
+#define SVP_CONFIG_LOG(...) PipMsg(__VA_ARGS__)
 #endif
 
 lua_State* svp_lua_state()
@@ -1289,14 +1290,16 @@ u32 svp_begin_optic_context(LPCSTR context, LPCSTR weapon, double weapon_id,
 {
 	if (!svp_transport_active() || svp_scope_mode() <= 0 ||
 		!std::isfinite(weapon_id) || std::floor(weapon_id) != weapon_id ||
-		weapon_id < 0 || weapon_id > u16(-1) ||
+		weapon_id < s_fields[field_weapon_id].minimum ||
+		weapon_id > s_fields[field_weapon_id].maximum ||
 		!std::isfinite(zoom_type) || std::floor(zoom_type) != zoom_type ||
-		zoom_type < 0 || zoom_type > u8(-1) ||
-		!svp_bounded_text(context, sizeof(string256), true) ||
-		!svp_bounded_text(weapon, sizeof(string128), true) ||
-		!svp_bounded_text(scope, sizeof(string128), false) ||
-		!svp_bounded_text(identity_source, sizeof(string64), true) ||
-		!svp_bounded_text(diagnostic_scope, sizeof(string128), false))
+		zoom_type < s_fields[field_zoom_type].minimum ||
+		zoom_type > s_fields[field_zoom_type].maximum ||
+		!svp_bounded_text(context, s_fields[field_context].string_capacity, true) ||
+		!svp_bounded_text(weapon, s_fields[field_weapon].string_capacity, true) ||
+		!svp_bounded_text(scope, s_fields[field_scope].string_capacity, false) ||
+		!svp_bounded_text(identity_source, s_fields[field_identity_source].string_capacity, true) ||
+		!svp_bounded_text(diagnostic_scope, s_fields[field_diagnostic_scope].string_capacity, false))
 		return 0;
 
 	const u32 token = svp_viewport().BeginOpticContext(context, weapon,
@@ -1393,6 +1396,8 @@ luabind::object svp_current_optic_profile()
 	}
 	SParsedConfig parsed = svp_config_view(config);
 	luabind::object result = svp_normalized_table(parsed, false);
+	result["context_token"] = luabind::object(); // the token stays with its owner
+	result["has_owner"] = config.context_token != 0;
 	result["valid"] = true;
 	result["route"] = "typed";
 	result["config_generation"] = config.generation;

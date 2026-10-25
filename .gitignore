@@ -44,7 +44,8 @@ compressor/mod.db0
 *~
 
 # Local development tools, tests and validation artifacts are not published.
-/tools/
+/tools/*
+!/tools/reticle_vector/
 /tests/
 
 # Local dependency downloads and Windows-path validation leftovers.
@@ -59,6 +60,12 @@ compressor/mod.db0
 /tests/reference/*.log
 /tests/reference/__pycache__/
 
-# release packages (tools/package_core.py, tools/release.py)
+# release packages
 /dist/
 __pycache__/
+
+# the vector reticle command-line tool, built by tools/reticle_vector/build-linux.sh
+tools/reticle_vector/svg_to_vector
+
+# Development logs, notes and test records stay local.
+/devdocs/

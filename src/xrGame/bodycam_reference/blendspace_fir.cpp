@@ -1,5 +1,7 @@
 #include "blendspace_fir.h"
+#include <algorithm>
 #include <cmath>
+#include <limits>
 #include <stdexcept>
 namespace BodycamReference
 {
@@ -8,6 +10,9 @@ namespace
 // Shorter steps leave the output unchanged.
 constexpr float kMinStepSeconds = 1e-4f;
 constexpr unsigned kInitialSlots = 10, kSlotGrowth = 5;
+// Past kRebaseAfter the clock and the sample times shift back by kRebaseOffset so float ages keep their precision.
+// The shift is exact for times in [kRebaseOffset / 2, 2 * kRebaseOffset], so ages below the limit are unchanged.
+constexpr float kRebaseAfter = 4096.f, kRebaseOffset = 2048.f;
 }
 BlendSpaceFir::BlendSpaceFir(float windowDuration, FirType type) : window_(windowDuration), type_(type)
 {
@@ -47,6 +52,13 @@ float BlendSpaceFir::Update(float input, float deltaTime)
 	if (deltaTime <= kMinStepSeconds)
 		return lastOutput_;
 	currentTime_ += deltaTime;
+	if (currentTime_ > kRebaseAfter)
+	{
+		currentTime_ -= kRebaseOffset;
+		for (auto& sample : data_)
+			if (sample.time > 0)
+				sample.time = std::max(sample.time - kRebaseOffset, std::numeric_limits<float>::min());
+	}
 	if (data_.empty())
 	{
 		data_.resize(kInitialSlots);

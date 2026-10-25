@@ -2,7 +2,7 @@
 namespace BodycamReference
 {
 SprintMarkerResult TickSprintMarkers(
-	std::array<std::string, 2> names, std::array<float, 2> times, MarkerState state, double recordRate, CandidateContext context)
+	const std::array<std::string, 2>& names, std::array<float, 2> times, MarkerState state, double recordRate, CandidateContext context)
 {
 	constexpr float length = kSprintCycleSeconds;
 	const float rate = float(recordRate);

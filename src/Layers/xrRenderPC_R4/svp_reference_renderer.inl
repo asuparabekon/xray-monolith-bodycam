@@ -161,6 +161,8 @@ bool CRenderTarget::scope_reference_submit(const SvpReferencePacket& packet)
         || !std::isfinite(packet.contrast)
         || (packet.toneMapInputGamma != 1.f && packet.toneMapInputGamma != 2.2f))
         return false;
+    static_assert(std::extent_v<decltype(SvpReferencePacket::materials)> + std::extent_v<decltype(SvpReferencePacket::glassMaterials)> ==
+        std::extent_v<decltype(CRenderTarget::scope_reference_material_checks)>, "one material check per packet material");
     auto* check = scope_reference_material_checks;
     for (const auto& material : packet.materials)
         if (!svp_reference_material_usable(*check++, material)) return false;

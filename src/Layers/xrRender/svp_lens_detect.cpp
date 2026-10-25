@@ -9,9 +9,7 @@
 // measured optical lens discs from the weapon hud mesh, ported from the 3DB viewer detection
 // runs once per unique visual and caches, inert until IKinematics::GetLensDetection is queried
 
-// pure pipeline stage, compiles in every renderer, only ever reached from the DX11 query below
-bool svp_lens_fit(const std::vector<svp_v3>& candidates, const svp_v3& axis_seed, int source,
-                  const std::vector<svp_v3>& all_verts, SLensDetection& out)
+static void svp_lens_detection_reset(SLensDetection& out, int source)
 {
 	out.ok = false;
 	out.has_objective = false;
@@ -23,6 +21,13 @@ bool svp_lens_fit(const std::vector<svp_v3>& candidates, const svp_v3& axis_seed
 	out.eye_radius = 0.f;
 	out.obj_center.set(0.f, 0.f, 0.f);
 	out.obj_radius = 0.f;
+}
+
+// pure pipeline stage, compiles in every renderer, only ever reached from the DX11 query below
+bool svp_lens_fit(const std::vector<svp_v3>& candidates, const svp_v3& axis_seed, int source,
+                  const std::vector<svp_v3>& all_verts, SLensDetection& out)
+{
+	svp_lens_detection_reset(out, source);
 
 	SLensDetectResult r = svp_detect_lens_discs(candidates, axis_seed, source);
 	if (!r.ok || !r.eyepiece.valid)
@@ -135,16 +140,7 @@ void CSkeletonX::SVP_GatherVerts(xr_vector<Fvector>& positions, xr_vector<u16>& 
 
 bool CKinematics::GetLensDetection(SLensDetection& out)
 {
-	out.ok = false;
-	out.has_objective = false;
-	out.source = 0;
-	out.mm = 0.f;
-	out.offset.set(0.f, 0.f, 0.f, 0.f);
-	out.eye_center.set(0.f, 0.f, 0.f);
-	out.eye_normal.set(0.f, 0.f, 1.f);
-	out.eye_radius = 0.f;
-	out.obj_center.set(0.f, 0.f, 0.f);
-	out.obj_radius = 0.f;
+	svp_lens_detection_reset(out, 0);
 
 #if defined(USE_DX10) || defined(USE_DX11)
 	// process-lifetime cache keyed by visual path, negatives cached too, deterministic per mesh

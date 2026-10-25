@@ -21,10 +21,6 @@ MarkerState RangeTime(float length, const float* times, int previous, int next, 
 	return { time, { previous, po }, { next, no } };
 }
 }
-MarkerState MarkerRangeTime(float length, const std::vector<float>& times, int previous, int next, float fraction)
-{
-	return RangeTime(length, times.data(), previous, next, fraction);
-}
 PositiveMarkerClock::PositiveMarkerClock(float length, std::array<std::string, 2> names, std::array<float, 2> times)
 	: length_(length), names_(std::move(names)), times_(times)
 {

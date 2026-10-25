@@ -25,7 +25,8 @@ class RecoilRig
 {
 public:
 	RecoilRig(RecoilSetup setup, std::function<unsigned()> draw15, std::function<double()> unit);
-	void BeginShot(bool aiming);
+	// An automatic shot also sets the automatic pushback.
+	void BeginShot(bool aiming, bool automatic = false);
 	// Takes effect on the next shot, so a running recoil keeps its scale.
 	void SetRecoilPolicy(const RecoilPolicy& policy) { policy_ = policy; }
 	void Stop();

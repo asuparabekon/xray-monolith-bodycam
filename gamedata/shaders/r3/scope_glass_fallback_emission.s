@@ -1,4 +1,4 @@
--- MSDF reticle glow over deferred lens glass (the glow of scope_glass_fallback), and of a reflex in the capture,
+-- Atlas reticle glow over deferred lens glass (the glow of scope_glass_fallback), and of a reflex in the capture,
 -- added into $user$reticle_emission or the scene (svp_reticle_emission.cpp).
 function normal(shader, t_base, t_second, t_detail)
 	shader:begin("scope_vertex", "scope_glass_fallback_emission")
@@ -26,5 +26,4 @@ function normal(shader, t_base, t_second, t_detail)
 	shader:dx10texture("s_reticle_capture_glow", "$user$reticle_capture_glow")
 	shader:dx10sampler("smp_base")
 	shader:dx10sampler("smp_rtlinear");
-	shader:dx10sampler("smp_linear") -- MSDF reticle tiles (reticle_msdf.h)
 end

@@ -5,6 +5,7 @@
 namespace SvpProjectile
 {
 constexpr float minimum_convergence_distance = 2.f;
+constexpr float minimum_resolve_distance = 1.f;
 
 inline float ResolveConvergenceDistance(float configured_distance,
 	bool hit, float hit_distance)
@@ -36,7 +37,7 @@ inline bool ResolveRay(const Fvector& pick_position,
 	target.mad(sight_position, sight_direction, convergence_distance);
 	Fvector resolved_direction;
 	resolved_direction.sub(target, position);
-	if (resolved_direction.magnitude() <= 1.f)
+	if (resolved_direction.magnitude() <= minimum_resolve_distance)
 		return false;
 
 	resolved_direction.normalize();

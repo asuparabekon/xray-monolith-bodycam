@@ -44,5 +44,6 @@ private:
 	std::vector<MouseShakeEntry> instances_;
 	bool previousNonzero_ = false;
 	unsigned events_ = 0;
+	double emitWait_ = 0; // Seconds until the next shake may start.
 };
 }

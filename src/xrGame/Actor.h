@@ -367,6 +367,8 @@ public:
 	void cam_BodycamClearViewmodelProfile(float blend_speed);
 	// lowering_weight 0..1 is the share of the lowering offset that is kept.
 	bool cam_BodycamGetHudOffset(Fvector& pos, Fvector& rot, float lowering_weight) const;
+	// The Classic footstep camera composed the view this frame or the last.
+	bool cam_BodycamFootstepComposed() const;
 	// The pose for the HUD arm controller; inactive outside Classic.
 	Bodycam::ArmPose BodycamArmPose() const;
 	bool BodycamSprintAnimReady() const;
@@ -595,7 +597,7 @@ private:
 	Bodycam::SprintStart m_bodycam_sprint;
 	Bodycam::BrakingStride m_bodycam_brake;
 	// Once per frame from g_cl_CheckControls.
-	void BodycamUpdateMovement(Fvector& control_accel, float& camera_effector_factor, float dt);
+	void BodycamUpdateMovement(Fvector& control_accel, float dt);
 	// The Reference gait and speed rules g_cl_CheckControls applies.
 	bool BodycamReferenceMovement() const;
 	static void BodycamReferenceGait(u32& wished_state);

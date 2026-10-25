@@ -12,7 +12,7 @@ Matrix ApplyLowerSway(Matrix gun, double centimeters);
 enum class GripPoseKind
 {
 	None,
-	Draco,
+	Authored,
 	Other
 };
 class LeftElbowOffset

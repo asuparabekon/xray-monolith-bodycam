@@ -7,14 +7,13 @@
 -- Authoritative references:
 --   svp_optic_config_script.cpp   the validator, field types, and ranges
 --   zzz_extra_scope_features.script   the canonical publisher and typed_table builder
---   README.md, "Modder integration"   the data routes and extension rules
+--   docs/PIP_OPTICS.md, "Typed Lua API"   the data routes and extension rules
 
 local API_VERSION = 3
 local SCHEMA_VERSION = 3
 
 local TAG = "[PIP-API-EXAMPLE]"
 
--- A route epoch change invalidates state derived from an earlier connection.
 local connection = nil
 
 local function diag_enabled()

@@ -52,10 +52,10 @@ public:
     ID3D11ShaderResourceView* distance() const;
     ID3D11ShaderResourceView* coverage() const;
     ID3D11ShaderResourceView* direct() const;
-    // The capture published before the current one, kept unchanged so consumers can fade from it;
-    // null until two captures were published.
+    // The capture published before the current one, kept unchanged so consumers can fade from it.
     bool has_previous() const { return previous_ >= 0; }
     Position previous_origin() const { return previous_origin_; }
+    // Null until two captures were published.
     ID3D11ShaderResourceView* previous_colour() const;
     ID3D11ShaderResourceView* previous_coverage() const;
     const Settings& settings() const { return settings_; }

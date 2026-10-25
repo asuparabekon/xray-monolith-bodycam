@@ -4,7 +4,7 @@
 // pure lens-disc detection ported from the 3DB viewer optics-math.js
 // engine-free split -> fit -> assign core plus the stage-E tube march
 
-// svp_v3/svp_v4 are layout-compatible with Fvector/Fvector4 so WO-B reinterprets its arrays
+// svp_v3/svp_v4 mirror Fvector/Fvector4, the engine caller copies its points in
 struct svp_v3 { float x, y, z; };
 struct svp_v4 { float x, y, z, w; };
 
@@ -17,13 +17,6 @@ struct SDiscFit {
 	bool   valid;
 };
 
-// one entry per skeleton bone the detector needs, filled by WO-B
-struct SBoneInfo {
-	svp_v3 model_pos;     // bind-pose model-space bone origin
-	svp_v3 model_axis_k;  // bind-pose forward column normalized
-	bool   is_lens;       // name matched /lens|glass/i by the caller
-};
-
 struct SLensDetectResult {
 	SDiscFit eyepiece;    // rear-most valid disc
 	SDiscFit objective;   // front-most valid disc past the forward gate, valid == false if none
@@ -32,12 +25,12 @@ struct SLensDetectResult {
 	bool     ok;          // false means no fittable lens, caller keeps authored/live
 };
 
-// detection constants, verbatim from optics-math.js:121-128
+// detection constants, verbatim from optics-math.js
 static const int   FIT_MIN_POINTS        = 12;
 static const float FIT_MAX_RADIUS        = 0.08f;
 static const float FIT_MAX_RMS_RATIO     = 0.35f;
 static const float SPLIT_MIN_GAP         = 0.015f;
-static const float NEAR_BONE_RADIUS      = 0.05f;      // used by WO-B for the fallback selection
+static const float NEAR_BONE_RADIUS      = 0.05f;      // near-bone fallback candidate radius
 static const float AXIS_SEED_MAX_COS     = 0.8660254f; // cos 30
 static const float OBJECTIVE_MIN_FORWARD = 0.03f;
 
@@ -63,5 +56,5 @@ svp_v4 svp_lens_offset_from_centers(const svp_v3& axis_dir, const svp_v3& eye_c,
                                     float eye_r, const svp_v3& obj_c, float obj_r);
 inline float svp_mm_suggestion(float obj_radius_m) { return obj_radius_m * 2.f * 1000.f; }
 
-// asserts the sv98 fixture, returns true on pass, gated caller lives in WO-D
+// asserts the sv98 fixture, returns true on pass, run by svpTestClient
 bool svp_lens_detect_selftest();

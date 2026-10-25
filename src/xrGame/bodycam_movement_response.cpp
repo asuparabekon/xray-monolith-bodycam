@@ -66,7 +66,7 @@ MovementInertiaOutput UpdateMovementInertia(
 	{
 		state = {};
 		output.accel.set(input.target_accel);
-		output.actual_speed = output.target_speed;
+		output.filtered_speed = output.target_speed;
 		output.speed_fraction = output.target_speed > kEpsilon ? 1.f : 0.f;
 		return output;
 	}
@@ -110,8 +110,8 @@ MovementInertiaOutput UpdateMovementInertia(
 	}
 
 	output.accel.set(state.accel);
-	output.actual_speed = XZMagnitude(state.accel) / kAccelPerSpeed;
-	output.speed_fraction = output.target_speed > kEpsilon ? output.actual_speed / output.target_speed : 0.f;
+	output.filtered_speed = XZMagnitude(state.accel) / kAccelPerSpeed;
+	output.speed_fraction = output.target_speed > kEpsilon ? output.filtered_speed / output.target_speed : 0.f;
 	return output;
 }
 } // namespace Bodycam

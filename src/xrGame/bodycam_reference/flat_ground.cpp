@@ -40,7 +40,7 @@ Matrix ApplyFlatPelvisControl(
 	const Matrix basis = InverseAffine(skeleton.ParentComponent(pelvis));
 	const auto original = skeleton.Local(pelvis);
 	auto target = original;
-	const double dy = offset * .01;
+	const double dy = offset * kMetresPerCentimetre;
 	for (unsigned i = 0; i < 3; ++i)
 		target.position[i] += basis[4 + i] * dy;
 	skeleton.SetLocal(pelvis, BlendSkeletalControl(original, target, alpha));

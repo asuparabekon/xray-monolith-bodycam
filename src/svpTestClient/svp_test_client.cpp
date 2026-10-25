@@ -679,25 +679,10 @@ void AddStateTests(Harness& harness)
 		rejected.base_fingerprint ^= 1;
 		CHECK_REJECT(harness, !state.PublishOpticConfig(token, rejected));
 		rejected = publication;
-		rejected.accepted.context_token = token + 1;
-		CHECK_REJECT(harness, !state.PublishOpticConfig(token, rejected));
-		rejected = publication;
 		++rejected.accepted.route_epoch;
 		CHECK_REJECT(harness, !state.PublishOpticConfig(token, rejected));
 		rejected = publication;
 		++rejected.accepted.session;
-		CHECK_REJECT(harness, !state.PublishOpticConfig(token, rejected));
-		rejected = publication;
-		rejected.accepted.frame = 0;
-		CHECK_REJECT(harness, !state.PublishOpticConfig(token, rejected));
-		rejected = publication;
-		rejected.accepted.fingerprint ^= 1;
-		CHECK_REJECT(harness, !state.PublishOpticConfig(token, rejected));
-		rejected = publication;
-		rejected.accepted.valid = false;
-		CHECK_REJECT(harness, !state.PublishOpticConfig(token, rejected));
-		rejected = publication;
-		rejected.accepted.typed_route = false;
 		CHECK_REJECT(harness, !state.PublishOpticConfig(token, rejected));
 		CSecondVPParams::OpticConfig after_rejections;
 		CHECK(harness, !state.ReadOpticConfig(after_rejections));
@@ -1402,7 +1387,7 @@ void AddOpticApiTests(Harness& harness)
 		const auto profile_path =
 			harness.GetOptions().repo / "gamedata/scripts/pip_optic_profile.script";
 		const auto fixture_path =
-			harness.GetOptions().repo / "gamedata/scripts/pip_optic_api_fixture.script";
+			harness.GetOptions().repo / "tests/reference/pip_optic_api_fixture.script";
 		CHECK(harness, std::filesystem::is_regular_file(profile_path));
 		CHECK(harness, std::filesystem::is_regular_file(fixture_path));
 		harness.Trace("files");

@@ -846,6 +846,11 @@ local function try_push(expected_key, expected_token, expected_route)
             if code == "stale_token" or code == "identity_mismatch" then
                 return PUSH_RESTART
             end
+            -- validation codes are deterministic, a retry would fail the same way
+            if code and code ~= "inactive" and code ~= "publication_failed"
+                and code ~= "exception" then
+                return PUSH_DONE
+            end
             return PUSH_RETRY
         end
         active_generation = accepted.config_generation
@@ -875,6 +880,12 @@ local function clear_token()
     active_token = nil
     active_generation = nil
     active_profile_fingerprint = nil
+end
+
+local function forget_active()
+    clear_token()
+    active_key = nil
+    active_route = nil
 end
 
 local function clear_legacy_route(route)
@@ -913,9 +924,7 @@ local function push_offset(force)
         if active_route ~= route then
             clear_legacy_route(active_route)
         end
-        clear_token()
-        active_key = nil
-        active_route = nil
+        forget_active()
         last_diag_key = nil
         if route == "typed" then
             local identity_source = scope_sec and "engine:CWeapon.GetScopeName"
@@ -940,9 +949,7 @@ local function push_offset(force)
         return
     end
     if push_result == PUSH_RESTART then
-        clear_token()
-        active_key = nil
-        active_route = nil
+        forget_active()
         return
     end
 
@@ -956,18 +963,14 @@ local function push_offset(force)
             return true
         end
         if retry_result == PUSH_RESTART then
-            clear_token()
-            active_key = nil
-            active_route = nil
+            forget_active()
             return true
         end
         if tries >= RETRY_MAX then
             printf("![SVP-PUSH] unresolved after retry key=%s token=%s",
                 key, tostring(token or 0))
             if route == "typed" then
-                clear_token()
-                active_key = nil
-                active_route = nil
+                forget_active()
             end
             return true
         end
@@ -1061,6 +1064,10 @@ local function seed_zoom_sound_memo()
     local item = db.actor and db.actor:active_item()
     local weapon = item and item:cast_Weapon()
     if not (item and weapon) then
+        return
+    end
+    -- a wheel scroll at the hip would seed the hip zoom factor
+    if not weapon:IsZoomed() then
         return
     end
     local id = item:id()

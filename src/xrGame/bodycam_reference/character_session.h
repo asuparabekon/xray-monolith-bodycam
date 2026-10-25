@@ -36,7 +36,6 @@ public:
 	bool AcceptsFrame(std::uint32_t frame, bool paused) const { return !paused && simulationFrame_ != frame; }
 	const std::function<double()>& RandomUnit() const { return randomSource_.unit; }
 	CharacterGraph& Graph() { return *graph_; }
-	void ResetRuntime(Rotation control, double horizontalFov, double velocityX, double velocityZ, bool aiming = false);
 	IdlePose& Idle() { return idle_; }
 	const RegripAssetBank& RegripAssets() const { return regrip_; }
 	const RifleAssetBank& RifleAssets() const { return rifle_; }

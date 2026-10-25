@@ -11,4 +11,7 @@ void svp_target_wh(u32& svp_w, u32& svp_h);
 // Learn the settled lens diameter for next-frame adaptive target sizing.
 void svp_track_disc(u32 width, u32 height);
 
+// Optic epoch the learned disc belongs to.
+u32 svp_disc_epoch();
+
 #endif

@@ -44,16 +44,17 @@ inline bool ActionAliasAimed(const std::string& alias)
 }
 
 // Classifies a HUD animation alias. A prefix matches whole words only: "anm_reload" and
-// "anm_reload_empty" match it, "anm_reloadx" does not.
-inline ActionKind ClassifyActionAlias(const std::string& alias)
+// "anm_reload_empty" match it, "anm_reloadx" does not. extraReloads lists further exact aliases the
+// host game uses for reload steps.
+inline ActionKind ClassifyActionAlias(const std::string& alias, const std::vector<std::string>& extraReloads = {})
 {
 	const auto family = [&](std::string_view base)
 	{ return alias == base || (alias.size() > base.size() && alias.compare(0, base.size(), base) == 0 && alias[base.size()] == '_'); };
 	if (family("anm_reload") || family("anm_open") || family("anm_add_cartridge") || family("anm_close"))
 		return ActionKind::Reload;
-	// Scripted tactical shotgun endings present in GAMMA GIMP configs.
-	if (alias == "anm_reloadendtac_end" || alias == "anm_reloadendtacnachalo_end" || alias == "anm_reloadendemptytac_end")
-		return ActionKind::Reload;
+	for (const auto& extra : extraReloads)
+		if (alias == extra)
+			return ActionKind::Reload;
 	if (family("anm_ammo_check"))
 		return ActionKind::AmmoCheck;
 	if (family("anm_bore") || family("anm_inspect"))
@@ -104,7 +105,7 @@ class GenericActions
 
 public:
 	GenericActions() = default;
-	explicit GenericActions(const std::vector<ActionAlias>& aliases)
+	explicit GenericActions(const std::vector<ActionAlias>& aliases, const std::vector<std::string>& extraReloads = {})
 	{
 		std::set<std::uint64_t> ambiguous;
 		std::set<std::uint64_t> hipMotions;
@@ -112,7 +113,7 @@ public:
 		std::set<std::string> unresolvedAliases;
 		for (const auto& alias : aliases)
 		{
-			const auto kind = alias.resolved ? ClassifyActionAlias(alias.alias) : ActionKind::None;
+			const auto kind = alias.resolved ? ClassifyActionAlias(alias.alias, extraReloads) : ActionKind::None;
 			aliasMotions[alias.alias].push_back(alias.motion);
 			if (!alias.resolved)
 				unresolvedAliases.insert(alias.alias);

@@ -45,7 +45,7 @@ bool CDSGraphManager::svp_cull_reject(dxRender_Visual* V, Fmatrix* M)
 	Fvector wc; wc.set(V->vis.sphere.P);
 	float wr = V->vis.sphere.R;
 	const bool reject = !s_svp_cull_frustum.testSphere_dirty(wc, wr);
-	// count the identity-matrix rejects distinctly, the ledger proof the sorted cull now fires
+	// count the identity-matrix rejects (sorted-list world statics) separately
 	if (reject && M == &Fidentity && ps_r__svp_stats)
 		++svp_stats_cull_reject_ident;
 	if (reject)

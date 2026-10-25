@@ -1,4 +1,5 @@
 #include "bodycam_viewmodel_profile.h"
+#include "bodycam_smoothing.h"
 
 #include <algorithm>
 #include <cmath>
@@ -35,13 +36,6 @@ bool NearlyZero(const SVec3& value)
 {
 	return std::fabs(value.x) < kActiveEpsilon && std::fabs(value.y) < kActiveEpsilon && std::fabs(value.z) < kActiveEpsilon;
 }
-
-void Approach(SVec3& current, const SVec3& target, float amount)
-{
-	current.x += (target.x - current.x) * amount;
-	current.y += (target.y - current.y) * amount;
-	current.z += (target.z - current.z) * amount;
-}
 } // namespace
 
 void SetViewmodelProfile(ViewmodelProfileState& state, const SVec3& pos, const SVec3& rot, float blend_speed)
@@ -62,9 +56,8 @@ void ClearViewmodelProfile(ViewmodelProfileState& state, float blend_speed)
 
 ViewmodelProfileOutput UpdateViewmodelProfile(ViewmodelProfileState& state, float dt, float ads_blend)
 {
-	const float response = 1.f - std::exp(-state.blend_speed * dt);
-	Approach(state.current_pos, state.target_pos, response);
-	Approach(state.current_rot, state.target_rot, response);
+	SmoothVector(state.current_pos, state.target_pos, state.blend_speed, dt);
+	SmoothVector(state.current_rot, state.target_rot, state.blend_speed, dt);
 
 	ViewmodelProfileOutput output;
 	output.pos = state.current_pos;

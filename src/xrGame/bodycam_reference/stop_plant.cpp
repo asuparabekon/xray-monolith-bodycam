@@ -1,5 +1,6 @@
 #include "stop_plant.h"
 #include "constants.h"
+#include <stdexcept>
 
 namespace BodycamReference
 {
@@ -10,10 +11,16 @@ constexpr StopEvaluator kPlantEvaluators[2][6] = { { { 573, StopAsset::F, .133 }
 													   { 565, StopAsset::RB, .233 } },
 	{ { 560, StopAsset::F, .7 }, { 559, StopAsset::B, .7 }, { 557, StopAsset::LF, .8 }, { 555, StopAsset::LB, .8 },
 		{ 553, StopAsset::RF, .766 }, { 552, StopAsset::RB, .7 } } };
+unsigned PlantIndex(unsigned state)
+{
+	if (state != 5 && state != 6)
+		throw std::invalid_argument("Stop plant state must be 5 or 6");
+	return state - 5;
+}
 }
 const StopEvaluatorSet& StopPlantEvaluators(unsigned state)
 {
-	return kPlantEvaluators[state - 5];
+	return kPlantEvaluators[PlantIndex(state)];
 }
 void StopPlantDispatch::InitializeState(unsigned state, const EventSink& sink)
 {
@@ -81,7 +88,7 @@ StopPlantTrace StopPlantDispatch::Update(
 }
 StopPlantSnapshot StopPlantDispatch::EvaluationSnapshot(unsigned state) const
 {
-	const auto& p = plants_[state - 5];
+	const auto& p = plants_[PlantIndex(state)];
 	return { p.weights.value(), p.left.Weights(), p.right.Weights(), p.layerRelevant };
 }
 }

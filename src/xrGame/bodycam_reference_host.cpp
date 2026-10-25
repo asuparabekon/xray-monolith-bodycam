@@ -63,9 +63,10 @@ void EngineCharacterHost::SetEquipment(const EquipmentTransforms& equipment)
 	neutralFitDirty_ = true;
 }
 
-void EngineCharacterHost::ConfigureActions(const std::vector<ActionAlias>& aliases, const std::vector<std::uint8_t>& semanticsPacket)
+void EngineCharacterHost::ConfigureActions(const std::vector<ActionAlias>& aliases, const std::vector<std::uint8_t>& semanticsPacket,
+	const std::vector<std::string>& extraReloadAliases)
 {
-	actions_ = GenericActions(aliases);
+	actions_ = GenericActions(aliases, extraReloadAliases);
 	auto clips = actions_.SemanticsClips();
 	if (!clips.empty())
 		semantics_ = std::make_unique<ActionSemantics>(semanticsPacket, std::move(clips), session_->RandomUnit());
@@ -98,14 +99,14 @@ void EngineCharacterHost::ConfigureRecoil(const RecoilMetadata& metadata)
 {
 	session_->Graph().recoil.SetRecoilPolicy(BuildRecoilPolicy(metadata));
 }
-void EngineCharacterHost::BeginShot(bool aiming)
+void EngineCharacterHost::BeginShot(bool aiming, bool automatic)
 {
 	if (!firing_)
 	{
 		session_->Graph().regrip.Semi().Begin(Motion().worldTime);
 		firing_ = true;
 	}
-	session_->Graph().recoil.BeginShot(aiming);
+	session_->Graph().recoil.BeginShot(aiming, automatic);
 }
 void EngineCharacterHost::StopFire(bool cancelled)
 {

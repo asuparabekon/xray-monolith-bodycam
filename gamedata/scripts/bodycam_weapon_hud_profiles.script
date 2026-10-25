@@ -16,6 +16,11 @@ local profile_fields = {
     { name = "blend_speed", type = 2, default = default_blend_speed },
 }
 
+local field_defaults = {}
+for _, field in ipairs(profile_fields) do
+    field_defaults[field.name] = field.default
+end
+
 local current_hud_section
 local current_weapon_section
 local current_profile
@@ -39,8 +44,11 @@ local function storage_section(weapon_section)
 end
 
 local function load_profile(weapon_section)
-    local profile = {}
     local ini = storage()
+    if not ini then
+        return blank_profile()
+    end
+    local profile = {}
     local section = storage_section(weapon_section)
     for _, field in ipairs(profile_fields) do
         profile[field.name] = ini:r_value(section, field.name, field.type, field.default)
@@ -171,7 +179,7 @@ local function draw_float(label, field, speed, minimum, maximum, format, descrip
     local changed, value = ImGui.DragFloat(label, current_profile[field], speed, minimum, maximum,
         format, ImGuiSliderFlags.AlwaysClamp)
     local reset = ImGui.IsItemClicked(ImGuiMouseButton.Right)
-    local default_value = field == "blend_speed" and default_blend_speed or 0
+    local default_value = field_defaults[field]
     tooltip(description, minimum, maximum, default_value, format)
     if changed or reset then
         if reset then
@@ -233,7 +241,6 @@ end
 function on_game_start()
     RegisterScriptCallback("actor_on_update", actor_on_update)
     RegisterScriptCallback("actor_on_net_destroy", actor_on_net_destroy)
-    refresh_active_profile()
 end
 
 if ImGui and ImGui.Groups and ImGui.Groups.Main and ImGui.Groups.Mods then

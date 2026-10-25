@@ -73,7 +73,7 @@ void GaitBlendList::Initialize()
 	lastIndex_ = -1;
 	duration_ = 0;
 	weights_ = { 1, 0 };
-	blends_ = {};
+	blends_.fill(CubicRangeBlend{});
 	if (policy_ != Policy::Gait)
 		for (auto& blend : blends_)
 			blend = CubicRangeBlend([](float alpha) { return alpha; });
@@ -127,10 +127,11 @@ GaitBlendTrace GaitBlendList::Update(unsigned gait, double dt, double parentWeig
 std::vector<SprintMaskContext> DispatchSprintMask(double mask, double parentWeight)
 {
 	const float alpha = std::clamp(float(mask), 0.f, 1.f), parent = float(parentWeight);
-	const bool a = alpha<kBlendFull, b = alpha> kBlendEpsilon;
-	if (a && b)
+	const bool belowFull = alpha < kBlendFull;
+	const bool aboveZero = alpha > kBlendEpsilon;
+	if (belowFull && aboveZero)
 		return { { false, parent * (1.f - alpha) }, { true, parent * alpha } };
-	return { { !a, parent } };
+	return { { !belowFull, parent } };
 }
 void ForwardGaitDispatch::InitializeMask(const std::function<void()>& initializeChildren)
 {

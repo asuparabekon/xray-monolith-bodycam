@@ -5,10 +5,10 @@
 #define main scope_color_write_main
 #include "scope_color_write.ps"
 #undef main
-#ifndef SCOPE_REFERENCE_OCULAR_DECLARED // declared by the MSDF-aware scope_custom_reticle.h
+#ifndef SCOPE_REFERENCE_OCULAR_DECLARED // declared by the atlas-aware scope_custom_reticle.h
 Texture2D scope_reference_ocular;
 #endif
-#ifdef RETICLE_MSDF_EMISSION_PASS
+#ifdef RETICLE_ATLAS_EMISSION_PASS
 #include "reticle_emission_out.h"
 ReticleEmissionOut main(v_out input)
 #else
@@ -20,16 +20,16 @@ float4 main(v_out input) : SV_Target
     // reject it. The glass G-buffer tag marks the frontmost visible lens pixels.
     if (!(scope_reference_visible_glass.Load(int3(input.hpos.xy,0)).w > 1.5)) discard;
 #endif
-#ifdef RETICLE_MSDF_EMISSION_PASS
-    // the glow core and its glow source (reticle_msdf.h), from the reticle alone; without the MSDF-aware reticle
+#ifdef RETICLE_ATLAS_EMISSION_PASS
+    // the glow core and its glow source (reticle_atlas.h), from the reticle alone; without the atlas-aware reticle
     // there is none
     ReticleEmissionOut o = (ReticleEmissionOut)0;
-#ifdef RETICLE_MSDF_H
+#ifdef RETICLE_ATLAS_H
     scope = new_Scope(input);
     const float4 mark = scope_custom_reticle(scope);
     const float pupil = saturate(scope_reference_ocular.Load(int3(input.hpos.xy,0)).a);
     o.core = float4(mark.rgb * pupil, mark.a);
-    o.glow = float4(rmsdf_glow_source.rgb * pupil, rmsdf_glow_source.a);
+    o.glow = float4(reticle_atlas_glow_source.rgb * pupil, reticle_atlas_glow_source.a);
 #else
     discard;
 #endif

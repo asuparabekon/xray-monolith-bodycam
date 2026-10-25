@@ -104,7 +104,6 @@ public:
 	Fvector4 svp_opt_offset = { 0.f, 0.f, 0.f, 0.f }; // xy lateral zw front/radius (eyepiece radii), authored_optics gated, 0 = none
 	float svp_opt_obj_mm = 0.f; // objective clear aperture mm, the spec cvar then the authored w fallback, 0 = none
 	bool svp_alt_sight = false; // aimed on a non scope sight, the fit latch freezes on the wrong pose
-	float svp_recoil_relax_s = 0.f; // authored one shot recovery, dispersion over relax speed
 	float svp_zoom_pub = 0.f; // raise transient free zoom for the svp camera, 0 = unset falls back to hud_params.y
 	float svp_eyebox_rad = 0.f; // eyebox half angle (rad) from the real exit pupil and eye relief
 	float svp_shadow_gain = 0.f; // swing envelope 0..1, hard weapon motion sweeps the crescent in

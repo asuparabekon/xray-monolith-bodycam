@@ -117,6 +117,6 @@ float4 main(p_screen I) : SV_Target
 
 	// Mix Scene with Blur
 	float weight = smoothstep(0.1f, 1.0f - (ssfx_scattering_setup.x * 0.8), fogresult);
-	return float4(scope_reference_fog_mix(raw.rgb, blur, weight,
+	return float4(scope_reference_fog_mix(raw.rgb, img, blur, weight,
 		scope_reference_transfer.x, meter), raw.a);
 }

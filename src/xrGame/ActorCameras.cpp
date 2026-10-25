@@ -690,6 +690,7 @@ bool CActor::cam_Prepare(float dt, float fFOV, PreparedCamera& frame, bool refer
 		}
 		else
 			psHUD_FOV = psHUD_FOV_def;
+		psHUD_FOV /= Bodycam::ReticleInspectZoom(); // the Reticle Editor's inspect zoom (bodycam_console.cpp)
 	}
 
 	if (cam_freelook != eflDisabled && cam_active != eacFreeLook)
@@ -913,6 +914,8 @@ void CActor::cam_Finalize(const PreparedCamera& frame)
 			cam_BodycamVisualUpdate(C, dt, _viewport_near, false);
 			Cameras().ApplyPP();
 		}
+		else
+			cam_BodycamVisualReset(nullptr); // Third person or demo camera: reseed on the next first-eye frame.
 		FirstPerson::PublishCamera();
 	}
 }

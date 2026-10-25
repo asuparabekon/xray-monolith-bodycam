@@ -1,4 +1,5 @@
 #pragma once
+#include "marker_clock.h"
 #include <optional>
 #include <vector>
 
@@ -49,7 +50,7 @@ private:
 struct RotateSequenceState
 {
 	float accumulator = 0, blendWeight = 0, playRate = 0;
-	int previousIndex = -2, nextIndex = -2;
+	int previousIndex = kNoMarker, nextIndex = kNoMarker;
 	SequenceDeltaHistory history;
 	bool relevanceFlag = false, rateClampInitialized = false, looping = false;
 };

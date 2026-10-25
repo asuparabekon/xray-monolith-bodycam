@@ -162,11 +162,19 @@ bool SaveReferenceWeaponPosition(LPCSTR section)
 		return false;
 	string_path path;
 	PositionPath(path);
-	// Other weapons and the other keys of this section are kept.
+	// Other weapons and the other keys of this section are kept. Only edited
+	// endpoints are written; the others keep following the binding baseline.
 	CInifile saved(path, FALSE, TRUE, FALSE);
 	saved.set_override_names(TRUE);
-	saved.w_fvector3(section, "hip_position_m", entry->value.hip);
-	saved.w_fvector3(section, "ads_position_m", entry->value.ads);
+	const auto write = [&](LPCSTR key, const Fvector& value, bool edited)
+	{
+		if (edited)
+			saved.w_fvector3(section, key, value);
+		else
+			saved.remove_line(section, key);
+	};
+	write("hip_position_m", entry->value.hip, entry->hip_override);
+	write("ads_position_m", entry->value.ads, entry->ads_override);
 	const bool ok = saved.save_as(path);
 	Msg("[Reference weapon position] save section=%s result=%s", section, ok ? "ok" : "failed");
 	return ok;
@@ -335,6 +343,11 @@ bool* const g_preset_features[] = {
 	&g_config.sim.fire.enable,
 	&g_config.sim.sprint.enable,
 	&g_config.movement_inertia.enable,
+	&g_config.footstep.enable,
+	&g_config.regrip.enable,
+	&g_config.recoil.enable,
+	&g_config.handling.directional_weapon_inertia,
+	&g_config.handling.movement_linked_handling,
 };
 
 struct PresetFloat
@@ -433,6 +446,11 @@ bool FootstepCameraEnabled()
 bool SprintTransitionEnabled()
 {
 	return g_config.sim.sprint.enable;
+}
+
+bool SprintBobEnabled()
+{
+	return g_config.sim.sprint.enable && g_config.sprint_start.gun_bob > 0.f;
 }
 
 bool AnyEffectEnabled()

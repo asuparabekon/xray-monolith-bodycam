@@ -16,8 +16,9 @@ void CRender::Calculate()
 	// once per frame, gates the hybrid IsSVPFrame and the legacy SVP paths. true PiP is DX11-only, so it
 	// stays off on the DX10/9/8 renderers even if r__svpscope is set, otherwise the shared scope capture
 	// would divert the lens meshes into PiP maps those renderers never render or clear
+	// pip off under MSAA, the late composite binds single-sample scene targets with the MSAA position
 #if defined(USE_DX11)
-	Device.true_pip_on = (scope_svp_enabled != 0);
+	Device.true_pip_on = (scope_svp_enabled != 0) && !RImplementation.o.dx10_msaa;
 #else
 	Device.true_pip_on = false;
 #endif

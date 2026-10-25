@@ -1,4 +1,4 @@
-// The two outputs of an MSDF reticle emission pass (svp_reticle_emission.cpp binds the glow targets there): the lit
+// The two outputs of a reticle atlas emission pass (svp_reticle_emission.cpp binds the glow targets there): the lit
 // core, and the same light weighted by the atlas's glow strength, which the engine spreads into the glow.
 #ifndef RETICLE_EMISSION_OUT_H
 #define RETICLE_EMISSION_OUT_H

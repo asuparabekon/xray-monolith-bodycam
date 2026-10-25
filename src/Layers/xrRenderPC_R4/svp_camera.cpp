@@ -142,7 +142,6 @@ bool svpCamera()
 	const u32 camera_session = params.GetSVPSession();
 	// Reference fits the current captured lens every frame; Gamma zoom/config stay native.
 	const bool referenceEffects = RImplementation.TargetMain && RImplementation.TargetMain->scope_reference_prepare_capture();
-	extern float ps_s3ds_pupil_parity;
 	const float pupil_parity = params.RenderOpticConfig().typed_route ? params.RenderOpticConfig().pupil_parity : ps_s3ds_pupil_parity;
 
 	// analytic eyepiece fit, a disc of radius r at view depth d projects to ndc height 2*r*_22/d
@@ -165,7 +164,6 @@ bool svpCamera()
 
 	// flat screen optic (binocular), the panel is a see-through window so the svp fov is the
 	// panel's angular subtense at the weapon zoom, magnification then tracks the stock look
-	extern int ps_r__svp_flat_window;
 	extern Fvector4 ps_s3ds_param_3;
 	const bool flat_optic = ps_r__svp_flat_window && (int)ps_s3ds_param_3.y == 8;
 	const bool flat_window = flat_optic && Device.m_SecondViewport.svp_disc_px > 1.f;
@@ -178,9 +176,7 @@ bool svpCamera()
 	{
 		// authored mag flat optics keep the clean optical mag, only the see-through panel takes the subtense ratio
 		if (!params.svp_authored_mag)
-			scope_magnification = fov_aim /
-				window_fov(g_pGamePersistent->m_pGShaderConstants->hud_params.y > 1.f ? g_pGamePersistent->m_pGShaderConstants->hud_params.y
-																					  : svp_fov);
+			scope_magnification = fov_aim / window_fov(svp_fov);
 		ratio_magnification = 1.f;
 	}
 	else if (referenceEffects)
@@ -198,14 +194,11 @@ bool svpCamera()
 
 	// magnification ceiling, the optic's authored config max zoom (hud_fov_params.x, the same source
 	// as g_pip_scope_max_mag), held through section churn so a flip cannot push the mag past the optic
-	{
-		scope_magnification = svp_clamp_magnification(scope_magnification, fov_aim);
-	}
+	scope_magnification = svp_clamp_magnification(scope_magnification, fov_aim);
 
 	// pip ratio pipeline diag ([SVP-RATIO]), cross checks the analytic fit against the measured
 	// screen ndc extent, they agree for a settled on axis pose, measured lives here for the check
 	{
-		extern int ps_r__svp_diag;
 		if (ps_r__svp_diag)
 		{
 			static u32 s_rat_ms = 0;
@@ -254,8 +247,8 @@ bool svpCamera()
 		const float yscale = (_abs(fovp.y - fovp.x) < 0.01f || params.svp_min_75base) ? fscale : 1.f;
 		if (flat_window && !params.svp_authored_mag)
 		{
-			g_pip_scope_max_mag = (fovp.x > EPS) ? fov_aim / window_fov(fovp.x * fscale) : scope_magnification;
-			g_pip_scope_min_mag = (fovp.y > EPS) ? fov_aim / window_fov(fovp.y * yscale) : scope_magnification;
+			g_pip_scope_max_mag = (fovp.x > EPS) ? fov_aim / window_fov(svp_factor_to_fov(fovp.x, fscale)) : scope_magnification;
+			g_pip_scope_min_mag = (fovp.y > EPS) ? fov_aim / window_fov(svp_factor_to_fov(fovp.y, yscale)) : scope_magnification;
 		}
 		else
 		{
@@ -278,8 +271,9 @@ bool svpCamera()
 			// authored mag flat optic renders the floor panel subtense then the optical mag crops in
 			const Fvector4& fovp = g_pGamePersistent->m_pGShaderConstants->hud_fov_params;
 			const float fscale = rad2deg(fov_aim) / 75.f;
-			const float yscale = (_abs(fovp.y - fovp.x) < 0.01f) ? fscale : 1.f;
-			vFov = window_fov(fovp.y * yscale) / scope_magnification;
+			const float yscale = (_abs(fovp.y - fovp.x) < 0.01f || params.svp_min_75base) ? fscale : 1.f;
+			// without an authored min zoom the panel subtense is 0, keep the plain window fov
+			vFov = (fovp.y > EPS) ? window_fov(fovp.y * yscale) / scope_magnification : fov / scope_magnification;
 		}
 		else
 			vFov = fov / scope_magnification;
@@ -297,7 +291,6 @@ bool svpCamera()
 	bool near_fresh = false;
 	bool entrance_enabled = false;
 	int entrance_ray_mode = 0;
-	extern int ps_r__svp_weapon_continuity;
 	// True PiP falls back to the main eye until a valid objective is available
 	if (scope_svp_enabled >= 2)
 	{
@@ -311,7 +304,6 @@ bool svpCamera()
 		const float front_use_lens = objective_delta.dotproduct(ax);
 		float front_use = front_use_lens;
 		// a clip-on ahead of the objective owns the entrance, the camera clears its far face
-		extern int ps_r__svp_clipon;
 		if (SvpReferenceCapture::UseInferredClipOn(referenceEffects, ps_r__svp_clipon != 0, params.svp_clipon_axial, front_use) &&
 			params.svp_hud_min_frame != u32(-1) && Device.dwFrame >= params.svp_hud_min_frame &&
 			Device.dwFrame - params.svp_hud_min_frame <= 8 && params.svp_hud_min_session == params.GetSVPSession() &&
@@ -375,7 +367,6 @@ bool svpCamera()
 			objective_registration = {};
 		}
 
-		extern int ps_r__svp_cop_diag;
 		static u32 s_basis_ms = 0;
 		if (ps_r__svp_cop_diag && (main_fallback || Device.dwTimeGlobal - s_basis_ms > 500))
 		{
@@ -392,7 +383,6 @@ bool svpCamera()
 
 	// Aligning to view-up is optional. Raw mode keeps the camera, aperture and
 	// reticle in the same weapon-relative eyepiece frame.
-	extern int ps_r__svp_roll_stabilize;
 	if (ps_r__svp_roll_stabilize)
 	{
 		Fvector fwd, wup, right, up;
@@ -405,22 +395,14 @@ bool svpCamera()
 			right.normalize();
 			up.crossproduct(fwd, right);
 			up.normalize();
-			m_W_svpcam.i.x = right.x;
-			m_W_svpcam.i.y = right.y;
-			m_W_svpcam.i.z = right.z;
-			m_W_svpcam.j.x = up.x;
-			m_W_svpcam.j.y = up.y;
-			m_W_svpcam.j.z = up.z;
-			m_W_svpcam.k.x = fwd.x;
-			m_W_svpcam.k.y = fwd.y;
-			m_W_svpcam.k.z = fwd.z;
+			m_W_svpcam.i.set(right);
+			m_W_svpcam.j.set(up);
+			m_W_svpcam.k.set(fwd);
 		}
 	}
 
 	// pip lens flip diagnostic ([SVP-ORIENT]), the mesh basis vs the final svp camera basis
 	{
-		extern int ps_r__svp_cop_diag;
-		extern int ps_r__svp_roll_stabilize;
 		if (ps_r__svp_cop_diag && params.eyepiece.radius > EPS)
 		{
 			static u32 s_orient_ms = 0;
@@ -446,24 +428,18 @@ bool svpCamera()
 	// a non-square SVP keeps the horizontal window subtense at vFov, the vertical follows the aspect
 	float vfov_use = (aspect < 0.999f) ? (2.f * atanf(aspect * tanf(vFov * 0.5f))) : vFov;
 
-	float fNearPlane_hud, fFarPlane_hud;
-	Device.matrices[0].mProject.decompose_projection(_, _, fNearPlane_hud, fFarPlane_hud);
-	// Reference FOV is vertical, including non-square targets; native retains its original policy.
-	const float projection_aspect = aspect;
-	auto svp_proj = Fmatrix().build_projection(vfov_use, projection_aspect, near_plane, fFarPlane);
-	auto svp_proj_hud = Fmatrix().build_projection(vfov_use, projection_aspect, near_plane, fFarPlane_hud);
+	auto svp_proj = Fmatrix().build_projection(vfov_use, aspect, near_plane, fFarPlane);
 	// Place the objective axis on its physical eyepiece chart point
 	if (entrance_ray_mode == 2)
 	{
 		svp_proj._31 += principal_ndc.x;
 		svp_proj._32 += principal_ndc.y;
-		svp_proj_hud._31 += principal_ndc.x;
-		svp_proj_hud._32 += principal_ndc.y;
 	}
+	// the HUD projection is the scene projection without the DLSS jitter
+	const Fmatrix svp_proj_hud = svp_proj;
 
 	if (scope_svp_enabled >= 2)
 	{
-		extern int ps_r__svp_cop_diag;
 		static u32 s_frontcam_ms = 0;
 		if (ps_r__svp_cop_diag && Device.dwTimeGlobal - s_frontcam_ms > 500)
 		{
@@ -509,7 +485,7 @@ bool svpCamera()
 	{
 		const u32 jf = Device.dwFrame; // latch once, stable on the render thread this frame
 		Fvector2 jpx = svp_jitter_offset(jf);
-		svp_apply_jitter(svp_proj, jpx, (float)RImplementation.TargetSVP->Width, (float)RImplementation.TargetSVP->Height);
+		svp_apply_jitter(svp_proj, jpx, (float)tw, (float)th); // the size the target takes this frame
 		Device.m_SecondViewport.svp_jitter_px = jpx;
 	}
 

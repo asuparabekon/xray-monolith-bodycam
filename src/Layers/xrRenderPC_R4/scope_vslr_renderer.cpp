@@ -136,7 +136,7 @@ public:
     }
 };
 
-// A wrapper's verdict does not change during a session and a compile is a stall: tried once per session.
+// A wrapper's verdict does not change while the process runs and a compile is a stall: tried once per process.
 bool wrapper_compiles(LPCSTR name)
 {
     static xr_map<shared_str, bool> verdicts;
@@ -241,6 +241,8 @@ public:
     float fade() const;
     // Whether this frame renders capture faces: one is under way, due, or the camera moved.
     bool capture_due() const;
+    // Whether this frame begins a capture; its faces all read the sun shadow copied then.
+    bool capture_starting() const { return !capture_.capturing() && capture_due(); }
     void keep_sun_shadow(float bias);
     const scope_vslr::Mirror& mirror() const { return mirror_; }
     void consumer_begin() { if (timed_) consumer_timing_.begin(HW.pContext); }
@@ -266,6 +268,7 @@ private:
     // World to the kept sun cascade's shadow-map coordinates, and the frame it was kept.
     Fmatrix sun_shadow_world_ = Fidentity;
     u32 sun_shadow_frame_ = u32(-1);
+    bool capture_shadowed_ = false; // the sun shadow was copied on the frame the capture began
     scope_vslr::Mirror mirror_;
     ref_texture reflection_, distance_, coverage_, direct_, previous_reflection_, previous_coverage_;
     ref_shader resolve_, sky_shader_, light_;
@@ -417,8 +420,8 @@ void ScopeVslr::light_surfaces(CRenderTarget& target, bool sun_shadow)
     // the sun alone.
     RCache.set_c("vslr_capture_params", 1.f / Device.dwWidth, capture_.settings().radius,
         ps_scope_vslr_debug >= 3 ? float(ps_scope_vslr_debug) : 0.f, 0.f);
-    // The sun's shadow from this frame's widest cascade, from the face's view space.
-    const bool shadowed = sun_shadow && sun_shadow_frame_ == Device.dwFrame;
+    // The sun's shadow from the widest cascade of the frame the capture began, from the face's view space.
+    const bool shadowed = sun_shadow && capture_shadowed_;
     Fmatrix shadow;
     shadow.mul(sun_shadow_world_, Device.mInvView);
     RCache.set_c("vslr_shadow", shadow);
@@ -659,6 +662,7 @@ void ScopeVslr::render(CRenderTarget& target, bool sphere, bool timed)
         capture_.begin({Device.vCameraPosition.x, Device.vCameraPosition.y, Device.vCameraPosition.z});
         capture_sector_ = RImplementation.pLastSector;
         capture_started_ms_ = Device.dwTimeGlobal;
+        capture_shadowed_ = sun_shadow_frame_ == Device.dwFrame;
         next_capture_ms_ = capture_started_ms_ + capture_interval_ms;
     }
     CTimerBase submit;
@@ -692,7 +696,12 @@ void ScopeVslr::render(CRenderTarget& target, bool sphere, bool timed)
     const float submit_ms = elapsed_ms(submit);
     if (timed) timing_.mark(HW.pContext, scope_vslr::Timing::Captured);
     if (sphere) draw_sphere(target);
-    if (!timed) return;
+    if (!timed)
+    {
+        // Counted from the first timed frame, not from level start.
+        publishes_ = fades_ = 0;
+        return;
+    }
     timing_.mark(HW.pContext, scope_vslr::Timing::Drawn);
     timing_.end(HW.pContext, faces, traverse_ms_, submit_ms);
     report();
@@ -794,9 +803,9 @@ void scope_vslr_scene_lights(const light_Package& normal, const light_Package& p
 
 void scope_vslr_sun_cascade(float bias)
 {
-    // Copied only on frames that render capture faces; the mirror image is lit without it.
+    // Copied once per capture, on the frame it begins; the mirror image is lit without it.
     if (reflections && reflections->available() && scope_vslr_active() && RImplementation.o.HW_smap
-        && RImplementation.Target == RImplementation.TargetMain && reflections->capture_due())
+        && RImplementation.Target == RImplementation.TargetMain && reflections->capture_starting())
         reflections->keep_sun_shadow(bias);
 }
 
@@ -831,7 +840,8 @@ void scope_vslr_render(CRenderTarget& target)
         CTimerBase creation;
         creation.Start();
         reflections = std::make_unique<ScopeVslr>();
-        Msg("[VSLR] capture created in %.1f ms", elapsed_ms(creation));
+        if (reflections->available())
+            Msg("[VSLR] capture created in %.1f ms", elapsed_ms(creation));
     }
     if (!reflections->available() || (!scope_vslr_active() && !ps_scope_vslr_debug)) return;
     // The debug sphere's display mapping is SDR only.

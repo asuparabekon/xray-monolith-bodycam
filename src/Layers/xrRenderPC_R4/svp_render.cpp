@@ -1,6 +1,7 @@
 #include "stdafx.h"
 #include "../../xrEngine/igame_persistent.h"
 #include "svp_stats.h"
+#include "svp_target.h"
 
 namespace
 {
@@ -9,6 +10,27 @@ struct ViewportHistory
 	bool active = false;
 	u32 opticEpoch = 0;
 };
+}
+
+// The main pass kept its graph for an SVP pass that no longer runs this frame: drop what the SVP
+// pass would have drained so it never replays into the next frame.
+void CRender::drainKeptGraph()
+{
+	auto& graph = GMBase.RGraph;
+	graph.clear_graph<false>(graph.mapStaticPasses, 0);
+	graph.clear_graph<false>(graph.mapDynamicPasses, 0);
+	graph.mapHUD.clear();
+	graph.mapLOD.clear();
+	graph.mapStaticSorted.Wmark.clear(); // wallmarks drain main first, the SVP pass clears them
+	graph.mapDynamicSorted.Wmark.clear();
+	graph.mapHUDSorted.Wmark.clear();
+	// the grass set is kept only when the draw clears it (grass shadows clear it at frame end)
+	if (Details && ps_ssfx_grass_shadows.x <= 0)
+	{
+		for (auto& list : Details->m_visibles)
+			for (auto& vis : list)
+				vis.clear_not_free();
+	}
 }
 
 // PiP viewport scheduling. Keep the main graph until its scope replay has finished;
@@ -24,19 +46,21 @@ void CRender::renderViewports(BOOL bSUN)
 	// target is sized once per aim and never resized mid-ADS (the live disc keeps learning for next time)
 	// Retain the existing process lifetime, including across renderer resets.
 	static ViewportHistory history;
-	// an optic swap while aimed re-locks from the re-learned disc so the target resizes once for the
-	// new optic, the ads-in edge still owns the first lock
-	const bool disc_swap = (svp && Device.m_SecondViewport.svp_optic_epoch != history.opticEpoch);
+	// an optic swap while aimed re-locks once the disc is re-learned for the new optic so the target
+	// resizes once for it, the ads-in edge still owns the first lock
+	const bool disc_swap = svp && Device.m_SecondViewport.svp_optic_epoch != history.opticEpoch
+		&& svp_disc_epoch() == Device.m_SecondViewport.svp_optic_epoch;
 	if ((svp && !history.active) || disc_swap)
 		Device.m_SecondViewport.svp_disc_applied = Device.m_SecondViewport.svp_disc_px;
-	history.opticEpoch = Device.m_SecondViewport.svp_optic_epoch;
+	if (!svp || disc_swap)
+		history.opticEpoch = Device.m_SecondViewport.svp_optic_epoch;
 	const bool svp_edge = (svp != history.active);
 	history.active = svp;
-	// pip allocate the SVP target before the main pass derives the camera into it (lazy, only while a
-	// PiP scope is aimed, never when off)
+	// pip allocate the SVP target before the main pass derives the camera into it (lazy, while a PiP scope
+	// is active or any weapon reports a zoom factor, never when off)
 	svp_stats::cpu_begin(svp_stats::CPU_MISC);
-	if (Device.true_pip_on && g_pGamePersistent &&
-		g_pGamePersistent->m_pGShaderConstants->hud_params.y > 0.005f)
+	if (Device.true_pip_on && (svp || (g_pGamePersistent &&
+		g_pGamePersistent->m_pGShaderConstants->hud_params.y > 0.005f)))
 		EnsureTargetSVP();
 	// pip the lens content swaps at the scope edges, both taa histories seed from the current
 	// frame so the stale scene never ghosts through the resolve
@@ -64,7 +88,6 @@ void CRender::renderViewports(BOOL bSUN)
 	{
 		extern Fvector4 ps_dev_param_7;
 		extern Fvector4 ps_dev_param_8;
-		extern int ps_r2_nightvision;
 		static float s_nvg_gen = -1.f;
 		static u32 s_nvg_ms = 0;
 		const float genf = floorf(ps_dev_param_8.x);
@@ -86,15 +109,28 @@ void CRender::renderViewports(BOOL bSUN)
 	if (Device.true_pip_on)
 		TargetMain->SetActive();
 	svp_stats::section_begin(svp_stats::SEC_MAIN_GBUFFER);
-	const u32 gbuffer_frame = Device.dwFrame; // grass fills its instance buffer once per frame for both gbuffers
+	const u32 gbuffer_frame = Device.dwFrame; // grass builds its instance spans once per frame for both gbuffers
+	const bool main_kept_graph = svp;
 	renderGBuffer(!svp); // keep the priority-0 graph when an SVP pass follows
 	svp_stats::section_end(svp_stats::SEC_MAIN_GBUFFER);
+	if (svp)
+	{
+		// the scope pass needs this frame's camera, a stale one would replay the last aim's view
+		auto& vp = Device.m_SecondViewport;
+		if (vp.svp_camera_frame != Device.dwFrame || vp.svp_camera_session != vp.GetSVPSession())
+			svp = false;
+	}
 	if (svp)
 	{
 		svp_stats::cpu_begin(svp_stats::CPU_REPLAY);
 		EnsureTargetSVP();
 		svp_stats::cpu_end(svp_stats::CPU_REPLAY);
+		// a resize here can fail at VRAM exhaustion too
+		if (!TargetSVP)
+			svp = false;
 	}
+	if (main_kept_graph && !svp)
+		drainKeptGraph();
 	svp_stats::cpu_begin(svp_stats::CPU_HUD);
 	TargetMain->svp_objective_hud_prepare(svp);
 	svp_stats::cpu_end(svp_stats::CPU_HUD);
@@ -107,7 +143,7 @@ void CRender::renderViewports(BOOL bSUN)
 		svp_stats::cpu_begin(svp_stats::CPU_REPLAY);
 		TargetSVP->SetActive();
 		svp_stats::cpu_end(svp_stats::CPU_REPLAY);
-		R_ASSERT2(Device.dwFrame == gbuffer_frame, "svp gbuffer runs on a new frame, the grass instance ranges are stale");
+		R_ASSERT2(Device.dwFrame == gbuffer_frame, "svp gbuffer runs on a new frame, the grass instance spans are stale");
 		svp_stats::section_begin(svp_stats::SEC_SVP_GBUFFER);
 		renderGBuffer(true);
 		svp_stats::section_end(svp_stats::SEC_SVP_GBUFFER);

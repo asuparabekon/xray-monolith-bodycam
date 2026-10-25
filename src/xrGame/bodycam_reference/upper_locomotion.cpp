@@ -124,6 +124,12 @@ UpperGraphTrace UpperLocomotionGraph::Update(const UpperGraphInput& in)
 				initializeMachine(1, "normal-enter-stop");
 		}
 	};
+	// The callback captures this frame's locals; drop it when the update ends.
+	struct ClearChange
+	{
+		std::function<void(const NormalStateChange&)>& callback;
+		~ClearChange() { callback = nullptr; }
+	} clearChange{ changeDuringUpdate_ };
 	if (in.normalContext)
 	{
 		machineUpdate(0);

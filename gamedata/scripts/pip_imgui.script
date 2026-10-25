@@ -160,13 +160,22 @@ local function get_console()
     return console
 end
 
+-- cvar bounds are fixed at registration; false marks a cvar this build lacks
+local bounds_cache = {}
+
 local function get_bounds(name)
+    local cached = bounds_cache[name]
+    if cached ~= nil then
+        return cached or nil
+    end
     local ok, bounds = pcall(function()
         return get_console():get_variable_bounds(name)
     end)
     if not ok or not bounds or bounds.min == nil or bounds.max == nil then
+        bounds_cache[name] = false
         return
     end
+    bounds_cache[name] = bounds
     return bounds
 end
 
@@ -352,34 +361,13 @@ local function draw_profile()
     end
 end
 
-local fixture_status
-
--- runs the packed api fixture, per case results land in the log as [SVP-API-FIXTURE] lines
-local function draw_fixture()
-    ImGui.Separator()
-    if ImGui.Button("Run API Fixture", vector2():set(160, 0)) then
-        local fixture = rawget(_G, "pip_optic_api_fixture")
-        if type(fixture) == "table" and type(fixture.run) == "function" then
-            local ok, passed = pcall(fixture.run)
-            fixture_status = not ok and "error"
-                or (passed and "pass" or "refused or fail, see log")
-        else
-            fixture_status = "unavailable"
-        end
-    end
-    if fixture_status then
-        ImGui.SameLine(250)
-        ImGui.Text("fixture " .. fixture_status)
-    end
-end
-
 local function draw_workbench()
     local workbench = rawget(_G, "pip_optic_workbench")
     if type(workbench) == "table" and type(workbench.draw) == "function" then
         workbench.draw()
         return
     end
-    ImGui.TextDisabled("Optics workbench module not installed")
+    ImGui.TextDisabled("Optics workbench not loaded, start or load a game")
 end
 
 local function render_window()
@@ -406,7 +394,6 @@ local function render_window()
         end
         if ImGui.BeginTabItem("Current Scope Profile", true, 0) then
             draw_profile()
-            draw_fixture()
             ImGui.EndTabItem()
         end
         if ImGui.BeginTabItem("Optics Workbench", true, 0) then

@@ -4,6 +4,7 @@
 #include "../xrRender/FBasicVisual.h"
 #include "r4_3dss_reticle.h"
 #include "r4_reticle_atlas.h"
+#include "r4_reticle_vector.h"
 
 // Lens/reflex shaders write scene-linear core and glow emission to MRT slots 2/3.
 // After tone mapping, reticle_glow_compose applies exposure and three blur lobes.
@@ -73,7 +74,10 @@ void CRenderTarget::reticle_glow_create()
 // main view, before any HUD or lens pass of the frame
 void CRenderTarget::reticle_glow_begin()
 {
-	if (this != RImplementation.TargetMain || !reticle_glow_dirty)
+	if (this != RImplementation.TargetMain)
+		return;
+	reticle_vector_edit_apply(); // the reticle editor's queued rebuilds, on the render thread
+	if (!reticle_glow_dirty)
 		return;
 	const FLOAT clear[4] = { 0.f, 0.f, 0.f, 0.f };
 	HW.pContext->ClearRenderTargetView(rt_reticle_emission->pRT, clear);
@@ -135,8 +139,8 @@ void C3DSSReticleGlow::hold(ID3DRenderTargetView* core, ID3DRenderTargetView* gl
 	changed = bound || !light;
 	if (!changed)
 		return;
-	saved_reflex_glow = g_reticle_msdf_reflex_glow;
-	g_reticle_msdf_reflex_glow = bound ? 1.f : -1.f;
+	saved_reflex_glow = g_reticle_reflex_glow;
+	g_reticle_reflex_glow = bound ? 1.f : -1.f;
 	ID3DRenderTargetView* views[4] = { saved[0], saved[1], bound ? core : saved[2], bound ? glow : saved[3] };
 	reticle_glow_rebind(views, depth);
 }
@@ -145,13 +149,13 @@ C3DSSReticleGlow::~C3DSSReticleGlow()
 {
 	if (!changed)
 		return;
-	g_reticle_msdf_reflex_glow = saved_reflex_glow;
+	g_reticle_reflex_glow = saved_reflex_glow;
 	reticle_glow_rebind(saved, depth);
 }
 
 // The stock 3DSS reticle pass: the reflex reticles, then the lenses, which show the frame as it is after the
 // reflexes (a magnifier shows the red dot behind it). A lens shows the reflex glow through its image from copies
-// of the glow targets taken with the frame (reticle_msdf_reflex_glow.y).
+// of the glow targets taken with the frame (reticle_atlas_reflex_glow.y).
 void CRenderTarget::render_3DSS_reticles()
 {
 	auto& G = RImplementation.GMBase.RGraph;
@@ -177,7 +181,7 @@ void CRenderTarget::render_3DSS_reticles()
 	{
 		HW.pContext->CopyResource(rt_reticle_image_emission->pSurface, rt_reticle_emission->pSurface);
 		HW.pContext->CopyResource(rt_reticle_image_glow->pSurface, rt_reticle_glow_source->pSurface);
-		g_reticle_msdf_image_glow = 1.f;
+		g_reticle_image_glow = 1.f;
 	}
 	if (!G.mapScopeHUDSorted.empty())
 	{
@@ -185,7 +189,7 @@ void CRenderTarget::render_3DSS_reticles()
 		glow.note(G.mapScopeHUDSorted);
 		RImplementation.render_Reticle();
 	}
-	g_reticle_msdf_image_glow = 0.f;
+	g_reticle_image_glow = 0.f;
 }
 
 // after the final tone curve and the HDR10 bloom, into the frame target combine_2 wrote; done already this
@@ -228,8 +232,8 @@ void CRenderTarget::reticle_glow_composite(const ref_rt& target, bool night_visi
 
 	// lobe sizes are set for 1080p and follow the resolution and the drawn sight's glow size
 	const float px = h / 1080.f * (s_reticle_glow_size_frame == Device.dwFrame ? s_reticle_glow_size : 1.f);
-	const Fvector& size = ps_r__reticle_msdf_glow_size;
-	const Fvector& weight = ps_r__reticle_msdf_glow_weight;
+	const Fvector& size = ps_r__reticle_glow_size;
+	const Fvector& weight = ps_r__reticle_glow_weight;
 	auto pass = [&](ref_shader& shader, u32 element, const ref_rt& target, float dx, float dy, float sigma)
 	{
 		set_viewport_size(HW.pContext, float(target->dwWidth), float(target->dwHeight));
@@ -260,14 +264,14 @@ void CRenderTarget::reticle_glow_composite(const ref_rt& target, bool night_visi
 	set_viewport_size(HW.pContext, w, h);
 	u_setrt(target, nullptr, nullptr, HW.pBaseZB);
 	RCache.set_Element(s_reticle_glow_final->E[1]);
-	RCache.set_c("reticle_glow_weight", weight.x, weight.y, weight.z, ps_r__reticle_msdf_glow_shoulder);
+	RCache.set_c("reticle_glow_weight", weight.x, weight.y, weight.z, ps_r__reticle_glow_shoulder);
 	RCache.set_c("reticle_glow_target", night_vision ? 1.f : 0.f, 0.f, 0.f, 0.f);
 	RCache.set_c(
-		"reticle_glow_tint", ps_r__reticle_msdf_glow_tint, size.x * px, ps_r__reticle_msdf_glow_exposure, ps_r__reticle_msdf_glow_halo);
+		"reticle_glow_tint", ps_r__reticle_glow_tint, size.x * px, ps_r__reticle_glow_exposure, ps_r__reticle_glow_halo);
 	// the main view's tone map as r4_rendertarget_phase_luminance.cpp sets it, with the glow's floor beside its own
 	const float amount = ps_r2_ls_flags.test(R2FLAG_TONEMAP) ? ps_r2_tonemap_amount : 0.f;
 	RCache.set_c("reticle_glow_exposure", 1.f + (ps_r2_tonemap_middlegray - 1.f) * amount, amount,
-		1.f + (ps_r2_tonemap_low_lum - 1.f) * amount, 1.f + (ps_r__reticle_msdf_glow_lowlum - 1.f) * amount);
+		1.f + (ps_r2_tonemap_low_lum - 1.f) * amount, 1.f + (ps_r__reticle_glow_lowlum - 1.f) * amount);
 	RCache.set_Geometry(g_combine);
 	RCache.set_CullMode(CULL_NONE);
 	RCache.set_Stencil(FALSE);

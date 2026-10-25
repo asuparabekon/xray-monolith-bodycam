@@ -56,6 +56,8 @@ BlendMarkerResult TickLocomotionMarkers(std::vector<BlendMarkerSample> samples, 
 		if (!found)
 			throw std::invalid_argument("Unsupported: no marker sample has a positive weight");
 	}
+	else if (samples.empty())
+		throw std::invalid_argument("Unsupported: a follower has no marker sample");
 	else
 		for (unsigned i = 1; i < samples.size(); ++i)
 			if (std::clamp(samples[i].weight, 0.0, 1.0) > std::clamp(samples[chosen].weight, 0.0, 1.0))

@@ -18,7 +18,7 @@ std::vector<unsigned> SourceBoneIndices()
 {
 	std::vector<unsigned> out;
 	for (unsigned i = 0; i < kSkeletonBoneCount; ++i)
-		out.push_back(i < kPhysicalBoneCount ? i : i + 90);
+		out.push_back(i < kPhysicalBoneCount ? i : i + (kSourceBoneCount - kSkeletonBoneCount));
 	return out;
 }
 }
@@ -57,7 +57,7 @@ void PrimaryRiflePose::PublishCompletedCurves(AnimationCurves curves)
 PrimaryRifleOutput PrimaryRiflePose::Apply(const PrimaryRifleInput& in, const std::vector<LocalPose>& physical,
 	const OverlayMontages& montages, const ActionCurvePublication& actionCurves, const RegionalStage& stage)
 {
-	if (physical.size() != 68)
+	if (physical.size() != kPhysicalBoneCount)
 		throw std::invalid_argument("Physical pose has " + std::to_string(physical.size()) + " bones, expected 68");
 	PrimaryRifleOutput out;
 	out.physical = physical;
@@ -100,7 +100,7 @@ PrimaryRifleOutput PrimaryRiflePose::Apply(const PrimaryRifleInput& in, const st
 	}
 	carried_ = target;
 	const double alpha = in.coherent ? 1 : std::clamp(double(in.amount), 0., 1.);
-	for (unsigned i = 0; i < 68; ++i)
+	for (unsigned i = 0; i < kPhysicalBoneCount; ++i)
 		out.physical[i] = alpha == 1 ? target[i] : BlendAnimationLocal(physical[i], target[i], alpha);
 	out.applied = true;
 	if (in.recordDiagnostics)
@@ -109,7 +109,7 @@ PrimaryRifleOutput PrimaryRiflePose::Apply(const PrimaryRifleInput& in, const st
 }
 std::vector<Matrix> PrimaryRiflePose::IncomingVirtualComponents(const std::vector<LocalPose>& physical) const
 {
-	if (!carried_ || physical.size() != 68)
+	if (!carried_ || physical.size() != kPhysicalBoneCount)
 		throw std::logic_error("No rifle pose has been applied yet, or the physical pose does not have 68 bones");
 	auto pose = *carried_;
 	std::copy(physical.begin(), physical.end(), pose.begin());

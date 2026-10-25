@@ -84,8 +84,8 @@ RifleLocalResult RifleLocalPose::Evaluate(double weightGait, double basePoseClf,
 	a = Mix(a, samples_[2].pose, clf);
 	curves = BlendAnimationCurves(curves, samples_[2].curves, clf);
 	curves["Layering_Head_Add"] = 0;
-	curves["Layering_Spine_Add"] = .3f * float(sprintWeight);
-	curves["Enable_SpineRotation"] = 1.f + (.4f - 1.f) * float(sprintWeight);
+	curves["Layering_Spine_Add"] = .3f * sprint;
+	curves["Enable_SpineRotation"] = 1.f + (.4f - 1.f) * sprint;
 	const auto base = Rotations(a);
 	for (unsigned i = 0; i < a.size(); ++i)
 		if (mask_[i])

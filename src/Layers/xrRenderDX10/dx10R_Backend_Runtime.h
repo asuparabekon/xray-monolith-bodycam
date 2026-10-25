@@ -330,38 +330,79 @@ IC void CBackend::Render(D3DPRIMITIVETYPE T, u32 baseV, u32 startV, u32 countV, 
 	PGO(Msg("PGO:DIP:%dv/%df",countV,PC));
 }
 
-IC void CBackend::RenderInstanced(D3DPRIMITIVETYPE T, u32 instanceCount, u32 baseV, u32 startV, u32 countV, u32 startI,
-                                  u32 PC, u32 startInstance)
+#ifdef USE_DX11
+IC void CBackend::RenderInstanced(D3DPRIMITIVETYPE T, u32 baseV, u32 countV, u32 startI, u32 PC, u32 instances)
 {
-	PROF_EVENT("RCache.RenderInstanced");
+	PROF_EVENT("RCache.Render_instanced");
 	D3D_PRIMITIVE_TOPOLOGY Topology = TranslateTopology(T);
 	u32 iIndexCount = GetIndexCount(T, PC);
-
-	//!!! HACK !!! (mirror of CBackend::Render - tessellation patch list)
-#ifdef USE_DX11
 	if (hs != 0 || ds != 0)
 	{
 		R_ASSERT(Topology == D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 		Topology = D3D11_PRIMITIVE_TOPOLOGY_3_CONTROL_POINT_PATCHLIST;
 	}
-#endif
 
 	stat.calls++;
-	stat.verts += countV * instanceCount;
-	stat.polys += PC * instanceCount;
+	stat.verts += countV * instances;
+	stat.polys += PC * instances;
 
 	ApplyPrimitieTopology(Topology);
 	SRVSManager.Apply();
 	ApplyRTandZB();
 	ApplyVertexLayout();
 	StateManager.Apply();
-	//	State manager may alter constants
 	constants.flush();
-
-	HW.pContext->DrawIndexedInstanced(iIndexCount, instanceCount, startI, baseV, startInstance);
-
-	PGO(Msg("PGO:DIPInst:%dv/%df x%d",countV,PC,instanceCount));
+	HW.pContext->DrawIndexedInstanced(iIndexCount, instances, startI, baseV, 0);
 }
+
+IC void CBackend::RenderInstancedIndirect(D3DPRIMITIVETYPE T, ID3D11Buffer* args, u32 offset)
+{
+	PROF_EVENT("RCache.Render_instanced_indirect");
+	D3D_PRIMITIVE_TOPOLOGY Topology = TranslateTopology(T);
+	if (hs != 0 || ds != 0)
+	{
+		R_ASSERT(Topology == D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+		Topology = D3D11_PRIMITIVE_TOPOLOGY_3_CONTROL_POINT_PATCHLIST;
+	}
+
+	stat.calls++;
+
+	ApplyPrimitieTopology(Topology);
+	SRVSManager.Apply();
+	ApplyRTandZB();
+	ApplyVertexLayout();
+	StateManager.Apply();
+	constants.flush();
+	HW.pContext->DrawIndexedInstancedIndirect(args, offset);
+}
+
+IC void CBackend::RenderInstancedUAV(D3DPRIMITIVETYPE T, u32 baseV, u32 countV, u32 startI, u32 PC, u32 instances, u32 slot, ID3D11UnorderedAccessView* uav)
+{
+	PROF_EVENT("RCache.Render_instanced_uav");
+	D3D_PRIMITIVE_TOPOLOGY Topology = TranslateTopology(T);
+	u32 iIndexCount = GetIndexCount(T, PC);
+	if (hs != 0 || ds != 0)
+	{
+		R_ASSERT(Topology == D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+		Topology = D3D11_PRIMITIVE_TOPOLOGY_3_CONTROL_POINT_PATCHLIST;
+	}
+
+	stat.calls++;
+	stat.verts += countV * instances;
+	stat.polys += PC * instances;
+
+	ApplyPrimitieTopology(Topology);
+	SRVSManager.Apply();
+	ApplyRTandZB();
+	ApplyVertexLayout();
+	StateManager.Apply();
+	constants.flush();
+	HW.pContext->OMSetRenderTargetsAndUnorderedAccessViews(D3D11_KEEP_RENDER_TARGETS_AND_DEPTH_STENCIL, nullptr, nullptr, slot, 1, &uav, nullptr);
+	HW.pContext->DrawIndexedInstanced(iIndexCount, instances, startI, baseV, 0);
+	ID3D11UnorderedAccessView* none = nullptr;
+	HW.pContext->OMSetRenderTargetsAndUnorderedAccessViews(D3D11_KEEP_RENDER_TARGETS_AND_DEPTH_STENCIL, nullptr, nullptr, slot, 1, &none, nullptr);
+}
+#endif
 
 IC void CBackend::Render(D3DPRIMITIVETYPE T, u32 startV, u32 PC)
 {

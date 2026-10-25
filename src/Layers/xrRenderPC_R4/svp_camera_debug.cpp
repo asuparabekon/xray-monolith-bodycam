@@ -133,7 +133,6 @@ void debug_scope(Fmatrix scope_camera, const Fmatrix& projection)
 			fm.c.mad(p.eyepiece.m_W.c, ax, front);
 			const float fr = std::max(eye.radius, objAtCam.radius) * 1.75f;
 			draw_circle(Fmatrix(fm).mulB_43(Fmatrix().scale(fr, fr, 0.f)), 0xff00ffff, true);
-			extern int ps_r__svp_cop_diag;
 			static u32 s_cam_ms = 0;
 			if (ps_r__svp_cop_diag && Device.dwTimeGlobal - s_cam_ms > 1000)
 			{
@@ -155,7 +154,6 @@ void debug_scope(Fmatrix scope_camera, const Fmatrix& projection)
 static void svp_3db_overlay(float fNearPlane, bool has_sight, const Fvector& sight_org, const Fvector& sight_axis, bool draw_lens,
 	const Fvector& eyepiece_pos, bool has_objective, const Fvector& objective_pos)
 {
-	extern int ps_r__3db_debug;
 	auto& vp = Device.m_SecondViewport;
 	CSecondVPParams::WeaponPoseSnapshot pose;
 	const bool pose_valid = vp.ReadWeaponPose(pose) && vp.SnapshotExact(pose.frame, pose.session, Device.dwFrame);
@@ -339,7 +337,6 @@ void svp_camera_diagnostics(const SSvpCameraDiagnostics& frame)
 
 	// pip optics diagnostic: throttled [SVPCOP] log of the camera center-of-projection offset from the
 	// eye, settled frames only (ADS transitions blow up ratio_magnification)
-	extern int ps_r__svp_cop_diag;
 	if (ps_r__svp_cop_diag && params.eyepiece.radius > EPS && ratio_magnification > 1.0f && ratio_magnification < ratio_cap)
 	{
 		static u32 s_last_ms = 0;
@@ -456,7 +453,6 @@ void svp_camera_diagnostics(const SSvpCameraDiagnostics& frame)
 	// pip [3DB] overlay, 1 = markers + fire (green) camera (blue) sight (red) rays,
 	// 2 = zeroed departure ray (white), 3 = fading shot tracers
 	{
-		extern int ps_r__3db_debug;
 		if (ps_r__3db_debug > 0 && (params.eyepiece.radius > EPS || params.dbg_eyepiece_r > EPS))
 		{
 			auto& vp = Device.m_SecondViewport;

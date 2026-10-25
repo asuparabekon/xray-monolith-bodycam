@@ -49,15 +49,16 @@ local defaults = {
     s3ds_twilight_strength = 0.35,
 }
 
+-- Same order as profile_value_info, so the published profile id names the section the values come from.
 local function runtime_section(ini, scope_section, weapon_section, scope_hint)
-    if weapon_section and ini:section_exist(weapon_section) then
-        return weapon_section
-    end
     if scope_section and ini:section_exist(scope_section) then
         return scope_section
     end
     if scope_hint and ini:section_exist(scope_hint) then
         return scope_hint
+    end
+    if weapon_section and ini:section_exist(weapon_section) then
+        return weapon_section
     end
 end
 
@@ -67,6 +68,10 @@ end
 
 local function ensure_physical_specs()
     physical_specs = physical_specs or ini_file("pip_optic_physical_specs.ltx")
+end
+
+local function ensure_profiles()
+    profiles = profiles or ini_file("pip_optic_profiles.ltx")
 end
 
 local function ensure_external_aliases()
@@ -402,7 +407,7 @@ local function physical_runtime_values(spec, model)
 end
 
 local function find_profile(scope_section, weapon_section, scope_hint, spec)
-    profiles = profiles or ini_file("pip_optic_profiles.ltx")
+    ensure_profiles()
     local section = runtime_section(profiles, scope_section, weapon_section, scope_hint)
     if section then
         return section
@@ -413,6 +418,7 @@ local function find_profile(scope_section, weapon_section, scope_hint, spec)
 end
 
 local function profile_value_info(scope_section, weapon_section, scope_hint, spec, key)
+    ensure_profiles()
     local sections = {scope_section, scope_hint, weapon_section, spec}
     for index = 1, 4 do
         local section = sections[index]
@@ -606,6 +612,7 @@ local function magnification_info(scope_section, weapon_section, scope_hint)
 end
 
 local function eye_coupling_info(scope_section, weapon_section, scope_hint, spec)
+    ensure_profiles()
     local sections = {scope_section, scope_hint, weapon_section}
     for index = 1, 3 do
         local section = sections[index]
@@ -730,12 +737,6 @@ function materialize_legacy(optics)
     for _, key in ipairs(keys) do
         exec_console_cmd(key .. " " .. tostring(optics.values[key]))
     end
-end
-
-function apply(scope_section, weapon_section)
-    local optics = resolve(scope_section, weapon_section)
-    materialize_legacy(optics)
-    return optics
 end
 
 function profile_value_for(scope_section, weapon_section, key, scope_hint)

@@ -48,50 +48,6 @@ void CDetailManager::hw_Load()
 	hw_Load_Shaders();
 }
 
-#ifdef USE_DX11
-// Chooses each object's draw path from the elements it draws with: lod 0 (the wave variants) and
-// lod 1 (the still one).
-void CDetailManager::hw_Probe_Instance_Shaders()
-{
-	static shared_str strInstBase("dt_instance_base");
-
-	hw_obj_path.assign(objects.size(), u8(hw_path_batched));
-	for (u32 o = 0; o < objects.size(); o++)
-	{
-		Shader* S = objects[o]->shader._get();
-		if (!S)
-			continue;
-
-		u32 decoded = 0, plain = 0, stale = 0;
-		for (u32 lod_id = 0; lod_id < 2; lod_id++)
-		{
-			ShaderElement* E = S->E[lod_id]._get();
-			if (!E)
-				continue;
-
-			for (u32 p = 0; p < E->passes.size(); p++)
-			{
-				R_constant_table* T = E->passes[p]->constants._get();
-				R_constant* C = T ? T->get(strInstBase) : nullptr;
-				if (!C || 0 == (C->destination & RC_dest_vertex))
-					++plain;
-				else if (T->dt_instance_size != u16(hw_InstanceStride))
-					++stale;
-				else
-					++decoded;
-			}
-		}
-		if (stale || (decoded && plain))
-		{
-			hw_obj_path[o] = u8(hw_path_unusable);
-			Msg("! [DETAILS] detail object %u: grass shader built for another instance layout, not drawn", o);
-		}
-		else if (decoded)
-			hw_obj_path[o] = u8(hw_path_instanced);
-	}
-}
-#endif
-
 void CDetailManager::hw_Load_Geom()
 {
 	// Analyze batch-size
@@ -99,41 +55,14 @@ void CDetailManager::hw_Load_Geom()
 	clamp(hw_BatchSize, (u32)0, (u32)64);
 	Msg("* [DETAILS] VertexConsts(%d), Batch(%d)", u32(HW.Caps.geometry.dwRegisters), hw_BatchSize);
 
-#ifdef USE_DX11
-	// latch the instancing path for this level, an instanced draw needs one mesh copy not the baked batch
-	hw_instancing = (ps_r__detail_instancing != 0);
-	if (hw_instancing)
-	{
-		hw_Probe_Instance_Shaders();
-		u32 instanced = 0;
-		for (u8 path : hw_obj_path)
-			instanced += path == hw_path_instanced ? 1 : 0;
-		hw_instancing = instanced != 0;
-		Msg("* [DETAILS] instanced objects %u of %u", instanced, u32(objects.size()));
-	}
-	// which shader elements each detail object carries, element 2 is the depth only shadow one
-	for (u32 o = 0; o < objects.size(); o++)
-	{
-		Shader* S = objects[o]->shader._get();
-		if (!S)
-			continue;
-		Msg("* [DETAILS] %s e0 %u e1 %u e2 %u e3 %u e4 %u", objects[o]->shader_name.c_str(),
-		    S->E[0]._get() ? 1u : 0u, S->E[1]._get() ? 1u : 0u, S->E[2]._get() ? 1u : 0u,
-		    S->E[3]._get() ? 1u : 0u, S->E[4]._get() ? 1u : 0u);
-	}
-	hw_overflow_logged = false;
-#endif
-	// The batched copies stay for objects drawn without instancing; an instanced draw uses the first.
-	const u32 dwCopies = hw_BatchSize;
-
 	// Pre-process objects
 	u32 dwVerts = 0;
 	u32 dwIndices = 0;
 	for (u32 o = 0; o < objects.size(); o++)
 	{
 		const CDetail& D = *objects[o];
-		dwVerts += D.number_vertices * dwCopies;
-		dwIndices += D.number_indices * dwCopies;
+		dwVerts += D.number_vertices * hw_BatchSize;
+		dwIndices += D.number_indices * hw_BatchSize;
 	}
 	u32 vSize = sizeof(vertHW);
 	Msg("* [DETAILS] %d v(%d), %d p", dwVerts, vSize, dwIndices / 3);
@@ -164,7 +93,7 @@ void CDetailManager::hw_Load_Geom()
 		for (u32 o = 0; o < objects.size(); o++)
 		{
 			const CDetail& D = *objects[o];
-			for (u32 batch = 0; batch < dwCopies; batch++)
+			for (u32 batch = 0; batch < hw_BatchSize; batch++)
 			{
 				u32 mid = batch * c_size;
 				for (u32 v = 0; v < D.number_vertices; v++)
@@ -204,7 +133,7 @@ void CDetailManager::hw_Load_Geom()
 		{
 			const CDetail& D = *objects[o];
 			u16 offset = 0;
-			for (u32 batch = 0; batch < dwCopies; batch++)
+			for (u32 batch = 0; batch < hw_BatchSize; batch++)
 			{
 				for (u32 i = 0; i < u32(D.number_indices); i++)
 					*pI++ = u16(u16(D.indices[i]) + u16(offset));
@@ -222,66 +151,6 @@ void CDetailManager::hw_Load_Geom()
 
 	// Declare geometry
 	hw_Geom.create(dwDecl, hw_VB, hw_IB);
-
-#ifdef USE_DX11
-	if (hw_instancing)
-	{
-		hw_inst_base.assign(3 * objects.size(), 0);
-		hw_inst_count.assign(3 * objects.size(), 0);
-		hw_slot_base.assign(3 * objects.size(), 0);
-		hw_slot_count.assign(3 * objects.size(), 0);
-
-		// expected instances per populated slot from the packed palette coverage over the decompress grid
-		const u32 grid = u32(iCeil(dm_slot_size / ps_r__Detail_density)) + 1;
-		const u32 cells = grid * grid;
-		double items_total = 0.0;
-		u32 slots_used = 0;
-		const u32 slot_count = dtSlots ? (dtH.size_x * dtH.size_z) : 0;
-		for (u32 i = 0; i < slot_count; i++)
-		{
-			DetailSlot& DS = dtSlots[i];
-			double cover = 0.0;
-			for (int p = 0; p < dm_obj_in_slot; p++)
-			{
-				if (DS.r_id(p) == DetailSlot::ID_Empty) continue;
-				const DetailPalette& pal = DS.palette[p];
-				cover += double(pal.a0 + pal.a1 + pal.a2 + pal.a3) / 60.0;
-			}
-			if (cover <= 0.0) continue;
-			items_total += cover * double(cells);
-			slots_used++;
-		}
-		const double per_slot = slots_used ? (items_total / double(slots_used)) : 0.0;
-		double want = ceil(1.15 * double(dm_cache_size) * 0.997 * per_slot);
-		if (want < double(1 << 18)) want = double(1 << 18);
-		if (want > double(1 << 20)) want = double(1 << 20);
-		hw_instance_cap = u32(want);
-
-		D3D_BUFFER_DESC idesc;
-		ZeroMemory(&idesc, sizeof(idesc));
-		idesc.ByteWidth = hw_instance_cap * hw_InstanceStride;
-		idesc.Usage = D3D_USAGE_DYNAMIC;
-		idesc.BindFlags = D3D_BIND_SHADER_RESOURCE;
-		idesc.CPUAccessFlags = D3D_CPU_ACCESS_WRITE;
-		idesc.MiscFlags = D3D_RESOURCE_MISC_BUFFER_STRUCTURED;
-		idesc.StructureByteStride = hw_InstanceStride;
-		R_CHK(HW.pDevice->CreateBuffer(&idesc, 0, &hw_instanceVB));
-		HW.stats_manager.increment_stats_vb(hw_instanceVB);
-
-		D3D_SHADER_RESOURCE_VIEW_DESC sdesc;
-		ZeroMemory(&sdesc, sizeof(sdesc));
-		sdesc.Format = DXGI_FORMAT_UNKNOWN;
-		sdesc.ViewDimension = D3D_SRV_DIMENSION_BUFFER;
-		sdesc.Buffer.FirstElement = 0;
-		sdesc.Buffer.NumElements = hw_instance_cap;
-		R_CHK(HW.pDevice->CreateShaderResourceView(hw_instanceVB, &sdesc, &hw_instanceSRV));
-
-		hw_frame_filled = u32(-1);
-		Msg("* [DETAILS] InstanceVB(%dK), stride(%d), cap(%d), slot_avg(%.1f), slots(%d)",
-		    (hw_instance_cap * hw_InstanceStride) / 1024, u32(hw_InstanceStride), hw_instance_cap, per_slot,
-		    slots_used);
-	}
-#endif
 }
 
 void CDetailManager::hw_Unload()
@@ -293,20 +162,7 @@ void CDetailManager::hw_Unload()
 	_RELEASE(hw_IB);
 	_RELEASE(hw_VB);
 #ifdef USE_DX11
-	_RELEASE(hw_instanceSRV);
-	if (hw_instanceVB)
-		HW.stats_manager.decrement_stats_vb(hw_instanceVB);
-	_RELEASE(hw_instanceVB);
-	hw_inst_base.clear();
-	hw_inst_count.clear();
-	hw_slot_base.clear();
-	hw_slot_count.clear();
-	hw_slot_ranges.clear();
-	hw_obj_path.clear();
-	hw_run_frustum = nullptr;
-	hw_run_site = hw_run_site_none;
-	hw_instance_cap = 0;
-	hw_frame_filled = u32(-1);
+	inst_Unload();
 #endif
 }
 
@@ -452,11 +308,7 @@ void CDetailManager::hw_Render_dump(ref_constant x_array, u32 var_id, u32 lod_id
 					u32 base = dwBatch * 4;
 
 					// Build matrix ( 3x4 matrix, last row - color )
-					Fmatrix M = Instance.mRotY;
-					const float sc = Instance.scale_calculated;
-					M._11 *= sc; M._21 *= sc; M._31 *= sc;
-					M._12 *= sc; M._22 *= sc; M._32 *= sc;
-					M._13 *= sc; M._23 *= sc; M._33 *= sc;
+					Fmatrix& M = Instance.mRotY_calculated;
 					c_storage[base+0].set(M._11, M._21, M._31, M._41);
 					c_storage[base+1].set(M._12, M._22, M._32, M._42);
 					c_storage[base+2].set(M._13, M._23, M._33, M._43);

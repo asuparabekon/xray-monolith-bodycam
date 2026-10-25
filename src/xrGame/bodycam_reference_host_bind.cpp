@@ -18,6 +18,10 @@
 #include "../xrEngine/svp_reference_optics.h"
 #include <stdexcept>
 #include <algorithm>
+#include <array>
+#include <cmath>
+#include <locale>
+#include <sstream>
 
 namespace
 {
@@ -26,6 +30,59 @@ namespace
 constexpr char kIdleFallbackMotion[] = "hand_idle_doun";
 // Mouse counts to the degrees the library takes, before its own sensitivity.
 constexpr double kMouseScale = .05;
+constexpr char kTuningSection[] = "bodycam_reference_tuning";
+
+// A comma-separated list, each item trimmed; empty items are dropped.
+std::vector<std::string> TuningList(const char* key)
+{
+	std::vector<std::string> result;
+	std::istringstream stream(BodycamReference::ReadEngineReferenceSetting(kTuningSection, key));
+	for (std::string item; std::getline(stream, item, ',');)
+	{
+		const auto begin = item.find_first_not_of(" \t"), end = item.find_last_not_of(" \t");
+		if (begin != std::string::npos)
+			result.push_back(item.substr(begin, end - begin + 1));
+	}
+	return result;
+}
+template <std::size_t N>
+std::array<double, N> TuningNumbers(const char* key)
+{
+	auto text = BodycamReference::ReadEngineReferenceSetting(kTuningSection, key);
+	std::replace(text.begin(), text.end(), ',', ' ');
+	std::istringstream stream(text);
+	stream.imbue(std::locale::classic());
+	std::array<double, N> result;
+	for (auto& value : result)
+		if (!(stream >> value) || !std::isfinite(value))
+			throw std::invalid_argument(std::string("Invalid tuning value: ") + kTuningSection + "." + key);
+	if (!(stream >> std::ws).eof())
+		throw std::invalid_argument(std::string("Trailing tuning values: ") + kTuningSection + "." + key);
+	return result;
+}
+BodycamReference::EngineReferenceTuning ReadTuning()
+{
+	BodycamReference::EngineReferenceTuning tuning;
+	try
+	{
+		tuning.extraReloadAliases = TuningList("extra_reload_aliases");
+		const auto pistol = TuningNumbers<3>("pistol_hip_offset_m");
+		tuning.pistolHipOffset = { pistol[0], pistol[1], pistol[2] };
+		auto& budgets = tuning.recoilBudgets;
+		budgets.pistol = TuningNumbers<1>("recoil_budget_pistol")[0];
+		budgets.smg = TuningNumbers<1>("recoil_budget_smg")[0];
+		budgets.rifle = TuningNumbers<1>("recoil_budget_rifle")[0];
+		budgets.shotgun = TuningNumbers<1>("recoil_budget_shotgun")[0];
+		budgets.sniper = TuningNumbers<1>("recoil_budget_sniper")[0];
+		tuning.scriptLayers.referenceSkipped = TuningList("reference_skipped_script_layers");
+	}
+	catch (const std::exception& e)
+	{
+		Msg("! Reference tuning unavailable, using neutral values: %s", e.what());
+		tuning = {};
+	}
+	return tuning;
+}
 
 // The motion the model plays for an alias: its first variant.
 std::string CalibrationMotion(IKinematicsAnimated& model, const player_hud_motion* alias)
@@ -79,12 +136,37 @@ void SeedWeaponPosition(const BodycamReference::EngineCharacterHost& host, const
 	Bodycam::ReferenceWeaponPosition position;
 	position.hip = Bodycam::FromRows(host.NeutralHipWeaponCamera()).c;
 	position.ads = Bodycam::FromRows(host.NeutralAdsWeaponCamera()).c;
-	const auto pistol = BodycamReference::PistolHipTranslation(weapon.m_kind == "w_pistol");
+	const auto pistol =
+		BodycamReference::PistolHipTranslation(weapon.m_kind == "w_pistol", BodycamReference::ReferenceTuning().pistolHipOffset);
 	position.hip.x += float(pistol[0]);
 	position.hip.y += float(pistol[1]);
 	position.hip.z -= float(pistol[2]);
 	Bodycam::SeedReferenceWeaponPosition(weapon.cNameSect().c_str(), position);
 }
+}
+
+const BodycamReference::EngineReferenceTuning& BodycamReference::ReferenceTuning()
+{
+	static const auto tuning = ReadTuning();
+	return tuning;
+}
+
+BodycamReference::RecoilMetadata BodycamReference::EngineRecoilMetadata(const CWeapon& weapon)
+{
+	// The equipped weapon carries its upgrades; its section does not.
+	RecoilMetadata metadata;
+	metadata.family = RecoilFamilyFromKind(weapon.m_kind.c_str() ? weapon.m_kind.c_str() : "");
+	metadata.hip = { weapon.cam_recoil.Dispersion, weapon.cam_recoil.MaxAngleVert };
+	metadata.aim = { weapon.zoom_cam_recoil.Dispersion, weapon.zoom_cam_recoil.MaxAngleVert };
+	metadata.budgets = ReferenceTuning().recoilBudgets;
+	// Fire mode 1 is single shot; -1 is full auto and larger values are bursts. The getter is not const.
+	metadata.automatic = const_cast<CWeapon&>(weapon).GetCurrentFireMode() != 1;
+	return metadata;
+}
+
+bool BodycamReference::ApplyScriptLayer(bool reference, const char* name)
+{
+	return ReferenceTuning().scriptLayers.Apply(reference, name ? name : "");
 }
 
 // The engine's own aimed camera relative to the weapon, for the sight of zoomType.
@@ -249,8 +331,9 @@ void player_hud::ConfigureReferenceActions()
 		if (id.valid())
 			aliases.push_back({ HandMotionKey(side, id.val), "anm_idle" });
 	}
-	m_reference_host->ConfigureActions(
-		aliases, ReadEngineReferencePacket(ReadEngineReferenceSetting(kCharacterSection, "native_action_semantics")));
+	m_reference_host->ConfigureActions(aliases,
+		ReadEngineReferencePacket(ReadEngineReferenceSetting(kCharacterSection, "native_action_semantics")),
+		ReferenceTuning().extraReloadAliases);
 }
 
 // Also runs while the HUD loads, when there is no host yet.
@@ -322,13 +405,9 @@ bool player_hud::ReferenceFire(bool firing, bool aiming, const CHudItem* item, b
 	{
 		if (firing)
 		{
-			// The equipped weapon carries its upgrades; its section does not.
-			RecoilMetadata metadata;
-			metadata.family = RecoilFamilyFromKind(firearm->m_kind.c_str() ? firearm->m_kind.c_str() : "");
-			metadata.hip = { firearm->cam_recoil.Dispersion, firearm->cam_recoil.MaxAngleVert };
-			metadata.aim = { firearm->zoom_cam_recoil.Dispersion, firearm->zoom_cam_recoil.MaxAngleVert };
+			const auto metadata = EngineRecoilMetadata(*firearm);
 			m_reference_host->ConfigureRecoil(metadata);
-			m_reference_host->BeginShot(aiming);
+			m_reference_host->BeginShot(aiming, metadata.automatic);
 		}
 		else
 			m_reference_host->StopFire(cancelled);

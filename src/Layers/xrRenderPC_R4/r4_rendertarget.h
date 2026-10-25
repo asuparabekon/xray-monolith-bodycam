@@ -576,8 +576,8 @@ public:
 	void svp_objective_hud_prepare(bool svp_follows); // pip validate one native objective weapon draw
 	void svp_objective_hud_report(); // pip report the native objective draw
 	void EvalSVP_DLSS(const SvpDlssInputs& in); // pip DLSS-SR eval, bilinear-passthrough stub for now (Task 7)
-	u32 draw_reflex(bool svp = false, bool msdf_light = true); // pip render captured reflex materials with their own shaders (msdf_light false: without MSDF reticle light)
-	// pip MSDF reticle glow of the PiP and Reference lenses and of a reflex in the capture (svp_reticle_emission.cpp)
+	u32 draw_reflex(bool svp = false, bool reticle_light = true); // pip render captured reflex materials with their own shaders (reticle_light false: without the atlas reticle light)
+	// pip atlas reticle glow of the PiP and Reference lenses and of a reflex in the capture (svp_reticle_emission.cpp)
 	ref_shader s_reticle_emission_pip, s_reticle_emission_glass;
 	ref_shader s_reticle_emission_reference, s_reticle_emission_reference_deferred;
 	ref_rt rt_reticle_capture_emission, rt_reticle_capture_glow; // a hybrid reflex's glow in capture space
@@ -590,7 +590,7 @@ public:
 	void reticle_capture_begin(bool light);
 	bool reticle_capture_light_current() const;
 	void draw_reference_capture_light();
-	void reticle_msdf_image(const ref_rt& image);
+	void reticle_atlas_image(const ref_rt& image);
 	void draw_scope_overlays(ID3DDepthStencilView* zb, bool stamp_lens, bool refresh_scene); // pip 3DSS non-lens late-pass meshes
 	void scope_overlay_scene_copy(); // pip scene copy the late-pass overlays blur
 	bool draw_hybrid_reflex(); // pip render an engaged magnifier reflex through the objective camera
@@ -722,7 +722,7 @@ public:
 };
 
 // 3DSS reticle glow: the glow targets at slots 2 and 3 for the reticle draws while it lives, and the reflex shaders
-// told to put their MSDF light there; a draw with light false is repeated later and leaves that light out
+// told to put their reticle light there; a draw with light false is repeated later and leaves that light out
 // (r4_rendertarget_phase_3dss_reticle.cpp)
 class C3DSSReticleGlow
 {

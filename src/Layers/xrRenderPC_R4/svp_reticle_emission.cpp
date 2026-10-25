@@ -49,7 +49,10 @@ void CRenderTarget::reticle_capture_begin(bool light)
 	const FLOAT clear[4] = { 0.f, 0.f, 0.f, 0.f };
 	auto target = [&](ref_rt& rt, LPCSTR name)
 	{
-		if (!rt || rt->dwWidth != w || rt->dwHeight != h)
+		// create() returns the registered target by name whatever its size, so drop a stale one first
+		if (rt && (rt->dwWidth != w || rt->dwHeight != h))
+			rt.destroy();
+		if (!rt)
 			rt.create(name, w, h, D3DFMT_A16B16G16R16F);
 		HW.pContext->ClearRenderTargetView(rt->pRT, clear);
 	};
@@ -73,7 +76,7 @@ bool CRenderTarget::reticle_capture_light_current() const
 
 // main view, after the Reference image and its reticle: the hybrid reflex where the image shows the capture
 // ($user$svp_reference_capture_tc, written by the image pass), through the image's pupil transmission. The reflex's
-// own light adds to the frame, its MSDF reticle core and glow source to the glow targets. The image pass kept to
+// own light adds to the frame, its atlas reticle core and glow source to the glow targets. The image pass kept to
 // the visible lens with the depth test, or with deferred glass the glass tag does it here; no depth test either way.
 void CRenderTarget::draw_reference_capture_light()
 {
@@ -97,9 +100,9 @@ void CRenderTarget::draw_reference_capture_light()
 		s_scope_reference_capture_light, [glow, deferred] { RCache.set_c("reticle_capture_glow", glow ? 1.f : 0.f, deferred, 0.f, 0.f); });
 }
 
-// MSDF reticle paint is lit by the image the lens shows: points $user$viewport2 at that image for the PiP reticle
+// Atlas reticle paint is lit by the image the lens shows: points $user$viewport2 at that image for the PiP reticle
 // phase (the eyepiece capture) and back at the main view's copy afterwards
-void CRenderTarget::reticle_msdf_image(const ref_rt& image)
+void CRenderTarget::reticle_atlas_image(const ref_rt& image)
 {
 	if (!image)
 		return;

@@ -8,11 +8,29 @@ rifle = bodycam_reference\character\rifle.bin
 recoil = bodycam_reference\character\recoil.bin
 movement = bodycam_reference\character\movement.bin
 equipment = bodycam_reference\character\accepted-equipment.bin
-copied = bodycam_reference\character\copied.bin
+idle = bodycam_reference\character\copied.bin
 regrip = bodycam_reference\character\regrip.bin
 basis_x = -1, 0, 0
 basis_y = 0, 1, 0
 basis_z = 0, 0, 1
+
+; Host game tuning the portable library takes as parameters. Reference and Classic both read it.
+[bodycam_reference_tuning]
+; Exact HUD aliases that also count as reload steps: the scripted tactical shotgun endings of GAMMA GIMP configs.
+extra_reload_aliases = anm_reloadendtac_end, anm_reloadendtacnachalo_end, anm_reloadendemptytac_end
+; Hip translation of a pistol (kind w_pistol), in camera-local metres with -Z forward: the source Glock17 relative to its M4,
+; measured from the shared FP_Camera socket on their ik_hand_gun bones plus pose offsets.
+pistol_hip_offset_m = -0.01665852, 0.06854060, -0.22434653
+; Typical dispersion / maximum vertical recoil ratio of each family's weapons. A weapon at or above it keeps the full gun recoil;
+; lower ratios scale the gun recoil down to 0.8. Zero keeps the full gun recoil.
+recoil_budget_pistol = 0.04
+recoil_budget_smg = 0.01
+recoil_budget_rifle = 0.01
+recoil_budget_shotgun = 0.12
+recoil_budget_sniper = 0.05
+; Script layers skipped while Reference drives the hands. The crouch additive also lowers the gun when looking up;
+; Reference poses pitch and stance itself.
+reference_skipped_script_layers = liz\liz_hands_crouch_additive.anm, liz/liz_hands_crouch_additive.anm
 
 [bodycam_reference_effects]
 source_baseline_eye_m = 9.999999994736442e-12, 5.999999999062311e-9, -0.04286755

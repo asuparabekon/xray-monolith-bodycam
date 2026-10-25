@@ -75,9 +75,17 @@ extern ECORE_API float ps_r__Detail_l_ambient;
 extern ECORE_API float ps_r__Detail_l_aniso;
 extern ECORE_API float ps_r__Detail_density;
 extern ECORE_API float ps_r__Detail_height;
-extern ECORE_API float ps_r__Detail_density_knee;
-extern ECORE_API float ps_r__Detail_density_curve;
-extern ECORE_API int ps_r__detail_instancing;
+extern ECORE_API int ps_r__detail_shadow_cull;
+extern ECORE_API int ps_r__detail_rows;
+extern ECORE_API int ps_r__detail_inst;
+extern ECORE_API int ps_r__detail_inst_res;
+extern ECORE_API int ps_r__detail_merge;
+extern ECORE_API int ps_r__detail_occ;
+extern ECORE_API int ps_r__detail_occ_first;
+extern ECORE_API int ps_r__detail_thin;
+extern ECORE_API float ps_r__detail_thin_start;
+extern ECORE_API float ps_r__detail_thin_keep;
+extern ECORE_API float ps_r__detail_thin_band;
 
 extern ECORE_API float ps_r__Tree_w_rot;
 extern ECORE_API float ps_r__Tree_w_speed;
@@ -409,12 +417,6 @@ extern ECORE_API int ps_r__sun_minmax_lean;
 extern ECORE_API int ps_r__smap_null_ps;
 // 0 records lod imposters in the shadow graphs like today, 1 skips a push no shadow pass ever draws
 extern ECORE_API int ps_r__sun_lod_skip;
-// 0 draws cascade grass with no accounting like today, 1 tallies slot sphere runs against the cascade frustum
-extern ECORE_API int ps_r__sun_grass_runs;
-// 0 draws every cascade grass instance like today, 1 draws only the slot ranges the cascade frustum keeps
-extern ECORE_API int ps_r__sun_grass_cull;
-// 0 draws cascade grass with the gbuffer element like today, 1 prefers the shadow element when the shader carries one
-extern ECORE_API int ps_r__grass_smap_element;
 // 0 sorts every render queue on every pass like today, 1 skips a queue that nothing appended to since its last sort
 extern ECORE_API int ps_r__dsgraph_sort_memo;
 // 0 walks the declaration layout map on every draw like today, 1 reuses the layout while the decl and signature hold

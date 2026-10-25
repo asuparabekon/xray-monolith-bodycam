@@ -12,9 +12,11 @@ RecoilRig::RecoilRig(RecoilSetup setup, std::function<unsigned()> draw15, std::f
 	sway_.Configure(setup_.sway);
 	fireSway_.Configure(setup_.fireSway);
 }
-void RecoilRig::BeginShot(bool aiming)
+void RecoilRig::BeginShot(bool aiming, bool automatic)
 {
 	gunPoseScale_ = policy_.GunPoseScale(aiming);
+	if (automatic)
+		translation_.SetAutoPushback();
 	const double horizontal = unit_(), vertical = unit_();
 	controller_.Fire({ horizontal, vertical });
 	timeline_.SetCurves(aiming ? setup_.aimCurves : setup_.hipCurves);

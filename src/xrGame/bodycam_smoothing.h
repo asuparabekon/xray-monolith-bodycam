@@ -1,6 +1,6 @@
 #pragma once
-// Smoothing steps shared by the Classic simulation and the camera rig. Internal
-// to those two; not part of either one's interface.
+// Smoothing steps shared by the Classic simulation, the camera rig and the
+// viewmodel profile. Internal to those; not part of their interfaces.
 #include "bodycam_simulation.h"
 #include <algorithm>
 #include <cmath>

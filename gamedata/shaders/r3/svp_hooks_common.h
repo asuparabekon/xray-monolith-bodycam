@@ -1,4 +1,3 @@
-// svp_hooks_common 20260723 pupil
 // shared SVP uniform + texture decls for the hook headers and monolith scopes, no shader_scope_params here
 #ifndef SVP_HOOKS_COMMON_INCLUDED
 #define SVP_HOOKS_COMMON_INCLUDED
@@ -23,9 +22,12 @@ uniform float4 svp_optic_profile; // x parallax, yz profile tunnel min/max, w gl
 uniform float4 svp_pupil_model; // x field decenter, y pupil sensitivity, z tunnel offset, w tunnel softness
 #endif
 
+// shader_scope_params.w below -1.5 marks a true PiP scope
+#define SVP_TRUE_PIP (shader_scope_params.w < -1.5)
+
 bool svp_physical_optics_active()
 {
-	return shader_scope_params.w < -1.5 && svp_aperture.x > 0.5;
+	return SVP_TRUE_PIP && svp_aperture.x > 0.5;
 }
 
 bool svp_scope_uses_authored_inside(int ffp, bool excluded_type)
@@ -46,7 +48,7 @@ uniform float4 svp_lens_light0_position; // xyz world position, w range
 uniform float4 svp_lens_light0_color; // rgb radiance at source, w enabled
 uniform float4 svp_lens_light1_position;
 uniform float4 svp_lens_light1_color;
-uniform float4 svp_lens_tuning; // environment, direct, ghosts, internal
+uniform float4 svp_lens_tuning; // environment, direct, ghosts, reserved
 uniform float4 svp_lens_control; // opacity, debug channel, reserved, reserved
 uniform float4 svp_lens_environment; // rgb radiance scale, w weather blend
 #include "svp_lens_object_light.h"
@@ -67,7 +69,7 @@ uniform float4 svp_control; // engine intent, x/y/z = strip parallax shadow/chro
 uniform float4 svp_mas; // x effective scale, y override active, z authored scale, w packed source
 float svp_effective_mas(float authored)
 {
-	return shader_scope_params.w < -1.5 && svp_mas.y > 0.5 ? svp_mas.x : authored;
+	return SVP_TRUE_PIP && svp_mas.y > 0.5 ? svp_mas.x : authored;
 }
 #endif
 #ifndef SVP_GLASS_DECLARED

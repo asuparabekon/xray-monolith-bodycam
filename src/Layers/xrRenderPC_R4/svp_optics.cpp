@@ -21,11 +21,11 @@
 #include "scope_glass_head.h"
 #endif
 
-#if defined(USE_DX11) //  Redotix99: for 3D Shader Based Scopes 		(sorry for using the nightvision phase file)
+#if defined(USE_DX11) //  Redotix99: for 3D Shader Based Scopes
 static SvpReferencePupil::Eye s_reference_pupil;
 
 #include "svp_reference_renderer.inl"
-// at half the size of the capture.
+// Reference highlight, blur and dispersion filters, rendered at half the size of the capture.
 void CRenderTarget::phase_scope_reference_filters(const ref_rt& source, float threshold, float range, float contrast)
 {
 	const u32 width = source->dwWidth / 2, height = source->dwHeight / 2;
@@ -168,7 +168,7 @@ void CRenderTarget::EnsureScopeShaders()
 	s_scope_glass_fallback.create("scope_glass_fallback");
 	s_scope_reference_reticle.create("scope_reference_reticle");
 	s_scope_reference_reticle_deferred.create("scope_reference_reticle_deferred");
-	// the MSDF reticle glow of the lens composites (svp_reticle_emission.cpp)
+	// the atlas reticle glow of the lens composites (svp_reticle_emission.cpp)
 	s_reticle_emission_pip.create("scope_reticle_emission");
 	s_reticle_emission_glass.create("scope_glass_fallback_emission");
 	s_reticle_emission_reference.create("scope_reference_reticle_emission");
@@ -251,7 +251,6 @@ void CRenderTarget::phase_scope_debug()
 void CRenderTarget::stamp_svp_corner_mask()
 {
 	// square rt only, a flat panel fills the whole rect and has no dead corner
-	extern int ps_r__svp_flat_window;
 	extern Fvector4 ps_s3ds_param_3;
 	if (Width != Height || (ps_r__svp_flat_window && (int)ps_s3ds_param_3.y == 8))
 		return;
@@ -496,7 +495,6 @@ void CRenderTarget::draw_scope(ref_shader se, std::function<void()> bind, bool o
 	RImplementation.rmNear();
 
 	// per-lens dump, which texture each lens draw samples as s_reticle + the optic type/geometry
-	extern int ps_r__svp_diag;
 	static u32 s_lens_ms = 0;
 	const bool lens_diag = ps_r__svp_diag && Device.dwTimeGlobal - s_lens_ms > 1000;
 	if (lens_diag)
@@ -658,7 +656,7 @@ void CRenderTarget::phase_3DSSReticle(bool object_lens_pass)
 			svp_track_disc(Width, Height);
 			if (!s_scope_reference_reticle_deferred)
 				s_scope_reference_reticle_deferred.create("scope_reference_reticle_deferred");
-			// the tone map input gamma lets MSDF reticle paint see the image as the image pass wrote it
+			// the tone map input gamma lets atlas reticle paint see the image as the image pass wrote it
 			draw_scope(s_scope_reference_reticle_deferred,
 				[&]
 				{
@@ -701,7 +699,6 @@ void CRenderTarget::phase_3DSSReticle(bool object_lens_pass)
 
 	// pip [SVP-RET] reticle pipeline diag, dumps the capture maps before the draws consume them
 	{
-		extern int ps_r__svp_diag;
 		static u32 s_ret_ms = 0;
 		if (ps_r__svp_diag && Device.dwTimeGlobal - s_ret_ms > 1000)
 		{
@@ -763,7 +760,6 @@ void CRenderTarget::phase_3DSSReticle(bool object_lens_pass)
 		auto S = RImplementation.TargetSVP;
 
 		// a hybrid magnifier drew the holo dot inside the svp already, skip the 1x main-view overlay
-		extern int ps_r__svp_reflex_capture;
 		// Suppress the fallback only for the captured optic identity, and only when the image the lens shows
 		// carries the capture (the Reference image takes it from its own capture-space target)
 		const bool reflex_in_svp = ps_r__svp_reflex_capture && svp && Device.m_SecondViewport.svp_reflex_capture_ok &&
@@ -797,18 +793,16 @@ void CRenderTarget::phase_3DSSReticle(bool object_lens_pass)
 
 		if (!object_lens_pass)
 			scope_overlay_scene_copy(); // the late-pass overlays blur the scene without the lens
-		// the lens composite below draws the reflexes again over the lens, with their MSDF reticle light; this
+		// the lens composite below draws the reflexes again over the lens, with their atlas reticle light; this
 		// pass leaves that light out so it is not added twice
-		const bool reflex_redrawn =
-			svp || (!RImplementation.GMBase.RGraph.mapScopeHUDSorted.empty() && Device.m_SecondViewport.eyepiece.radius > EPS);
+		const bool reflex_redrawn = svp || has_lens;
 		if (!object_lens_pass && !reflex_in_svp)
 			draw_reflex(false, !reflex_redrawn); // reflex / red dot, both 1x and magnifier
 
 		// composite the captured eyepiece, inactive true PiP keeps clear glass over the main scene
-		if (svp || (!RImplementation.GMBase.RGraph.mapScopeHUDSorted.empty() && Device.m_SecondViewport.eyepiece.radius > EPS))
+		if (svp || has_lens)
 		{
 			// JITTERFIX, cancel the TAA jitter in the VS so the lens edge has no ring, cvar 0 skips for the a/b
-			extern int ps_r__svp_jitterfix;
 			if (!object_lens_pass && !referenceImage && svp && ps_r__svp_jitterfix)
 			{
 				PIX_EVENT(SCOPE_PHASE_JITTERFIX);
@@ -859,8 +853,8 @@ void CRenderTarget::phase_3DSSReticle(bool object_lens_pass)
 							Device.m_SecondViewport.objective.m_W.transform_dir(up);
 							Device.mView.transform_dir(up);
 							up.z = 0.0f;
-							up.normalize();
-							float angle = acosf(up.dotproduct({ 0, 1, 0 })) * (up.x > 0 ? 1.0f : -1.0f);
+							up.normalize_safe();
+							float angle = acosf(clampr(up.dotproduct({ 0, 1, 0 }), -1.f, 1.f)) * (up.x > 0 ? 1.0f : -1.0f);
 							RCache.set_c("hack_tex_angle", angle);
 						});
 				}
@@ -921,16 +915,16 @@ void CRenderTarget::phase_3DSSReticle(bool object_lens_pass)
 				if (!referenceImage)
 				{
 					PIX_EVENT(SCOPE_PHASE_RETICLE);
-					// MSDF reticle paint reflects the eyepiece capture, which the main bindings above put away
+					// Atlas reticle paint reflects the eyepiece capture, which the main bindings above put away
 					if (svp)
-						M->reticle_msdf_image(S->rt_secondVP);
+						M->reticle_atlas_image(S->rt_secondVP);
 					draw_scope(scope_image_shader, []() { RCache.set_c("scope_phase", SCOPE_PHASE_RETICLE); });
 					if (scope_glass_deferred_current())
 						M->draw_reticle_emission(M->s_reticle_emission_glass, M->baseZB);
 					else
 						M->draw_reticle_emission(M->s_reticle_emission_pip, M->baseZB);
 					if (svp)
-						M->reticle_msdf_image(M->rt_secondVP);
+						M->reticle_atlas_image(M->rt_secondVP);
 					u_setrt(M->rt_Generic_0, nullptr, M->rt_Position, M->baseZB);
 				}
 			}
@@ -986,8 +980,8 @@ void CRenderTarget::phase_3DSSReticle(bool object_lens_pass)
 			return;
 		}
 
-		// The capture maps clear at the main-pass combine tail now, past the NVG
-		// split and TAA mask. Stamp that read them after the late overlay pass.
+		// The capture maps clear at the main-pass combine tail, past the NVG split
+		// and TAA mask stamps that read them after the late overlay pass.
 		u_setrt(RImplementation.Target->rt_Generic_0, RImplementation.Target->rt_Position, 0, HW.pBaseZB);
 		return;
 	}
@@ -1010,7 +1004,7 @@ void CRenderTarget::phase_3DSSReticle(bool object_lens_pass)
 	draw_scope_overlays(HW.pBaseZB, false, false);
 	u_setrt(RImplementation.Target->rt_Generic_0, RImplementation.Target->rt_Position, 0, HW.pBaseZB);
 
-	// the capture maps clear at the main-pass combine tail now, past every consumer, the frame-start
+	// the capture maps clear at the main-pass combine tail, past every consumer, the frame-start
 	// clear + per-frame rebuild cover staleness on the fallback path too
-};
+}
 #endif

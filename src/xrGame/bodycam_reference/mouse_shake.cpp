@@ -1,4 +1,4 @@
-// Operation order and float width reproduce the source bit for bit; the replay tests cover them.
+// Operation order and float width reproduce the source bit for bit, except that new shakes are capped at 30 per second.
 #include "mouse_shake.h"
 #include <algorithm>
 #include <cmath>
@@ -9,6 +9,9 @@ namespace
 constexpr float kRandomPhaseScale = 0x1.9222dap-13f; // float(2 pi / 32767)
 constexpr double kLookActuationSquared = 0x1.5798ecp-27;
 constexpr float kBlendSeconds = .1f;
+// New shakes start at most this often, so the stacked shake does not grow with frame rate.
+// At 30 fps or less every motion frame still starts one, as in the source.
+constexpr double kEmitSeconds = 1. / 30;
 }
 MouseShake::MouseShake(const std::function<unsigned()>& draw15)
 {
@@ -64,7 +67,17 @@ void MouseShakeLayer::InputFrame(double x, double y, double dt, double speed)
 	const bool nonzero = ((x * x) + (y * y)) + 0 >= kLookActuationSquared, event = nonzero || previousNonzero_;
 	previousNonzero_ = nonzero;
 	if (!event)
+	{
+		emitWait_ = 0; // The first motion frame starts a shake at once.
 		return;
+	}
+	if (emitWait_ > 0)
+	{
+		emitWait_ -= dt;
+		if (emitWait_ > 0)
+			return;
+	}
+	emitWait_ = std::max(emitWait_ + kEmitSeconds, 0.);
 	const double inverse = dt == 0 ? 0 : 1 / dt, yaw = (x * inverse) / 50, pitch = (y * inverse) / 50;
 	const float eventScale =
 		float(std::clamp(((std::abs(pitch) + std::abs(yaw)) - 1) / 3, 0., 1.) * 3 + std::clamp(speed / 600, 0., 1.) * 1.5);

@@ -51,6 +51,7 @@ ENGINE_API CRenderDevice* DevicePtr = nullptr;
 
 ENGINE_API xr_atomic_bool g_bRendering = false;
 extern ENGINE_API float psHUD_FOV;
+extern ENGINE_API float psCamAttachedFOV;
 
 BOOL g_bLoaded = FALSE;
 ref_light precache_light = 0;
@@ -462,7 +463,7 @@ void CRenderDevice::on_idle()
 	// pip true hud fov renders the weapon at the scene perspective while fully aimed through a PiP scope
 	extern int g_svp_hud_true_fov;
 	const float hud_fov_deg = BodycamReference::HudProjectionFov(
-		dwFrame, reference_hud_projection_frame, fFOV, psHUD_FOV * 83.f,
+		dwFrame, reference_hud_projection_frame, fFOV, psHUD_FOV * BodycamReference::kHudFovDegrees,
 		g_svp_hud_true_fov && true_pip_on && m_SecondViewport.IsSVPActive()
 		&& g_pGamePersistent && g_pGamePersistent->m_pGShaderConstants->hud_params.x > 0.999f, reference_hud_nearwall_scale);
 	mProjectHud.build_projection(deg2rad(hud_fov_deg), fASPECT, R_VIEWPORT_NEAR, g_pGamePersistent->Environment().CurrentEnv->far_plane);
@@ -470,7 +471,7 @@ void CRenderDevice::on_idle()
         dwFrame,reference_hud_projection_frame,reference_hud_clip_scale);
     mProjectHud._11*=referenceClipScale;
     mProjectHud._22*=referenceClipScale;
-	mProjectCam.build_projection(deg2rad(83.f), fASPECT, R_VIEWPORT_NEAR, g_pGamePersistent->Environment().CurrentEnv->far_plane);
+	mProjectCam.build_projection(deg2rad(psCamAttachedFOV), fASPECT, R_VIEWPORT_NEAR, g_pGamePersistent->Environment().CurrentEnv->far_plane);
 	
 	mViewHud.set(mView);
 	mViewCam.set(mView);

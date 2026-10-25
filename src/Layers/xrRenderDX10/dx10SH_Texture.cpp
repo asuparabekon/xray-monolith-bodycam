@@ -15,6 +15,10 @@
 
 #include "StateManager/dx10ShaderResourceStateCache.h"
 
+#if RENDER == R_R4
+#include "../xrRenderPC_R4/r4_reticle_vector.h"
+#endif
+
 #define		PRIORITY_HIGH	12
 #define		PRIORITY_NORMAL	8
 #define		PRIORITY_LOW	4
@@ -672,6 +676,14 @@ void CTexture::Load()
 	{
 		// Normal texture
 		u32 mem = 0;
+#if RENDER == R_R4
+		// Vector reticle: built from <name>.svg when that is the texture's source (r4_reticle_vector.cpp)
+		float glow_size = 0.f;
+		pSurface = reticle_vector_texture_load(*cName, mem, glow_size);
+		if (pSurface)
+			reticle_glow_size = glow_size;
+		else
+#endif
 		//pSurface = ::RImplementation.texture_load	(*cName,mem);
 		pSurface = ::RImplementation.texture_load(*cName, mem, true);
 
@@ -704,7 +716,7 @@ void CTexture::Unload()
 	}
 
 #if RENDER == R_R4
-	// 3DSS MSDF: re-read the descriptor if this texture is loaded again.
+	// Reticle atlas: read the glow size again if this texture is loaded again.
 	reticle_glow_size = -1.f;
 #endif
 	// Already unloaded or never loaded: no GPU resources to release.

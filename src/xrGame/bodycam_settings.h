@@ -100,8 +100,8 @@ struct ReferenceWeaponPosition
 };
 const ReferenceWeaponPosition& GetReferenceWeaponPosition(LPCSTR section);
 // Sets the baseline a weapon's Reference binding supplies. Saved positions and
-// manual previews win over it. Until a baseline exists the positions read as
-// zero, which is not a pose: check HasReferenceWeaponPositionBaseline first.
+// manual previews win over it. Until a baseline exists only the saved endpoints
+// are set and the others read as zero: check HasReferenceWeaponPositionBaseline first.
 bool SeedReferenceWeaponPosition(LPCSTR section, const ReferenceWeaponPosition& baseline);
 const ReferenceWeaponPosition& GetReferenceWeaponPositionBaseline(LPCSTR section);
 bool HasReferenceWeaponPositionBaseline(LPCSTR section);
@@ -126,6 +126,8 @@ void DumpConfigBindings();
 bool FootstepCameraEnabled();
 // One toggle: the sprint start presentation and the sprint camera sway.
 bool SprintTransitionEnabled();
+// The Sprint Transition's gun step bob.
+bool SprintBobEnabled();
 bool AnyEffectEnabled();
 // 0 off, 1 balanced, 2 the shipped defaults.
 constexpr int kDefaultPreset = 2;
@@ -134,4 +136,6 @@ bool GetFloat(LPCSTR name, float& value);
 bool SetFloat(LPCSTR name, float value);
 bool GetBool(LPCSTR name, bool& value);
 bool SetBool(LPCSTR name, bool value);
+// The Reticle Editor's inspect zoom (r__reticle_inspect): the HUD drawn this many times closer, 1 = off.
+float ReticleInspectZoom();
 } // namespace Bodycam

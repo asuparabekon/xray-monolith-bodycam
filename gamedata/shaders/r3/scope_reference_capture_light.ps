@@ -1,12 +1,12 @@
 // A reflex drawn into the eyepiece capture (a hybrid magnifier) over the Reference image (svp_reticle_emission.cpp).
 // The reflex left its light in capture-space targets; this pass shows it where the image shows the capture, through
-// the image's pupil transmission: the reflex's own light into the frame, its MSDF reticle core and glow source into
+// the image's pupil transmission: the reflex's own light into the frame, its atlas reticle core and glow source into
 // the glow targets.
 #include "scope_common.h"
 Texture2D scope_reference_ocular;     // a: the image's pupil transmission
 Texture2D scope_reference_capture_tc; // xy: the capture coordinate the image shows, w: 1 where the image drew
 Texture2D s_capture_light;            // the reflex as it draws over the capture
-Texture2D s_capture_emission;         // its MSDF reticle core, while the glow has its own targets
+Texture2D s_capture_emission;         // its atlas reticle core, while the glow has its own targets
 Texture2D s_capture_glow;             // and that core weighted by the atlas's glow strength
 Texture2D scope_reference_visible_glass; // w > 1.5: the frontmost visible lens glass (deferred glass)
 uniform float4 reticle_capture_glow;  // x 1 = the glow targets are bound at 1 and 2, y 1 = deferred glass

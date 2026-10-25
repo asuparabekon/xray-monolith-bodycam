@@ -9,29 +9,34 @@
 #endif
 
 #include "svp_reference_optics.h"
+#include "svp_gameplay_cvars.h"
 namespace
 {
 xrCriticalSection referenceOpticsLock;
 SvpReferenceOpticsFrame referenceOptics;
 }
+
 bool svp_reference_optics_read(SvpReferenceOpticsFrame& output)
 {
-    xrCriticalSectionGuard lock(&referenceOpticsLock);
-    output=referenceOptics;
-    return output.enabled;
+	xrCriticalSectionGuard lock(&referenceOpticsLock);
+	output = referenceOptics;
+	return output.enabled;
 }
+
 bool svp_reference_optics_publish(const SvpReferenceOpticsFrame& input)
 {
-    xrCriticalSectionGuard lock(&referenceOpticsLock);
-    if(referenceOptics.enabled&&referenceOptics.frame==input.frame&&
-        referenceOptics.session==input.session)return false;
-    referenceOptics=input;
-    return true;
+	xrCriticalSectionGuard lock(&referenceOpticsLock);
+	if (referenceOptics.enabled && referenceOptics.frame == input.frame &&
+		referenceOptics.session == input.session)
+		return false;
+	referenceOptics = input;
+	return true;
 }
+
 void svp_reference_optics_clear()
 {
-    xrCriticalSectionGuard lock(&referenceOpticsLock);
-    referenceOptics={};
+	xrCriticalSectionGuard lock(&referenceOpticsLock);
+	referenceOptics = {};
 }
 
 bool CSecondVPParams::MatchesOpticConfig(const WeaponPoseSnapshot& pose,
@@ -274,7 +279,7 @@ constexpr SFieldDescriptor s_optic_fields[] =
 	SVP_NUM(field_reticle_illum, "reticle_illum", true, true, true, 0, 1, true, false, ""),
 	SVP_ENUM(field_magnification_mode, "magnification_mode", false, true, true,
 		s_magnification_modes, "optional_pair_mode_length:magnifications"),
-	SVP_ARRAY(field_magnifications, "magnifications", false, true, true, 1, 16, 0, 200,
+	SVP_ARRAY(field_magnifications, "magnifications", false, true, true, 1, 16, 0, SVP_MAG_LIMIT,
 		"optional_pair_mode_length:magnification_mode"),
 	SVP_LANE(field_mod_lane, "mod_lane", false, true, true, s_lane_members),
 	SVP_MAP(field_sources, "sources", true, "string", true, sizeof(string256),
@@ -502,12 +507,7 @@ LPCSTR CSecondVPParams::OpticSchemaHash()
 
 static void svp_hash_bytes(u64& hash, const void* data, size_t size)
 {
-	const u8* bytes = static_cast<const u8*>(data);
-	for (size_t i = 0; i < size; ++i)
-	{
-		hash ^= bytes[i];
-		hash *= 1099511628211ull;
-	}
+	hash = svp_schema_hash_append(hash, data, size);
 }
 
 static u64 svp_hash_optic_config(const CSecondVPParams::OpticConfig& config)
@@ -598,10 +598,6 @@ bool CSecondVPParams::ConnectOpticApi(u32 api, u32 schema)
 	if (api != optic_api_version || schema != optic_schema_version)
 		return false;
 
-	xrCriticalSectionGuard guard(m_snapshot_lock);
-	if (m_optic_api_connected.load(std::memory_order_relaxed))
-		return true;
-
 	m_optic_api_connected.store(true, std::memory_order_release);
 	return true;
 }
@@ -690,11 +686,8 @@ bool CSecondVPParams::PublishOpticConfig(u32 context_token,
 		m_optic_accepted.generation != publication.base_generation ||
 		m_optic_accepted.fingerprint != publication.base_fingerprint ||
 		!svp_optic_identity_matches(context_token, next, m_optic_accepted) ||
-		!next.valid || !next.typed_route ||
-		next.context_token != context_token ||
 		next.route_epoch != m_optic_route_epoch.load(std::memory_order_relaxed) ||
-		next.session != session || next.frame != u32(-1) ||
-		next.fingerprint != svp_hash_optic_config(next))
+		next.session != session)
 		return false;
 
 	if (m_optic_accepted.valid && next.fingerprint == m_optic_accepted.fingerprint)

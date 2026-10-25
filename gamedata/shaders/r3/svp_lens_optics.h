@@ -8,11 +8,12 @@ uniform float4 svp_lens_light0_position;
 uniform float4 svp_lens_light0_color;
 uniform float4 svp_lens_light1_position;
 uniform float4 svp_lens_light1_color;
-uniform float4 svp_lens_tuning; // environment, direct, ghosts, internal
+uniform float4 svp_lens_tuning; // environment, direct, ghosts, reserved
 uniform float4 svp_lens_control; // opacity, debug channel, reserved, reserved
 uniform float4 svp_lens_environment; // rgb radiance scale, w weather blend
 uniform float4 svp_lens_probe_positive; // raw object probe: +X, +Y, +Z
 uniform float4 svp_lens_probe_negative; // raw object probe: -X, -Y, -Z
+uniform float4 svp_lens_deadzone;
 #endif
 
 #include "svp_lens_object_light.h"
@@ -24,12 +25,9 @@ struct SvpLensChannels
 	float4 environment;
 	float4 direct;
 	float4 ghosts;
-	float4 internal_stack;
 };
 
 // One profile drives both the standalone HUD glass and the 3DSS lens pass.
-// One profile serves every optic. An optic resolver could return a modified
-// copy without changing the optical model or either render path.
 struct SvpLensProfile
 {
 	float roughness;
@@ -493,7 +491,6 @@ SvpLensChannels svp_evaluate_lens(float2 lens_position, float2 screen_position, 
 	channels.environment = 0;
 	channels.direct = 0;
 	channels.ghosts = 0;
-	channels.internal_stack = 0;
 
 	// Optical coordinates may move for parallax, but no simulated surface is
 	// allowed to exist beyond the physical objective. The caller owns the one
@@ -554,7 +551,6 @@ SvpLensChannels svp_evaluate_lens(float2 lens_position, float2 screen_position, 
 	channels.ghosts = svp_optic_over(primary_environment_ghost,
 		secondary_environment_ghost)
 		* tube_transmission;
-	channels.internal_stack = 0;
 
 	// Ambient returns appear as the eye leaves the usable optical axis. Direct
 	// source ghosts use the same ownership but remain a separate channel.
@@ -562,7 +558,6 @@ SvpLensChannels svp_evaluate_lens(float2 lens_position, float2 screen_position, 
 	source_visibility = saturate(source_visibility);
 	channels.environment *= reflection_visibility;
 	channels.ghosts *= reflection_visibility;
-	channels.internal_stack *= reflection_visibility;
 
 	// Environment and internal returns are evaluated from the curved lens in
 	// world space. Do not relight them with a weapon-wide brightness scalar;
@@ -598,7 +593,6 @@ float4 svp_composite_lens(SvpLensChannels channels)
 	channels.environment *= svp_lens_tuning.x;
 	channels.direct *= svp_lens_tuning.y;
 	channels.ghosts *= svp_lens_tuning.z;
-	channels.internal_stack *= svp_lens_tuning.w;
 
 	int debug_channel = (int)round(svp_lens_control.y);
 	float object_hemi = svp_optic_hemi_visibility();
@@ -607,14 +601,13 @@ float4 svp_composite_lens(SvpLensChannels channels)
 	if (debug_channel == 1) return svp_lens_channel_debug(channels.environment);
 	if (debug_channel == 2) return svp_lens_channel_debug(channels.direct);
 	if (debug_channel == 3) return svp_lens_channel_debug(channels.ghosts);
-	if (debug_channel == 4) return svp_lens_channel_debug(channels.internal_stack);
 	if (debug_channel == 6) return float4(0.0, 1.0, 0.0, 1.0);
 	if (debug_channel == 7) return float4(saturate(object_light), 1.0);
 	if (debug_channel == 8) return float4(1.0 - object_sun, object_hemi, object_sun, 1.0);
 	if (debug_channel == 9)
 		return float4(1.0 - object_sun, object_sun, 0.0, 1.0);
 
-	float4 combined = channels.internal_stack;
+	float4 combined = 0;
 	combined = svp_optic_over(channels.environment, combined);
 	combined = svp_optic_over(channels.ghosts, combined);
 	combined = svp_optic_over(channels.direct, combined);

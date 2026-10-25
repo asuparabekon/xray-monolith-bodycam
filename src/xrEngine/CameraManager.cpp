@@ -580,7 +580,7 @@ void CCameraManager::ApplyDevice(float _viewport_near)
 	// pip true hud fov renders the weapon at the scene perspective while fully aimed through a PiP scope
 	extern int g_svp_hud_true_fov;
 	const float hud_fov_deg = BodycamReference::HudProjectionFov(
-		Device.dwFrame, Device.reference_hud_projection_frame, Device.fFOV, psHUD_FOV * 83.f,
+		Device.dwFrame, Device.reference_hud_projection_frame, Device.fFOV, psHUD_FOV * BodycamReference::kHudFovDegrees,
 		g_svp_hud_true_fov && Device.true_pip_on && Device.m_SecondViewport.IsSVPActive()
 		&& g_pGamePersistent && g_pGamePersistent->m_pGShaderConstants->hud_params.x > 0.999f,
 		Device.reference_hud_nearwall_scale);

@@ -1,4 +1,3 @@
-// svp_hooks_lens 20260715 thinhook
 // relocated true-PiP flat-screen lens cull, included by scope_custom_lens.h after scope_3dss_common.h
 #ifndef SVP_HOOKS_LENS_INCLUDED
 #define SVP_HOOKS_LENS_INCLUDED
@@ -9,7 +8,7 @@
 // true PiP so the world fills the panel (reflections/specular/dirt/vignette would ellipse it)
 bool svp_lens_flat_window_cull()
 {
-	return RETICLE_TYPE == RT_FLAT_SCREEN && shader_scope_params.w < -1.5;
+	return RETICLE_TYPE == RT_FLAT_SCREEN && SVP_TRUE_PIP;
 }
 
 float svp_lens_ads_reflection_visibility()

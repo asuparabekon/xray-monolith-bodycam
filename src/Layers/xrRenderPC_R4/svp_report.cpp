@@ -7,7 +7,6 @@ void svp_report_configuration()
 {
 	// pip one-shot config fingerprint requested through r__svp_report
 	{
-		extern int ps_r__svp_report;
 		if (ps_r__svp_report)
 		{
 			ps_r__svp_report = 0;
@@ -30,6 +29,14 @@ void svp_report_configuration()
 					c.second->Status(st);
 					char tok[288];
 					xr_sprintf(tok, "%s%s=%s", grp ? " " : "", nm, st);
+					// xr_strcat aborts on overflow, flush early when long values would not fit
+					if (xr_strlen(line) + xr_strlen(tok) >= sizeof(line))
+					{
+						PipMsg("[SVP-CFG] %s", line);
+						line[0] = 0;
+						grp = 0;
+						xr_sprintf(tok, "%s=%s", nm, st);
+					}
 					xr_strcat(line, tok);
 					if (++grp == 8)
 					{
@@ -55,7 +62,6 @@ void svp_report_configuration()
 				PipMsg("[SVP-CFG] aa ssfx_taa=%s r2_aa=%s r2_aa_kernel=%s", a_taa, a_aa, a_ker);
 				// present pipeline isn't an r__svp_/g_svp_/s3ds_ cvar so the walk above never prints it
 				extern int ps_framelimiter;
-				extern int ps_r__swapchain_buffers;
 				PipMsg("[SVP-CFG] swapchain_buffers=%d present_interval=%d framelimit=%d", ps_r__swapchain_buffers,
 					psDeviceFlags.test(rsVSync) ? 1 : 0, ps_framelimiter);
 			}

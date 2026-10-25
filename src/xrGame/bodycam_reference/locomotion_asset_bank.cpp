@@ -107,7 +107,7 @@ RegionalManifest ReadRegional(ReferenceAssetReader& r)
 		a.weights.resize(r.Count(64));
 		for (auto& weight : a.weights)
 			weight = Value(r);
-		a.mask.resize(r.Count(179));
+		a.mask.resize(r.Count(kSourceBoneCount));
 		for (auto& e : a.mask)
 		{
 			e.skeletonIndex = r.U32();
@@ -263,10 +263,10 @@ LocomotionAssetBank LocomotionAssetBank::Load(const std::vector<std::uint8_t>& b
 	(void)out.Properties();
 	(void)out.Rotations();
 	(void)out.Walking();
-	// The virtual bones follow the source skeleton's 158 bones.
+	// The virtual bones sit after the source skeleton's non-virtual bones.
 	std::vector<unsigned> mapping;
 	for (unsigned i = 0; i < kSkeletonBoneCount; ++i)
-		mapping.push_back(i < kPhysicalBoneCount ? i : i + 90);
+		mapping.push_back(i < kPhysicalBoneCount ? i : i + (kSourceBoneCount - kSkeletonBoneCount));
 	(void)RegionalPose(out.regional_, u.parents, std::move(mapping));
 	return out;
 }

@@ -15,6 +15,7 @@
 #include "bodycam_reference/constants.h"
 #include "bodycam_reference/regrip_presentation.h"
 #include "bodycam_reference_assets.h"
+#include "bodycam_reference_host.h"
 #include "bodycam_reference/classic_regrip.h"
 #include "bodycam_reference/classic_recoil.h"
 #include "bodycam_reference/recoil_asset.h"
@@ -188,7 +189,6 @@ u16 ResolveArmBone(IKinematics* model, LPCSTR primary, LPCSTR fallback)
 
 // Weight change per second.
 constexpr float kProfileFadeOutSpeed = 6.f;
-constexpr float kProfileSamplingFadeInSpeed = 3.f;
 constexpr float kProfileReadyFadeInSpeed = 2.5f;
 constexpr float kControllerEnterSpeed = 10.f;
 constexpr float kControllerExitSpeed = 14.f;
@@ -694,7 +694,8 @@ struct HudArms::State
 	void UpdateClassicRegrip(float dt, CWeapon* weapon, bool allowed);
 	void UpdateClassicRecoil(float dt, CWeapon* weapon, bool allowed);
 	void UpdateClassicHandling(float dt, CWeapon* weapon, bool allowed);
-	bool LoadClassicRegrip();
+	bool LoadReferenceRig();
+	bool LoadRegripAssets();
 	bool LoadClassicRecoil();
 	bool FullLoweringInfluence() const;
 	Fmatrix ClassicParentFrame() const;
@@ -702,7 +703,7 @@ struct HudArms::State
 	void SolveStalker2Controller(const ControllerFrame& frame);
 	void SolveClassicController(const ControllerFrame& frame);
 	void BuildClassicTargets(const ControllerFrame& frame, ClassicTargets& targets);
-	void ApplyReferenceLayers(const ControllerFrame& frame, ClassicTargets& targets) const;
+	void ApplyReferenceLayers(const ControllerFrame& frame, ClassicTargets& targets);
 	BodycamReference::ClassicRigidLimit LimitClassicReach(const ControllerFrame& frame, const ClassicTargets& targets) const;
 	void SolveClassicArms(const ControllerFrame& frame, ClassicTargets& targets, const BodycamReference::ClassicRigidLimit& limit);
 	void LogRegrip(const ControllerFrame& frame, const BodycamReference::ClassicRigidLimit& limit);
@@ -735,17 +736,21 @@ struct HudArms::State
 	{
 		xr_map<u64, AuthoredMotionProfile> profiles;
 		AuthoredPhaseFollower phase;
+		u64 phase_key = u64(-1); // The motion the follower tracks.
 		float profile_weight = 0.f;
 		AuthoredMotionGains gains;
 	} m_authored;
 
 	// Reference source rig: the calibration regrip, recoil and look settling share.
+	// The regrip clip bank loads on its own, so recoil and sway do not need it.
 	struct ReferenceRig
 	{
-		std::optional<BodycamReference::RegripAssetBank> regrip_assets;
 		std::optional<BodycamReference::EngineBasis> basis;
 		std::unique_ptr<BodycamReference::ClassicReferenceRegripPose> pose;
+		std::vector<std::string> bone_names;
 		bool load_attempted = false;
+		std::optional<BodycamReference::RegripAssetBank> regrip_assets;
+		bool regrip_attempted = false;
 	} m_rig;
 
 	struct Regrip
@@ -755,7 +760,7 @@ struct HudArms::State
 		double alpha = 0;
 		double held_alpha = 0; // The alpha a clip fading out under an authored animation keeps.
 		std::vector<BodycamReference::RegripMontageSample> samples;
-		mutable std::vector<BodycamReference::RegripSample> pose_samples; // working storage of the const pose pass
+		std::vector<BodycamReference::RegripSample> pose_samples; // working storage of the pose pass
 		BodycamReference::Rotation camera;
 		u32 random = kRegripSeed;
 		void Reset()
@@ -854,8 +859,13 @@ void HudArms::State::ReadSimulationPose(const ArmPose& pose)
 void HudArms::State::UpdateAuthoredMotionProfile(float dt)
 {
 	dt = std::clamp(dt, 0.f, kMaximumStepTime);
-	const auto fade_profile = [&]
-	{ m_authored.profile_weight += std::clamp(-m_authored.profile_weight, -dt * kProfileFadeOutSpeed, dt * kProfileSamplingFadeInSpeed); };
+	const auto fade_profile = [&] { m_authored.profile_weight = std::max(0.f, m_authored.profile_weight - dt * kProfileFadeOutSpeed); };
+	// Sampling stopped: the phase follower starts in phase with the clip next time.
+	const auto stop_sampling = [&]
+	{
+		fade_profile();
+		m_authored.phase.valid = false;
+	};
 
 	IKinematics* const models[kArmCount] = { m_hud.m_model ? m_hud.m_model->dcast_PKinematics() : nullptr,
 		m_hud.m_model_2 ? m_hud.m_model_2->dcast_PKinematics() : nullptr };
@@ -865,7 +875,7 @@ void HudArms::State::UpdateAuthoredMotionProfile(float dt)
 		m_stalker2.movement_weight > kProfileMinimumMovement;
 	if (!profile_allowed || !models[kRightArm] || !models[kLeftArm] || m_primary_anchor == BI_NONE)
 	{
-		fade_profile();
+		stop_sampling();
 		return;
 	}
 
@@ -874,7 +884,7 @@ void HudArms::State::UpdateAuthoredMotionProfile(float dt)
 	float blend_weight = 0.f;
 	if (!ReadActiveHandMotion(m_hud.m_model, item, motion_key, phase, blend_weight) || blend_weight < kProfileMinimumBlend)
 	{
-		fade_profile();
+		stop_sampling();
 		return;
 	}
 
@@ -887,13 +897,17 @@ void HudArms::State::UpdateAuthoredMotionProfile(float dt)
 			!RelativeBoneTransform(models[side], arm.upperarm, arm.forearm, forearm[side]) ||
 			!RelativeBoneTransform(models[side], arm.clavicle, arm.upperarm, upperarm[side]))
 		{
-			fade_profile();
+			stop_sampling();
 			return;
 		}
 	}
 
+	const u64 profile_key = AuthoredMotionKey(motion_key, weapon->IsZoomed());
+	if (profile_key != m_authored.phase_key)
+		m_authored.phase.valid = false;
+	m_authored.phase_key = profile_key;
 	m_authored.phase.Update(phase, dt);
-	AuthoredMotionProfile& profile = m_authored.profiles[AuthoredMotionKey(motion_key, weapon->IsZoomed())];
+	AuthoredMotionProfile& profile = m_authored.profiles[profile_key];
 	const Fmatrix& lead = models[kRightArm]->LL_GetBoneInstance(m_primary_anchor).mTransform;
 	if (!profile.initialized)
 	{
@@ -968,9 +982,8 @@ void HudArms::State::DumpAuthoredMotionProfile() const
 	const AuthoredMotionProfile& profile = found->second;
 	const AuthoredMotionMetrics metrics = profile.Metrics();
 	Msg("* bodycam authored profile complete=%d samples=%u travel=%0.3f lead_deg=%0.3f lead_mm=%0.3f wrist_deg=%0.3f forearm_deg=%0.3f upperarm_deg=%0.3f",
-		profile.complete, profile.sample_count, profile.phase_travel, angle_normalize_signed(metrics.lead_rotation) * 180.f / PI,
-		metrics.lead_translation * 1000.f, angle_normalize_signed(metrics.wrist_rotation) * 180.f / PI,
-		angle_normalize_signed(metrics.forearm_rotation) * 180.f / PI, angle_normalize_signed(metrics.upperarm_rotation) * 180.f / PI);
+		profile.complete, profile.sample_count, profile.phase_travel, rad2deg(metrics.lead_rotation), metrics.lead_translation * 1000.f,
+		rad2deg(metrics.wrist_rotation), rad2deg(metrics.forearm_rotation), rad2deg(metrics.upperarm_rotation));
 	Msg("* bodycam authored gains controller=%0.3f wrist=%0.3f arm=%0.3f", profile.gains.controller, profile.gains.wrist,
 		profile.gains.arm);
 }
@@ -1005,16 +1018,16 @@ void HudArms::State::OnWeaponChanged(const attachable_hud_item* item)
 	m_weapon_geometry_valid = true;
 }
 
-bool HudArms::State::LoadClassicRegrip()
+bool HudArms::State::LoadReferenceRig()
 {
-	if (m_rig.regrip_assets)
+	if (m_rig.pose)
 		return true;
 	if (m_rig.load_attempted)
 		return false;
 	m_rig.load_attempted = true;
 	try
 	{
-		const auto reader = MakeProfileReader("Missing Classic regrip asset profile");
+		const auto reader = MakeProfileReader("Missing Classic reference rig profile");
 		const auto paths = reader.Paths(kCharacterSection);
 		const auto rifle = BodycamReference::RifleAssetBank::Load(BodycamReference::ReadEngineReferencePacket(paths.rifle));
 		std::vector<std::string> names;
@@ -1042,7 +1055,29 @@ bool HudArms::State::LoadClassicRegrip()
 		const auto camera_from_source = m_rig.basis->ToReference(m_rig.basis->CameraRelativeToEngine(source_model));
 		m_rig.pose = std::make_unique<BodycamReference::ClassicReferenceRegripPose>(
 			parents, std::move(source_pose), *head, camera_from_source, *source_gun, *source_wrist);
-		m_rig.regrip_assets = BodycamReference::RegripAssetBank::Load(BodycamReference::ReadEngineReferencePacket(paths.regrip), names);
+		m_rig.bone_names = std::move(names);
+		return true;
+	}
+	catch (const std::exception& e)
+	{
+		m_rig.basis.reset();
+		Msg("! [CLASSIC-RIG] unavailable: %s", e.what());
+		return false;
+	}
+}
+
+bool HudArms::State::LoadRegripAssets()
+{
+	if (m_rig.regrip_assets)
+		return true;
+	if (m_rig.regrip_attempted || !LoadReferenceRig())
+		return false;
+	m_rig.regrip_attempted = true;
+	try
+	{
+		const auto reader = MakeProfileReader("Missing Classic regrip asset profile");
+		m_rig.regrip_assets = BodycamReference::RegripAssetBank::Load(
+			BodycamReference::ReadEngineReferencePacket(reader.Paths(kCharacterSection).regrip), m_rig.bone_names);
 		return true;
 	}
 	catch (const std::exception& e)
@@ -1056,7 +1091,7 @@ bool HudArms::State::LoadClassicRecoil()
 {
 	if (m_recoil.setup)
 		return true;
-	if (m_recoil.load_attempted || !LoadClassicRegrip())
+	if (m_recoil.load_attempted || !LoadReferenceRig())
 		return false;
 	m_recoil.load_attempted = true;
 	try
@@ -1092,11 +1127,7 @@ bool HudArms::State::ClassicRecoilFire(bool firing, bool aiming, const CWeapon* 
 		m_recoil.player = std::make_unique<BodycamReference::ClassicRecoil>(
 			*m_recoil.setup, [this] { return NextRandom(m_recoil.random) >> 17; },
 			[this] { return double(NextRandom(m_recoil.random) >> 8) / 16777216.; });
-	BodycamReference::RecoilMetadata metadata;
-	metadata.family = BodycamReference::RecoilFamilyFromKind(weapon->m_kind.c_str() ? weapon->m_kind.c_str() : "");
-	metadata.hip = { weapon->cam_recoil.Dispersion, weapon->cam_recoil.MaxAngleVert };
-	metadata.aim = { weapon->zoom_cam_recoil.Dispersion, weapon->zoom_cam_recoil.MaxAngleVert };
-	m_recoil.player->BeginShot(aiming, metadata);
+	m_recoil.player->BeginShot(aiming, BodycamReference::EngineRecoilMetadata(*weapon));
 	return true;
 }
 
@@ -1137,7 +1168,7 @@ void HudArms::State::UpdateClassicRegrip(float dt, CWeapon* weapon, bool allowed
 {
 	const auto& settings = GetConfig().regrip;
 	const bool enabled = ClassicActive() && settings.enable;
-	if (enabled && !m_regrip.player && LoadClassicRegrip())
+	if (enabled && !m_regrip.player && LoadRegripAssets())
 		m_regrip.player =
 			std::make_unique<BodycamReference::ClassicRegrip>(*m_rig.regrip_assets, [this] { return NextRandom(m_regrip.random) >> 17; });
 	if (!m_regrip.player)
@@ -1247,7 +1278,7 @@ void HudArms::State::UpdateClassicHandling(float dt, CWeapon* weapon, bool allow
 
 	// The mouse-driven elbow settling runs only while the Classic layers have the hands.
 	BodycamReference::ClassicSwayInput look;
-	look.enabled = allowed && settings.directional_weapon_inertia && m_weapon_geometry_valid && LoadClassicRegrip();
+	look.enabled = allowed && settings.directional_weapon_inertia && m_weapon_geometry_valid && LoadReferenceRig();
 	if (look.enabled)
 	{
 		const auto pose = BodycamReference::Decompose(m_rig.basis->CameraWorldToReference(ToRows(EyeFrame(*Actor()->cam_FirstEye()))));
@@ -1287,8 +1318,10 @@ void HudArms::State::SolveControllers(float dt)
 	frame.sway = m_handling.sway_output.ownsLook;
 	frame.recoil = m_recoil.active;
 	const bool classic_layers = m_handling.delta_active || frame.regrip || frame.sway || frame.recoil;
+	// Arms that are not solved this frame put no reach limit on the regrip camera.
 	if (!primary || (m_stalker2.weight < kIdleWeight && !classic_layers))
 	{
+		m_reach_alpha = 1.f;
 		ClearAuthoredPoles(m_arms);
 		return;
 	}
@@ -1317,6 +1350,7 @@ void HudArms::State::SolveControllers(float dt)
 
 	if (!m_arms[kRightArm].Solvable() || m_primary_anchor == BI_NONE || (!m_hud.m_adjust_mode && !m_weapon_geometry_valid))
 	{
+		m_reach_alpha = 1.f;
 		ClearAuthoredPoles(m_arms);
 		return;
 	}
@@ -1407,7 +1441,7 @@ void HudArms::State::BuildClassicTargets(const ControllerFrame& frame, ClassicTa
 }
 
 // Regrip, recoil and look settling, evaluated in Reference space on the built targets.
-void HudArms::State::ApplyReferenceLayers(const ControllerFrame& frame, ClassicTargets& targets) const
+void HudArms::State::ApplyReferenceLayers(const ControllerFrame& frame, ClassicTargets& targets)
 {
 	const BodycamReference::EngineBasis& basis = *m_rig.basis;
 	Fmatrix inverse_gun, inverse_left, relative_right, relative_left, pole_right, pole_left;

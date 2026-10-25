@@ -52,7 +52,7 @@ public:
 	void BeginShot(bool aiming, const RecoilMetadata& metadata)
 	{
 		rig_.SetRecoilPolicy(BuildRecoilPolicy(metadata));
-		rig_.BeginShot(aiming);
+		rig_.BeginShot(aiming, metadata.automatic);
 		firing_ = true;
 	}
 	// Trigger release lets the authored tail finish.

@@ -1,7 +1,7 @@
-# Bodycam HUD Animation Policy
+# Weapon lowering during HUD animations
 
-Scripted HUD animations can explicitly scale Bodycam viewmodel lowering while
-the animation is blended in. Other Bodycam layers are not affected.
+A scripted HUD animation can scale down Bodycam's weapon lowering while it plays.
+Other Bodycam layers are not affected.
 
 ## Full HUD motions
 
@@ -46,6 +46,6 @@ LAM2 animation actions may set:
 action.bodycam_lowering_influence = 0
 ```
 
-The active NVG and headlamp compatibility scripts use this explicit policy.
+The NVG and headlamp compatibility scripts set it to turn lowering off during their animations.
 Reloads, healing animations, persistent inertia overlays, and other untagged
 HUD actions do not suppress Bodycam lowering.

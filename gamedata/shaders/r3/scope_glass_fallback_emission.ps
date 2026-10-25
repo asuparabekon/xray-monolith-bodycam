@@ -1,7 +1,7 @@
-// The glow of an MSDF reticle (reticle_msdf.h) at visible lens glass pixels, as scope_glass_fallback draws
-// the reticle itself; without the MSDF-aware reticle it draws nothing. It evaluates only the reticle.
+// The glow of an atlas reticle (reticle_atlas.h) at visible lens glass pixels, as scope_glass_fallback draws
+// the reticle itself; without the atlas-aware reticle it draws nothing. It evaluates only the reticle.
 Texture2D scope_reference_visible_glass;
-#define RETICLE_MSDF_EMISSION_PASS
+#define RETICLE_ATLAS_EMISSION_PASS
 #define main scope_color_write_main
 #include "scope_color_write.ps"
 #undef main
@@ -10,11 +10,11 @@ Texture2D scope_reference_visible_glass;
 ReticleEmissionOut main(v_out input)
 {
     ReticleEmissionOut o = (ReticleEmissionOut)0;
-#ifdef RETICLE_MSDF_H
+#ifdef RETICLE_ATLAS_H
     if (!(scope_reference_visible_glass.Load(int3(input.hpos.xy, 0)).w > 1.5)) discard;
     scope = new_Scope(input);
     o.core = scope_custom_reticle(scope);
-    o.glow = rmsdf_glow_source;
+    o.glow = reticle_atlas_glow_source;
 #else
     discard;
 #endif

@@ -67,6 +67,8 @@ const LocomotionFrameResult& PrimaryFrame::Update(
 PrimaryRifleOutput PrimaryFrame::Apply(const std::vector<LocalPose>& physical, const OverlayMontages& montages,
 	const ActionCurvePublication& actions, const RegionalStage& stage)
 {
+	if (!last_)
+		throw std::logic_error("Primary frame applied before its first update");
 	actionWeight_ = FInterpTo(actionWeight_, CurveValue(rifle_.LayerInputs(), "FP_Action_Weight"), delta_, 8);
 	PrimaryRifleInput in;
 	in.recordDiagnostics = recordPoseDiagnostics_;

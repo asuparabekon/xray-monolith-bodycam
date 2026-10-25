@@ -36,7 +36,6 @@ namespace BodycamReference
 namespace
 {
 // GetHudFov is in the engine's HUD FOV unit; this many degrees make one.
-constexpr float kHudFovDegrees = 83.f;
 // The camera trace runs this many metres along the aim direction and this many up.
 constexpr float kCameraTraceForward = 15.f, kCameraTraceUp = .5f;
 
@@ -186,11 +185,11 @@ bool EngineFrameAdapter::Update(CActor& actor, CWeapon* weapon)
 		Msg("! Reference frame disabled: %s", failure.what());
 	}
 	Leave(actor, hud);
-	// The weapon is not bound again until it is equipped again.
+	// Classic until the next mode request; the weapon is not bound again until
+	// it is equipped again.
 	if (frame.hostReady)
 		hud.m_reference_profile_attempted = true;
-	else
-		hud.m_reference_failed_request = selection.Requests();
+	hud.m_reference_failed_request = selection.Requests();
 	return FinishWithoutReference(frame);
 }
 

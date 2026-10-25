@@ -206,7 +206,7 @@ class LensTuningBinder final : public R_constant_setup
 {
 	void setup(R_constant* constant) override
 	{
-		RCache.set_c(constant, ps_r__svp_lens_environment, ps_r__svp_lens_direct, ps_r__svp_lens_ghosts, ps_r__svp_lens_internal);
+		RCache.set_c(constant, ps_r__svp_lens_environment, ps_r__svp_lens_direct, ps_r__svp_lens_ghosts, 0.f); // w reserved
 	}
 };
 
@@ -334,19 +334,12 @@ void SvpLensLighting::CaptureSceneLights(const light_Package& normal, const ligh
 
 void SvpLensLighting::BindObjectLighting(IRenderable* owner)
 {
+	// a null owner must not apply the object bus, so apply_object runs only for a lit owner
 	const bool hasLighting = owner && owner->renderable_ROS();
 	if (hasLighting)
 		RImplementation.apply_object(owner);
 	else
-	{
-		RCache.set_c("svp_lens_object_light", 0.f, 0.f, 0.f, 0.f);
-		RCache.set_c("scope_glass_sky_positive", 0.f, 0.f, 0.f, 0.f);
-		RCache.set_c("scope_glass_sky_negative", 0.f, 0.f, 0.f, 0.f);
-		RCache.set_c("scope_glass_probe_positive", 0.f, 0.f, 0.f, 0.f);
-		RCache.set_c("scope_glass_probe_negative", 0.f, 0.f, 0.f, 0.f);
-		RCache.set_c("svp_lens_probe_positive", 0.f, 0.f, 0.f, 0.f);
-		RCache.set_c("svp_lens_probe_negative", 0.f, 0.f, 0.f, 0.f);
-	}
+		RImplementation.svp_clear_lens_object_light();
 
 	const float hemi = hasLighting ? RImplementation.o_hemi : 0.f;
 	const float sun = hasLighting ? RImplementation.o_sun : 0.f;

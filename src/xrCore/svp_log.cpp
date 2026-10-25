@@ -16,10 +16,11 @@ void PipMsg(const char* format, ...)
 	string2048 buf;
 	va_list mark;
 	va_start(mark, format);
-	int sz = _vsnprintf(buf, sizeof(buf) - 1, format, mark);
+	const int sz = _vsnprintf(buf, sizeof(buf) - 1, format, mark);
 	buf[sizeof(buf) - 1] = 0;
 	va_end(mark);
-	if (sz <= 0)
+	// -1 is a truncated line, still written
+	if (sz == 0)
 		return;
 
 	xrCriticalSectionGuard g(&pipGuard);

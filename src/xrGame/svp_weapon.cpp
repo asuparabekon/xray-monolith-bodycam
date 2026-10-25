@@ -166,8 +166,7 @@ void CWeapon::UpdateSvpSwingEnvelope(CActor* pActor)
 
 	const bool shot = envelope.ammo != -1 && current_ammo < envelope.ammo;
 	envelope.ammo = current_ammo;
-	extern int g_svp_crescent;
-	if (!g_svp_crescent || !vp.IsSVPActive() || GetZRotatingFactor() <= 0.999f)
+	if (!g_svp_crescent || !vp.IsSVPActive() || GetZRotatingFactor() <= SVP_SETTLED_ROT)
 		return;
 
 	const float threshold = _max(24.f / _max(vp.svp_mag, 1.f), 12.f);
@@ -202,7 +201,7 @@ void CWeapon::UpdateSecondVP()
 		return;
 
 	CActor* pActor = smart_cast<CActor*>(H_Parent());
-	if (!scope_svp_enabled)
+	if (scope_svp_enabled < 2)
 	{
 		// legacy fake-SVP, stock activation condition unchanged
 		Device.m_SecondViewport.SetSVPActive(m_zoomtype == 0 && pActor->cam_Active() == pActor->cam_FirstEye() && IsSecondVPZoomPresent() && m_zoom_params.m_fZoomRotationFactor > 0.05f);
@@ -282,14 +281,10 @@ void CWeapon::UpdateSecondVP()
 	}
 	// aimed on irons or the launcher, the scope lens still renders but its pose is not the scope's
 	Device.m_SecondViewport.svp_alt_sight = (m_zoomtype != 0 && IsZoomed());
-	// authored recoil relax time publish, the recoil settle window derives from it
-	Device.m_SecondViewport.svp_recoil_relax_s = (zoom_cam_recoil.RelaxSpeed > EPS)
-		? zoom_cam_recoil.Dispersion / zoom_cam_recoil.RelaxSpeed : 0.f;
 
 	// pip publish a raise transient free zoom for the svp camera, the raise holds the dialed
 	// magnification and hands off to the live target after settle
 	{
-		extern int g_svp_zoom_sync;
 		extern float scope_radius;
 		auto& vp = Device.m_SecondViewport;
 		// a selector, not an integrator, the raise publishes the steady dialed magnification and the
@@ -381,7 +376,7 @@ bool CWeapon::GetSVPCameraMatrix()
 	if (!vp.ReadSight(sight) || sight.lens_radius <= EPS
 		|| !vp.SnapshotRecent(sight.frame, sight.session, Device.dwFrame))
 		return false;
-	if (!scope_svp_enabled || !svp_optic_api_active())
+	if (scope_svp_enabled < 2 || !svp_optic_api_active())
 		return true;
 
 	CSecondVPParams::OpticConfig config;

@@ -1,4 +1,4 @@
--- MSDF reticle glow at visible deferred glass pixels, added into $user$reticle_emission
+-- Atlas reticle glow at visible deferred glass pixels, added into $user$reticle_emission
 function normal(shader, t_base, t_second, t_detail)
 	shader:begin("scope_vertex", "scope_reference_reticle_deferred_emission")
 	: zb(false, false)

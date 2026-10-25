@@ -36,7 +36,6 @@ struct MarkerContext
 	MarkerPosition start, end;
 	std::vector<PassedMarker> passed;
 };
-MarkerState MarkerRangeTime(float length, const std::vector<float>& times, int previous, int next, float fraction);
 // Sync-marker clock of a sequence with two markers, played forwards and not mirrored.
 class PositiveMarkerClock
 {

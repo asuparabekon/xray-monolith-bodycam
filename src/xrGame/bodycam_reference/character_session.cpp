@@ -91,16 +91,6 @@ NeutralPose CharacterSession::EvaluateNeutralPose(const std::vector<LocalPose>& 
 	const auto presentation = neutral->character.Present({}, {}, kNeutralFov);
 	return { presentation.armsCamera, presentation.weaponCamera, authored, solved.physical };
 }
-void CharacterSession::ResetRuntime(Rotation control, double fov, double vx, double vz, bool aiming)
-{
-	// The decoded assets and the random stream are kept; only the graph is rebuilt.
-	auto next = MakeGraph(randomSource_, control, fov);
-	next->motion.SeedControl(control, aiming);
-	next->movement.SeedControl(control, vx, vz);
-	graph_ = std::move(next);
-	idle_.ResetTime();
-	simulationFrame_.reset();
-}
 bool CharacterSession::BeginFrame(std::uint32_t frame, bool paused, double delta, bool aiming, bool magnified,
 	const CharacterMovementInput& input, const std::function<void()>& afterGrounded)
 {

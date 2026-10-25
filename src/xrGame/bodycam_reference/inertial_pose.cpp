@@ -8,8 +8,9 @@ namespace BodycamReference
 {
 namespace
 {
-constexpr float pi = kPiF, twoPi = 2 * kPiF;
-Quaternion Multiply(Quaternion a, Quaternion b)
+constexpr float kTwoPiF = 2 * kPiF;
+// QuaternionProduct in the source operation order.
+Quaternion SourceQuaternionProduct(Quaternion a, Quaternion b)
 {
 	const double x = b[0], y = b[1], z = b[2], w = b[3], px = a[0], py = a[1], pz = a[2], pw = a[3];
 	return { ((w * px + x * pw) + z * py) - y * pz, ((y * pw - z * px) + w * py) + x * pz, ((y * px + z * pw) - x * py) + w * pz,
@@ -18,10 +19,10 @@ Quaternion Multiply(Quaternion a, Quaternion b)
 template <class T>
 T Wrap(T value)
 {
-	while (value > pi)
-		value = T(value - twoPi);
-	while (value < -pi)
-		value = T(value + twoPi);
+	while (value > kPiF)
+		value = T(value - kTwoPiF);
+	while (value < -kPiF)
+		value = T(value + kTwoPiF);
 	return value;
 }
 std::array<double, 3> ReadVector(const PackedTransform& t, unsigned offset)
@@ -58,7 +59,7 @@ InertialVectorDelta InertialVectorDifference(
 }
 InertialRotationDelta InertialRotationDifference(Quaternion current, Quaternion recent, Quaternion older, float dt)
 {
-	const auto q = Multiply(recent, Conjugate(current));
+	const auto q = SourceQuaternionProduct(recent, Conjugate(current));
 	const double length = (q[0] * q[0] + q[2] * q[2]) + q[1] * q[1];
 	std::array<double, 3> axis = { 1, 0, 0 };
 	if (length >= 1e-8)
@@ -77,7 +78,7 @@ InertialRotationDelta InertialRotationDifference(Quaternion current, Quaternion 
 	float velocity = 0;
 	if (dt > 1e-4f && angle > 1e-4f)
 	{
-		const auto old = Multiply(older, Conjugate(current));
+		const auto old = SourceQuaternionProduct(older, Conjugate(current));
 		const double dot = (axis[1] * old[1] + axis[0] * old[0]) + axis[2] * old[2];
 		const float projected = float(dot == 0 && old[3] == 0 ? 0 : Wrap(2 * std::atan2(dot, old[3])));
 		velocity = Wrap(angle - projected) / dt;
@@ -87,14 +88,15 @@ InertialRotationDelta InertialRotationDifference(Quaternion current, Quaternion 
 InertialPoseDeltas BuildInertialPose(const PackedPose& current, const PackedPose& recent, const PackedPose& older, float dt,
 	Quaternion currentComponent, Quaternion recentComponent, Quaternion olderComponent)
 {
-	const auto a = Multiply(Conjugate(currentComponent), recentComponent), b = Multiply(Conjugate(currentComponent), olderComponent);
+	const auto a = SourceQuaternionProduct(Conjugate(currentComponent), recentComponent),
+			   b = SourceQuaternionProduct(Conjugate(currentComponent), olderComponent);
 	InertialPoseDeltas out;
 	out.records.reserve(current.size());
 	out.rootMode = std::abs(a[3]) < double(.999f) || std::abs(b[3]) < double(.999f) ? 2 : 0;
 	for (unsigned i = 0; i < current.size(); ++i)
 	{
-		const auto rq = i == 0 && out.rootMode == 2 ? Multiply(a, Rotation(recent[i])) : Rotation(recent[i]);
-		const auto oq = i == 0 && out.rootMode == 2 ? Multiply(b, Rotation(older[i])) : Rotation(older[i]);
+		const auto rq = i == 0 && out.rootMode == 2 ? SourceQuaternionProduct(a, Rotation(recent[i])) : Rotation(recent[i]);
+		const auto oq = i == 0 && out.rootMode == 2 ? SourceQuaternionProduct(b, Rotation(older[i])) : Rotation(older[i]);
 		out.records.push_back({ InertialVectorDifference(ReadVector(current[i], 4), ReadVector(recent[i], 4), ReadVector(older[i], 4), dt),
 			InertialVectorDifference(ReadVector(current[i], 8), ReadVector(recent[i], 8), ReadVector(older[i], 8), dt),
 			InertialRotationDifference(Rotation(current[i]), rq, oq, dt) });
@@ -110,7 +112,7 @@ PackedPose ApplyInertialPose(PackedPose pose, const std::vector<InertialBoneDelt
 		const auto& r = d.rotation;
 		const float half = InertialDecay(r.angle, r.velocity, time, duration) * .5f;
 		const double s = std::sin(double(half));
-		const auto q = Multiply({ r.axis[0] * s, r.axis[1] * s, r.axis[2] * s, std::cos(double(half)) }, Rotation(t));
+		const auto q = SourceQuaternionProduct({ r.axis[0] * s, r.axis[1] * s, r.axis[2] * s, std::cos(double(half)) }, Rotation(t));
 		std::copy(q.begin(), q.end(), t.begin());
 		const float translation = InertialDecay(d.translation.magnitude, d.translation.velocity, time, duration),
 					scale = InertialDecay(d.scale.magnitude, d.scale.velocity, time, duration);

@@ -133,6 +133,14 @@ void CDetailManager::cache_Decompress(Slot* S)
 	// Prepare to actual-bounds-calculations
 	Fbox Bounds;
 	Bounds.invalidate();
+	Fbox Origins;
+	Origins.invalidate();
+	for (u32 i = 0; i < dm_obj_in_slot; i++)
+	{
+		D.G[i].occ_B.invalidate();
+		D.G[i].occ_O.invalidate();
+		D.G[i].occ_H = 0;
+	}
 
 	// Decompressing itself
 	for (u32 z = 0; z <= d_size; z++)
@@ -299,6 +307,11 @@ RDEVICE.Statistic->TEST0.End		();
 			mXform.mul_43(Item.mRotY, mScale);
 			ItemBB.xform(Dobj->bv_bb, mXform);
 			Bounds.merge(ItemBB);
+			Origins.modify(Item_P);
+			SlotPart& part = D.G[index];
+			part.occ_B.merge(ItemBB);
+			part.occ_O.modify(Item_P);
+			part.occ_H = _max(part.occ_H, _max(_abs(ItemBB.max.y - Item_P.y), _abs(ItemBB.min.y - Item_P.y)));
 
 #ifndef _EDITOR
 #ifdef		DEBUG
@@ -359,4 +372,12 @@ RDEVICE.Statistic->TEST0.End		();
 	D.vis.clear();
 	D.vis.box.set(Bounds);
 	D.vis.box.getsphere(D.vis.sphere.P, D.vis.sphere.R);
+
+	Origins.merge(D.vis.box);
+	const Fvector& C = D.vis.sphere.P;
+	Fvector far_corner;
+	far_corner.set(_max(_abs(Origins.min.x - C.x), _abs(Origins.max.x - C.x)),
+	               _max(_abs(Origins.min.y - C.y), _abs(Origins.max.y - C.y)),
+	               _max(_abs(Origins.min.z - C.z), _abs(Origins.max.z - C.z)));
+	D.cull_R = far_corner.magnitude();
 }

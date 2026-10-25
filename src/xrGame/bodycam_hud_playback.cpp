@@ -1,6 +1,7 @@
 // Classic bodycam HUD playback: the sprint-entry clip of a HUD item, driving a
-// one-shot clip by progress, pacing the movement loop, and the script-only
-// movement notification.
+// one-shot clip by progress, pacing the movement loop, the script-only
+// movement notification, the lowering influence of script animations, and the
+// player_hud forwarders to the arm controller.
 #include "stdafx.h"
 #include "bodycam_hud_arms.h"
 #include "bodycam_sprint_start.h"
@@ -64,8 +65,9 @@ constexpr float kMaximumHeldPhase = 0.97f;
 // Smaller changes of the loop pace are not applied.
 constexpr float kPaceTolerance = 0.002f;
 
-// Visits live blends of both arm models and of the primary weapon.
-// Other attached items (3D scopes) play their own clips.
+// Visits live blends of the arm models and of the primary weapon. With a
+// left-hand item (detector) the second arm model plays that item's clips and
+// is skipped; other attached items (3D scopes) play their own clips.
 template <typename Visit>
 void VisitHudBlends(player_hud& hud, Visit&& visit)
 {
@@ -80,7 +82,8 @@ void VisitHudBlends(player_hud& hud, Visit&& visit)
 					visit(*blend);
 	};
 	model(hud.m_model);
-	model(hud.m_model_2);
+	if (!hud.attached_item(1))
+		model(hud.m_model_2);
 	if (attachable_hud_item* item = hud.attached_item(0))
 		model(item->m_model ? item->m_model->dcast_PKinematicsAnimated() : nullptr);
 }

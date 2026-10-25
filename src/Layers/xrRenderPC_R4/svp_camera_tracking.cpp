@@ -17,7 +17,6 @@ LPCSTR svp_camera_domain_name(CSecondVPParams::ECameraDomain domain)
 // drawn weapon extent the drain published last frame, rising slowly and dropping at once
 float svp_auto_near(CSecondVPParams& vp, float cap, float& out_min, bool& out_manual, bool& out_fresh)
 {
-	extern float ps_r__svp_near;
 	static float s_slew = R_VIEWPORT_NEAR;
 	static u32 s_frame = u32(-1);
 	static u32 s_epoch = u32(-1);
@@ -52,7 +51,6 @@ float svp_auto_near(CSecondVPParams& vp, float cap, float& out_min, bool& out_ma
 	out_fresh = fresh;
 	if (!fresh)
 	{
-		extern int ps_r__svp_cop_diag;
 		static u32 s_stale_ms = 0;
 		if (ps_r__svp_cop_diag && Device.dwTimeGlobal - s_stale_ms > 5000)
 		{
@@ -96,8 +94,6 @@ void svp_epoch_update(const void* lens_visual, float lens_radius, CSecondVPParam
 		float exit_pupil_high_mm = 0.f;
 		u32 config_generation = 0;
 	};
-	extern float ps_s3ds_eye_relief_low_mm, ps_s3ds_eye_relief_high_mm;
-	extern float ps_s3ds_exit_pupil_low_mm, ps_s3ds_exit_pupil_high_mm;
 	const auto& optic_config = params.RenderOpticConfig();
 	SCameraInputs current;
 	current.offset = params.svp_opt_offset;
@@ -133,7 +129,6 @@ void svp_epoch_update(const void* lens_visual, float lens_radius, CSecondVPParam
 	if (optic_change_now || input_change)
 	{
 		++s_camera_epoch;
-		extern int ps_r__svp_cop_diag;
 		if (ps_r__svp_cop_diag)
 			PipMsg("[SVP-EPOCH] optic=%u camera=%u reason=%s r %.2f->%.2fcm", s_optic_epoch, s_camera_epoch,
 				vis_change ? (r_change ? "visual-radius" : "visual") : (r_change ? "radius" : "inputs"), s_prev_r * 100.f,
@@ -198,7 +193,6 @@ bool svp_camera_history(
 		referenceEffects != s_reference_camera;
 	if (history_reset)
 	{
-		extern int ps_r__svp_cop_diag;
 		if (ps_r__svp_cop_diag)
 		{
 			LPCSTR reason = first_camera

@@ -35,6 +35,7 @@ extern ECORE_API u32 svp_stats_distort_guard; // svp distort guard stamps read b
 extern ECORE_API u32 svp_stats_nvg_sky; // svp nvg sky lum remaps read by the overlay, incremented in phase_combine
 extern ECORE_API u32 svp_stats_disc_latch; // svp adaptive-res disc latch moves read by the overlay, incremented in phase_3DSSReticle
 extern ECORE_API u32 svp_stats_fwd_keep; // svp forward-list keeps read by the overlay, incremented in render_forward
+extern ECORE_API u32 svp_stats_optic_resolve; // svp optics bus resolve fires read by the overlay, incremented in svp_optics_resolve
 // session-lifetime ever-fired ledger latches, set at the gated call sites, swept once per session
 extern ECORE_API u32 svp_ledger_cull_reject;
 extern ECORE_API u32 svp_ledger_ssa_culled;
@@ -65,7 +66,6 @@ extern ECORE_API int ps_r__svp_skip_volumetric;
 extern ECORE_API int ps_r__svp_skip_grass;
 extern ECORE_API int ps_r__svp_grass_cull;
 extern ECORE_API int ps_r__svp_sss_sun;
-extern ECORE_API int ps_r__svp_skip_pos_copy;
 extern ECORE_API int ps_r__svp_smap_alloc;
 
 // main-view post gate, lossless skips for post passes with nothing to do
@@ -169,6 +169,7 @@ extern ECORE_API int ps_r__svp_npc_detail;
 extern ECORE_API int ps_r__svp_thermal_sim;
 extern ECORE_API float ps_r__svp_twilight;
 extern ECORE_API float ps_r__svp_parallax;
+extern ECORE_API int ps_r__svp_reticle_fit;
 extern ECORE_API float ps_r__svp_near_blur;
 extern ECORE_API float ps_r__svp_focus_m;
 extern ECORE_API int ps_r__svp_authored_optics;
@@ -178,7 +179,6 @@ extern ECORE_API int ps_r__svp_measured_optics; // measured lens geometry fills 
 extern ECORE_API float ps_r__svp_lens_environment;
 extern ECORE_API float ps_r__svp_lens_direct;
 extern ECORE_API float ps_r__svp_lens_ghosts;
-extern ECORE_API float ps_r__svp_lens_internal;
 extern ECORE_API float ps_r__svp_lens_opacity;
 extern ECORE_API int ps_r__svp_lens_debug;
 extern ECORE_API int ps_r__svp_lens_diagnostics;
@@ -250,6 +250,7 @@ extern ECORE_API float ps_r__svp_nvg_bleach;
 extern ECORE_API float ps_r__svp_nvg_sensitivity;
 extern ECORE_API int ps_r__svp_nvg_objective;
 extern ECORE_API int ps_r__svp_weapon_continuity;
+extern ECORE_API int ps_r__svp_clipon;
 extern ECORE_API int ps_r__svp_optic_body_suppress;
 extern ECORE_API int ps_r__svp_nearblur_scatter;
 

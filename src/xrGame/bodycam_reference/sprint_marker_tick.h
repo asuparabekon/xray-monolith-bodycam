@@ -17,5 +17,5 @@ struct SprintMarkerResult
 	bool notifyRootMotionPending = true;
 };
 SprintMarkerResult TickSprintMarkers(
-	std::array<std::string, 2> names, std::array<float, 2> times, MarkerState state, double recordRate, CandidateContext context);
+	const std::array<std::string, 2>& names, std::array<float, 2> times, MarkerState state, double recordRate, CandidateContext context);
 }

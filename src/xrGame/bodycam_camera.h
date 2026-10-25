@@ -44,6 +44,7 @@ class CBodycam
 public:
 	bool AnyFeatureEnabled() const;
 	void Reset(const CCameraBase* camera, float ads_blend);
+	// Deltas of the camera's yaw and pitch (CCameraBase angles, radians).
 	void AddMouseLookDelta(float yaw_delta, float pitch_delta);
 	void RebaseLookDelta(float yaw_delta, float pitch_delta);
 	const CameraComposition& Update(const ActorFrame& frame, CameraRigHost& host);
@@ -56,8 +57,8 @@ public:
 	// lowering_weight 0..1 is the share of the lowering offset that is kept.
 	bool GetHudOffset(Fvector& pos, Fvector& rot, float lowering_weight) const;
 	bool GetArmPose(ArmPose& pose) const;
-	// Speeds in m/s and the actual speed over its target, from Movement Inertia.
-	void SetMovementSpeed(float target_speed, float actual_speed, float speed_fraction);
+	// Speeds in m/s and the filtered speed over its target, from Movement Inertia.
+	void SetMovementSpeed(float target_speed, float filtered_speed, float speed_fraction);
 	bool SprintBobActive() const { return m_sprint_bob.Output().active; }
 
 private:
@@ -77,7 +78,7 @@ private:
 	Fvector m_lowering_rot = { 0.f, 0.f, 0.f };
 	ArmPose m_arm_pose;
 	float m_movement_target_speed = 0.f;
-	float m_movement_actual_speed = 0.f;
+	float m_movement_filtered_speed = 0.f;
 	float m_movement_speed_fraction = 0.f;
 	ViewmodelProfileState m_viewmodel_profile;
 	BodycamReference::ClassicSprintBob m_sprint_bob;

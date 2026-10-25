@@ -62,13 +62,13 @@ bool CRenderTarget::svp_nvg_pass()
 	});
 	RCache.set_ColorWriteEnable();
 
+	// Optical focus is admitted only after this frame's actual lens and image.
+	const float focus = (!RImplementation.o.dx10_msaa && scope_glass_deferred_current()
+		&& scope_reference_current() && scope_reference_composited_frame == Device.dwFrame) ? 1.f : 0.f;
+
 	// lens region draws the mod's own centered tube class, interior mask 1 across the glass
 	RCache.set_Element(s_nightvision->E[ps_r2_nightvision]);
-	// Optical focus is admitted only after this frame's actual lens and image.
-	RCache.set_c("scope_glass_nvg_focus", (this == RImplementation.TargetMain
-		&& !RImplementation.o.dx10_msaa && scope_glass_deferred_current()
-		&& scope_reference_current() && scope_reference_composited_frame == Device.dwFrame) ? 1.f : 0.f,
-		0.f, 0.f, 0.f);
+	RCache.set_c("scope_glass_nvg_focus", focus, 0.f, 0.f, 0.f);
 
 	RCache.set_c("shader_param_8", svp_nvg_center_tubes(ps_dev_param_8.x),
 		ps_dev_param_8.y, ps_dev_param_8.z, ps_dev_param_8.w);
@@ -77,11 +77,7 @@ bool CRenderTarget::svp_nvg_pass()
 
 	// wearer region keeps the authored tube class, set explicitly since the element may stay bound
 	RCache.set_Element(s_nightvision->E[ps_r2_nightvision]);
-	// Optical focus is admitted only after this frame's actual lens and image.
-	RCache.set_c("scope_glass_nvg_focus", (this == RImplementation.TargetMain
-		&& !RImplementation.o.dx10_msaa && scope_glass_deferred_current()
-		&& scope_reference_current() && scope_reference_composited_frame == Device.dwFrame) ? 1.f : 0.f,
-		0.f, 0.f, 0.f);
+	RCache.set_c("scope_glass_nvg_focus", focus, 0.f, 0.f, 0.f);
 
 	RCache.set_c("shader_param_8", ps_dev_param_8.x,
 		ps_dev_param_8.y, ps_dev_param_8.z, ps_dev_param_8.w);

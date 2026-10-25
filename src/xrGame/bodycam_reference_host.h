@@ -2,13 +2,32 @@
 #include "bodycam_reference/action_semantics.h"
 #include "bodycam_reference/action_aliases.h"
 #include "bodycam_reference/recoil_policy.h"
+#include "bodycam_reference/script_layer_policy.h"
 #include "bodycam_reference_assets.h"
 #include "bodycam_reference_arms.h"
 #include "bodycam_reference/camera_intensity.h"
 #include "bodycam_reference/stance_clearance.h"
 
+class CWeapon;
+
 namespace BodycamReference
 {
+// Host game tuning from the [bodycam_reference_tuning] configuration section, read once
+// (bodycam_reference_host_bind.cpp). A missing or malformed section is reported once and gives the
+// library's neutral values.
+struct EngineReferenceTuning
+{
+	std::vector<std::string> extraReloadAliases;
+	Vector pistolHipOffset{};
+	RecoilBudgets recoilBudgets;
+	ScriptLayerPolicy scriptLayers;
+};
+const EngineReferenceTuning& ReferenceTuning();
+// The recoil metadata of the equipped weapon: its upgrades, family budget and fire mode.
+RecoilMetadata EngineRecoilMetadata(const CWeapon& weapon);
+// Whether player_hud applies a script layer this frame.
+bool ApplyScriptLayer(bool reference, const char* name);
+
 // Identifies a hand motion to the host. The two arm models number their
 // motions separately: model 0 is the right arm, 1 the left.
 inline std::uint64_t HandMotionKey(unsigned model, unsigned motion)
@@ -67,7 +86,8 @@ public:
 	const EngineBasis& Basis() const { return basis_; }
 
 	// The action clips among the bound weapon's hand motions.
-	void ConfigureActions(const std::vector<ActionAlias>& aliases, const std::vector<std::uint8_t>& semanticsPacket);
+	void ConfigureActions(const std::vector<ActionAlias>& aliases, const std::vector<std::uint8_t>& semanticsPacket,
+		const std::vector<std::string>& extraReloadAliases = {});
 	void SelectAction(std::uint64_t motion, std::uint64_t generation, const std::string& alias)
 	{
 		actions_.Select(motion, generation, alias);
@@ -85,7 +105,8 @@ public:
 	AnimationCurves ActionCurves(const AnimationCurves& base) const;
 
 	void ConfigureRecoil(const RecoilMetadata&);
-	void BeginShot(bool aiming);
+	// An automatic shot (full-auto or burst) also sets the automatic pushback.
+	void BeginShot(bool aiming, bool automatic = false);
 	void StopFire(bool cancelled);
 	void AddMouse(double x, double y);
 	// Replaces the aim direction. Call before BeginFrame.

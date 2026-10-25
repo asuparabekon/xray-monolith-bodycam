@@ -11,80 +11,10 @@
 #include "../../Include/xrRender/UIShader.h"
 #include "../../Include/xrRender/FactoryPtr.h"
 
-// gate cvar + the shared cull counters, all defined in svp_console.cpp
-extern int ps_r__svp_stats;
-extern u32 svp_stats_ssa_culled;
-extern u32 svp_stats_cull_reject;
-extern u32 svp_stats_cull_reject_ident;
-extern u32 svp_stats_lights_mirrored;
-extern u32 svp_stats_lights_skipped;
-extern u32 svp_stats_taa_stamp;
-extern u32 svp_stats_nvg_split;
-extern u32 svp_stats_lod_scale;
-extern u32 svp_stats_hud_cull_reject;
-extern u32 svp_stats_reflex_capture;
-extern u32 svp_stats_distort_guard;
-extern u32 svp_stats_nvg_sky;
-extern u32 svp_stats_disc_latch;
-extern u32 svp_stats_fwd_keep;
-extern u32 svp_stats_optic_resolve;
-extern u32 svp_stats_lean_flags;
-extern u32 svp_stats_copies;
-extern u32 svp_stats_copy_kb;
-extern u32 svp_stats_copy_kb_cat[4];
-extern void (*svp_copy_timer_hook)(u32 cat, bool begin);
-extern u32 svp_stats_tiny;
-extern u32 svp_stats_shadow;
-// fps audit tallies, all defined in svp_console.cpp alongside the counters above
-extern u32 svp_stats_state_apply;
-extern u32 svp_stats_sampler_set;
-extern u32 svp_stats_cb_flush;
-extern u32 svp_stats_cb_flush_map;
-extern float svp_stats_join_ms;
-extern float svp_stats_capture_base_ms;
-extern float svp_stats_capture_cascade_ms[3];
-extern float svp_stats_present_ms;
-extern u32 svp_stats_sort_calls;
-extern u32 svp_stats_sort_packets;
-extern u32 svp_stats_layout_hit;
-extern u32 svp_stats_layout_miss;
-extern u32 svp_stats_detail_main_thread;
-extern u32 svp_stats_hom_main_thread;
-extern u32 svp_stats_hom_tested;
-extern u32 svp_stats_hom_rejected;
-// occlusion engine readout, the id and buffer size come from the per-frame latch
-extern u32 svp_stats_hom_engine;
-extern u32 svp_stats_hom_res_w;
-extern u32 svp_stats_hom_res_h;
-extern u32 svp_stats_hom_tris_in;
-extern u32 svp_stats_hom_tris_emitted;
-extern u32 svp_stats_hom_render_us;
-extern u64 svp_stats_hom_test_ticks;
-extern u32 svp_stats_hom_disagree;
-extern u32 svp_stats_hom_shadow_queries;
-extern u32 svp_stats_hom_dis_keep;
-extern u32 svp_stats_moc_ret;
-extern u32 svp_stats_moc_fill_pct;
-extern u32 svp_stats_hom_terr_cells;
-extern u32 svp_stats_hom_terr_emitted;
-extern u32 svp_stats_hom_terr_capped;
-// live screen-space pass configuration, defined in xrRender_console.cpp
-extern Fvector4 ps_ssfx_ao;
-extern Fvector4 ps_ssfx_il;
-extern Fvector4 ps_ssfx_ssr;
-extern int ps_ssfx_ao_quality;
-extern int ps_ssfx_il_quality;
-extern int ps_ssfx_ssr_quality;
 // sss weapon dof drive plus the nvg flag that forces the beefs dof variant
 extern Fvector4 ps_ssfx_wpn_dof_1;
 extern float ps_ssfx_wpn_dof_2;
 extern Fvector4 ps_dev_param_8;
-extern int ps_r__svp_wpn_dof;
-extern int ps_r__svp_diag;
-// adaptive-res grow gate, defined in svp_console.cpp
-extern int ps_r__svp_adaptive_grow;
-// lean post gate, defined in svp_console.cpp
-extern int ps_r__pp_lean;
 // engine scope magnification, defined in xrRender_console.cpp
 extern float g_pip_scope_magnification;
 
@@ -129,7 +59,7 @@ namespace
 		u32 lean_flags;
 		bool lean_on;
 		u32 copies, copy_kb, rtsw, shadow, tiny, smap;
-		u32 copy_kb_cat[4];
+		u32 copy_kb_cat[SVP_CP_COUNT];
 		u32 state_apply, sampler_set, cb_flush, cb_flush_map;
 		float join_ms, capture_base_ms, capture_cascade_ms[3], present_ms;
 		u32 sort_calls, sort_packets;
@@ -252,7 +182,7 @@ namespace
 	// hook body for the shared copy sites, maps their category onto our accumulating sections
 	void copy_timer(u32 cat, bool begin)
 	{
-		if (cat >= 4)
+		if (cat >= SVP_CP_COUNT)
 			return;
 		const section_e s = section_e(SEC_CP_HIST + cat);
 		if (begin) section_begin(s); else section_end(s);
@@ -436,6 +366,30 @@ namespace
 		va_end(args);
 		++idx;
 	}
+
+	const section_e SVP_SECS[4] = { SEC_SVP_GBUFFER, SEC_SVP_LIGHTS, SEC_SVP_EMISSIVE, SEC_SVP_COMBINE };
+	const section_e MAIN_SECS[4] = { SEC_MAIN_GBUFFER, SEC_MAIN_LIGHTS, SEC_MAIN_EMISSIVE, SEC_MAIN_COMBINE };
+
+	// one viewport's gbuffer, lights, emissive and combine sections summed in that order
+	template <typename T>
+	T sum_sections(const stats_frame& d, const section_e (&secs)[4], T sec_data::*field)
+	{
+		return d.sec[secs[0]].*field + d.sec[secs[1]].*field + d.sec[secs[2]].*field + d.sec[secs[3]].*field;
+	}
+
+	// panel backing quad in the vertex color over the opaque-white ui texture
+	void draw_back(float l, float t, float w, float h, u32 color)
+	{
+		UIRender->SetShader(**s_shader);
+		UIRender->StartPrimitive(6, IUIRender::ptTriList, IUIRender::pttTL);
+		UIRender->PushPoint(l, t, 0.f, color, 0.f, 0.f);
+		UIRender->PushPoint(l + w, t, 0.f, color, 1.f, 0.f);
+		UIRender->PushPoint(l + w, t + h, 0.f, color, 1.f, 1.f);
+		UIRender->PushPoint(l, t, 0.f, color, 0.f, 0.f);
+		UIRender->PushPoint(l + w, t + h, 0.f, color, 1.f, 1.f);
+		UIRender->PushPoint(l, t + h, 0.f, color, 0.f, 1.f);
+		UIRender->FlushPrimitive();
+	}
 }
 
 namespace svp_stats
@@ -472,28 +426,29 @@ namespace svp_stats
 
 		++s_frame_no;
 		s_cur = &s_frames[s_frame_no % RING];
-		// the reclaimed slot is RING frames old, resolve it before overwriting its queries
+		// the reclaimed slot is RING frames old, resolve it before overwriting its queries,
+		// an unresolved one skips only this frame's query work
 		if (s_cur->in_flight && !resolve_slot(*s_cur))
-		{
 			s_cur = nullptr;
-			return;
-		}
-		s_cur->pair_count = 0;
-		s_cur->overflow = false;
-		s_cur->in_flight = false;
-		for (u32 i = 0; i < SEC_COUNT; ++i)
+		if (s_cur)
 		{
-			s_cur->data.sec[i].cpu_ms = 0.0;
-			s_cur->data.sec[i].gpu_ms = 0.0;
-			s_cur->data.sec[i].calls = s_cur->data.sec[i].verts = s_cur->data.sec[i].polys = 0;
-			s_sec_open_pair[i] = -1;
+			s_cur->pair_count = 0;
+			s_cur->overflow = false;
+			s_cur->in_flight = false;
+			for (u32 i = 0; i < SEC_COUNT; ++i)
+			{
+				s_cur->data.sec[i].cpu_ms = 0.0;
+				s_cur->data.sec[i].gpu_ms = 0.0;
+				s_cur->data.sec[i].calls = s_cur->data.sec[i].verts = s_cur->data.sec[i].polys = 0;
+				s_sec_open_pair[i] = -1;
+			}
+			for (u32 i = 0; i < CPU_COUNT; ++i)
+				s_cur->data.svp_cpu[i] = 0.0;
+			s_cur->data.main_lights = s_cur->data.main_shadowed = 0;
+			s_cur->data.svp_blends = s_cur->data.sun_passes = 0;
+			s_cur->data.overflow = false;
+			s_cur->data.frame_ms = fms;
 		}
-		for (u32 i = 0; i < CPU_COUNT; ++i)
-			s_cur->data.svp_cpu[i] = 0.0;
-		s_cur->data.main_lights = s_cur->data.main_shadowed = 0;
-		s_cur->data.svp_blends = s_cur->data.sun_passes = 0;
-		s_cur->data.overflow = false;
-		s_cur->data.frame_ms = fms;
 		// shared cull counters, one frame of accumulation each
 		svp_stats_ssa_culled = 0;
 		svp_stats_cull_reject = 0;
@@ -568,7 +523,8 @@ namespace svp_stats
 				bench_update();
 			}
 		}
-		HW.pContext->Begin(s_cur->disjoint);
+		if (s_cur)
+			HW.pContext->Begin(s_cur->disjoint);
 	}
 
 	void section_begin(section_e s)
@@ -681,7 +637,7 @@ namespace svp_stats
 		d.lean_on = (ps_r__pp_lean != 0);
 		d.copies = svp_stats_copies;
 		d.copy_kb = svp_stats_copy_kb;
-		for (u32 i = 0; i < 4; ++i)
+		for (u32 i = 0; i < SVP_CP_COUNT; ++i)
 			d.copy_kb_cat[i] = svp_stats_copy_kb_cat[i];
 		d.tiny = svp_stats_tiny;
 		d.shadow = svp_stats_shadow;
@@ -749,26 +705,16 @@ namespace svp_stats
 
 		// section totals per viewport, svp mirrors nest inside the main lighting so its column is the
 		// scope-only slice while the main column carries the whole pass
-		double svp_gpu = d.sec[SEC_SVP_GBUFFER].gpu_ms + d.sec[SEC_SVP_LIGHTS].gpu_ms
-			+ d.sec[SEC_SVP_EMISSIVE].gpu_ms + d.sec[SEC_SVP_COMBINE].gpu_ms;
-		double main_gpu = d.sec[SEC_MAIN_GBUFFER].gpu_ms + d.sec[SEC_MAIN_LIGHTS].gpu_ms
-			+ d.sec[SEC_MAIN_EMISSIVE].gpu_ms + d.sec[SEC_MAIN_COMBINE].gpu_ms;
-		double svp_cpu = d.sec[SEC_SVP_GBUFFER].cpu_ms + d.sec[SEC_SVP_LIGHTS].cpu_ms
-			+ d.sec[SEC_SVP_EMISSIVE].cpu_ms + d.sec[SEC_SVP_COMBINE].cpu_ms;
-		double main_cpu = d.sec[SEC_MAIN_GBUFFER].cpu_ms + d.sec[SEC_MAIN_LIGHTS].cpu_ms
-			+ d.sec[SEC_MAIN_EMISSIVE].cpu_ms + d.sec[SEC_MAIN_COMBINE].cpu_ms;
-		u32 svp_calls = d.sec[SEC_SVP_GBUFFER].calls + d.sec[SEC_SVP_LIGHTS].calls
-			+ d.sec[SEC_SVP_EMISSIVE].calls + d.sec[SEC_SVP_COMBINE].calls;
-		u32 main_calls = d.sec[SEC_MAIN_GBUFFER].calls + d.sec[SEC_MAIN_LIGHTS].calls
-			+ d.sec[SEC_MAIN_EMISSIVE].calls + d.sec[SEC_MAIN_COMBINE].calls;
-		u32 svp_verts = d.sec[SEC_SVP_GBUFFER].verts + d.sec[SEC_SVP_LIGHTS].verts
-			+ d.sec[SEC_SVP_EMISSIVE].verts + d.sec[SEC_SVP_COMBINE].verts;
-		u32 main_verts = d.sec[SEC_MAIN_GBUFFER].verts + d.sec[SEC_MAIN_LIGHTS].verts
-			+ d.sec[SEC_MAIN_EMISSIVE].verts + d.sec[SEC_MAIN_COMBINE].verts;
-		u32 svp_polys = d.sec[SEC_SVP_GBUFFER].polys + d.sec[SEC_SVP_LIGHTS].polys
-			+ d.sec[SEC_SVP_EMISSIVE].polys + d.sec[SEC_SVP_COMBINE].polys;
-		u32 main_polys = d.sec[SEC_MAIN_GBUFFER].polys + d.sec[SEC_MAIN_LIGHTS].polys
-			+ d.sec[SEC_MAIN_EMISSIVE].polys + d.sec[SEC_MAIN_COMBINE].polys;
+		double svp_gpu = sum_sections(d, SVP_SECS, &sec_data::gpu_ms);
+		double main_gpu = sum_sections(d, MAIN_SECS, &sec_data::gpu_ms);
+		double svp_cpu = sum_sections(d, SVP_SECS, &sec_data::cpu_ms);
+		double main_cpu = sum_sections(d, MAIN_SECS, &sec_data::cpu_ms);
+		u32 svp_calls = sum_sections(d, SVP_SECS, &sec_data::calls);
+		u32 main_calls = sum_sections(d, MAIN_SECS, &sec_data::calls);
+		u32 svp_verts = sum_sections(d, SVP_SECS, &sec_data::verts);
+		u32 main_verts = sum_sections(d, MAIN_SECS, &sec_data::verts);
+		u32 svp_polys = sum_sections(d, SVP_SECS, &sec_data::polys);
+		u32 main_polys = sum_sections(d, MAIN_SECS, &sec_data::polys);
 
 		CGameFont& F = *s_font;
 		const float H = (float)Device.dwHeight;
@@ -846,15 +792,7 @@ namespace svp_stats
 
 		// dark translucent backing rect at ~75% over the opaque-white ui texture
 		u32 back = color_rgba(14, 17, 21, 191);
-		UIRender->SetShader(**s_shader);
-		UIRender->StartPrimitive(6, IUIRender::ptTriList, IUIRender::pttTL);
-		UIRender->PushPoint(panel_l, top, 0.f, back, 0.f, 0.f);
-		UIRender->PushPoint(panel_l + panel_w, top, 0.f, back, 1.f, 0.f);
-		UIRender->PushPoint(panel_l + panel_w, top + panel_h, 0.f, back, 1.f, 1.f);
-		UIRender->PushPoint(panel_l, top, 0.f, back, 0.f, 0.f);
-		UIRender->PushPoint(panel_l + panel_w, top + panel_h, 0.f, back, 1.f, 1.f);
-		UIRender->PushPoint(panel_l, top + panel_h, 0.f, back, 0.f, 1.f);
-		UIRender->FlushPrimitive();
+		draw_back(panel_l, top, panel_w, panel_h, back);
 
 		const u32 c_hdr = color_rgba(175, 200, 235, 255);
 		const u32 c_txt = color_rgba(205, 218, 218, 255);
@@ -896,7 +834,7 @@ namespace svp_stats
 		fmt_count(sb, sizeof(sb), svp_polys); fmt_count(mb, sizeof(mb), main_polys);
 		row(c_txt, "polys", c_txt, sb, c_txt, mb, true, !lean);
 		xr_sprintf(sb, "%u", d.svp_blends); xr_sprintf(mb, "%u", d.main_lights);
-		row(c_txt, "lights", c_txt, sb, c_txt, mb, true, !lean);
+		row(c_txt, "lamps", c_txt, sb, c_txt, mb, true, !lean);
 		xr_sprintf(mb, "%u", d.main_shadowed);
 		row(c_txt, "shadow", c_dim, "-", c_txt, mb, true, !lean);
 
@@ -977,15 +915,7 @@ namespace svp_stats
 			const float bavg_r = bval_r + gap + cell;
 			brk_l = bpanel_l; brk_top = btop; brk_w = bpanel_w; brk_h = bpanel_h;
 
-			UIRender->SetShader(**s_shader);
-			UIRender->StartPrimitive(6, IUIRender::ptTriList, IUIRender::pttTL);
-			UIRender->PushPoint(bpanel_l, btop, 0.f, back, 0.f, 0.f);
-			UIRender->PushPoint(bpanel_l + bpanel_w, btop, 0.f, back, 1.f, 0.f);
-			UIRender->PushPoint(bpanel_l + bpanel_w, btop + bpanel_h, 0.f, back, 1.f, 1.f);
-			UIRender->PushPoint(bpanel_l, btop, 0.f, back, 0.f, 0.f);
-			UIRender->PushPoint(bpanel_l + bpanel_w, btop + bpanel_h, 0.f, back, 1.f, 1.f);
-			UIRender->PushPoint(bpanel_l, btop + bpanel_h, 0.f, back, 0.f, 1.f);
-			UIRender->FlushPrimitive();
+			draw_back(bpanel_l, btop, bpanel_w, bpanel_h, back);
 
 			float by = btop + pad;
 			auto brow = [&](u32 lc, LPCSTR label, u32 vc, LPCSTR val, u32 ac, LPCSTR avg)
@@ -1086,35 +1016,44 @@ namespace svp_stats
 					d.sec[SEC_GLASS_COMPOSE].gpu_ms, s_sec_avg[SEC_GLASS_COMPOSE]);
 				// every cascade of the frame summed, runs near keep means one draw per slot
 				// calls is the whole cascade grass pass so it tracks the sub range fragmentation
-				foot_emit(ptail, pt, "sun runs slots %u keep %u runs %u max %u drop %u draws %u calls %u",
-					d.grass_slots, d.grass_keep, d.grass_runs, d.grass_run_max,
-					d.grass_drop, d.grass_draws, d.sec[SEC_SUN_GRASS].calls);
-				// the scope cone sees a sliver of the main-view set so keep should sit far below the sun row
-				foot_emit(ptail, pt, "svp runs slots %u keep %u runs %u max %u drop %u draws %u calls %u",
-					d.grass_svp_slots, d.grass_svp_keep, d.grass_svp_runs, d.grass_svp_run_max,
-					d.grass_svp_drop, d.grass_svp_draws, d.sec[SEC_SVP_GBUFFER].calls);
-				// scoped cpu the section columns never attribute to the scope, all zero unscoped
-				foot_emit(ptail, pt, "svp cpu now replay %.2f lights %.2f hud %.2f lens %.2f misc %.2f ms",
-					d.svp_cpu[CPU_REPLAY], d.svp_cpu[CPU_LIGHTS], d.svp_cpu[CPU_HUD],
-					d.svp_cpu[CPU_LENS], d.svp_cpu[CPU_MISC]);
-				foot_emit(ptail, pt, "svp cpu avg replay %.2f lights %.2f hud %.2f lens %.2f misc %.2f ms",
-					s_cpu_avg[CPU_REPLAY], s_cpu_avg[CPU_LIGHTS], s_cpu_avg[CPU_HUD],
-					s_cpu_avg[CPU_LENS], s_cpu_avg[CPU_MISC]);
+				if (!ps_r__detail_shadow_cull)
+					foot_emit(ptail, pt, "sun runs off");
+				else
+					foot_emit(ptail, pt, "sun runs slots %u keep %u runs %u max %u drop %u draws %u calls %u",
+						d.grass_slots, d.grass_keep, d.grass_runs, d.grass_run_max,
+						d.grass_drop, d.grass_draws, d.sec[SEC_SUN_GRASS].calls);
+				if (!lean)
+				{
+					// the scope cone sees a sliver of the main-view set so keep should sit far below the sun row
+					if (!ps_r__svp_grass_cull)
+						foot_emit(ptail, pt, "svp runs off");
+					else
+						foot_emit(ptail, pt, "svp runs slots %u keep %u runs %u max %u drop %u draws %u",
+							d.grass_svp_slots, d.grass_svp_keep, d.grass_svp_runs, d.grass_svp_run_max,
+							d.grass_svp_drop, d.grass_svp_draws);
+					// scoped cpu the section columns never attribute to the scope, all zero unscoped
+					foot_emit(ptail, pt, "svp cpu now replay %.2f lights %.2f hud %.2f lens %.2f misc %.2f ms",
+						d.svp_cpu[CPU_REPLAY], d.svp_cpu[CPU_LIGHTS], d.svp_cpu[CPU_HUD],
+						d.svp_cpu[CPU_LENS], d.svp_cpu[CPU_MISC]);
+					foot_emit(ptail, pt, "svp cpu avg replay %.2f lights %.2f hud %.2f lens %.2f misc %.2f ms",
+						s_cpu_avg[CPU_REPLAY], s_cpu_avg[CPU_LIGHTS], s_cpu_avg[CPU_HUD],
+						s_cpu_avg[CPU_LENS], s_cpu_avg[CPU_MISC]);
+				}
 			}
 
 			// the per-category megabytes ride in the label so the row keeps the two data columns
-			char cplab[4][32];
-			const section_e cpsec[4] = { SEC_CP_HIST, SEC_CP_TAIL, SEC_CP_SCENE, SEC_CP_PASS };
-			const u32 cpavg[4] = { PIPE_CP_HIST_KB, PIPE_CP_TAIL_KB, PIPE_CP_SCENE_KB, PIPE_CP_PASS_KB };
-			LPCSTR cpname[4] = { "cp hist", "cp tail", "cp scene", "cp pass" };
+			char cplab[SVP_CP_COUNT][32];
+			const section_e cpsec[SVP_CP_COUNT] = { SEC_CP_HIST, SEC_CP_TAIL, SEC_CP_SCENE, SEC_CP_PASS };
+			const u32 cpavg[SVP_CP_COUNT] = { PIPE_CP_HIST_KB, PIPE_CP_TAIL_KB, PIPE_CP_SCENE_KB, PIPE_CP_PASS_KB };
+			LPCSTR cpname[SVP_CP_COUNT] = { "cp hist", "cp tail", "cp scene", "cp pass" };
 			if (!lean)
-				for (u32 i = 0; i < 4; ++i)
+				for (u32 i = 0; i < SVP_CP_COUNT; ++i)
 					xr_sprintf(cplab[i], "%s %.0fmb", cpname[i], s_pipe_avg[cpavg[i]] / 1024.0);
 
 			const u32 prows = lean ? 6u : 10u;
 			float plabel_w = F.SizeOf_("untracked") + digit;
 			if (!lean)
-				for (u32 i = 0; i < 4; ++i)
+				for (u32 i = 0; i < SVP_CP_COUNT; ++i)
 					plabel_w = _max(plabel_w, F.SizeOf_(cplab[i]) + digit);
 			float pcontent_w = plabel_w + cell + gap + cell;
 			for (u32 i = 0; i < pt; ++i)
@@ -1128,15 +1067,7 @@ namespace svp_stats
 			const float pval_r = plabel_l + plabel_w + cell;
 			const float pavg_r = pval_r + gap + cell;
 
-			UIRender->SetShader(**s_shader);
-			UIRender->StartPrimitive(6, IUIRender::ptTriList, IUIRender::pttTL);
-			UIRender->PushPoint(ppanel_l, ptop, 0.f, back, 0.f, 0.f);
-			UIRender->PushPoint(ppanel_l + ppanel_w, ptop, 0.f, back, 1.f, 0.f);
-			UIRender->PushPoint(ppanel_l + ppanel_w, ptop + ppanel_h, 0.f, back, 1.f, 1.f);
-			UIRender->PushPoint(ppanel_l, ptop, 0.f, back, 0.f, 0.f);
-			UIRender->PushPoint(ppanel_l + ppanel_w, ptop + ppanel_h, 0.f, back, 1.f, 1.f);
-			UIRender->PushPoint(ppanel_l, ptop + ppanel_h, 0.f, back, 0.f, 1.f);
-			UIRender->FlushPrimitive();
+			draw_back(ppanel_l, ptop, ppanel_w, ppanel_h, back);
 
 			float py = ptop + pad;
 			auto prow = [&](u32 lc, LPCSTR label, u32 vc, LPCSTR val, u32 ac, LPCSTR avg)
@@ -1164,7 +1095,7 @@ namespace svp_stats
 			fmt_count(pb, sizeof(pb), d.tiny); xr_sprintf(pa, "%.0f", s_pipe_avg[PIPE_TINY]);
 			prow(c_txt, "tiny", c_txt, pb, c_txt, pa);
 			if (!lean)
-				for (u32 i = 0; i < 4; ++i)
+				for (u32 i = 0; i < SVP_CP_COUNT; ++i)
 				{
 					const double ms = d.sec[cpsec[i]].gpu_ms;
 					const double avg = s_sec_avg[cpsec[i]];

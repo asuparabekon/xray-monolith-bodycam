@@ -85,13 +85,14 @@ player_hud_motion* player_hud::ReferenceSelectActionMotion(attachable_hud_item& 
 	if (item.m_attach_place_idx != 0 || !ReferenceOwnsMotion(item.m_parent_hud_item) || requested->m_animations.empty())
 		return requested;
 	auto* weapon = item.m_parent_hud_item->object().cast_weapon();
-	const auto kind = BodycamReference::ClassifyActionAlias(requested->m_alias_name.c_str());
+	const auto kind =
+		BodycamReference::ClassifyActionAlias(requested->m_alias_name.c_str(), BodycamReference::ReferenceTuning().extraReloadAliases);
 	if (weapon && kind != BodycamReference::ActionKind::None && weapon->IsZoomed())
 	{
 		const auto aimed = m_reference_host->AimedAlias(requested->m_alias_name.c_str());
 		if (!aimed)
 			weapon->CancelReferenceActionAim();
-		else if (auto* paired = item.m_hand_motions->find_motion(aimed->c_str()))
+		else if (auto* paired = item.m_hand_motions->find_motion(aimed->c_str()); paired && !paired->m_animations.empty())
 			requested = paired;
 	}
 	// An action that keeps the aim, whichever of its variants plays, ends the burst being fired.

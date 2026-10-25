@@ -4,6 +4,9 @@
 #include "../xrEngine/xr_ioconsole.h"
 #include "../xrEngine/xr_ioc_cmd.h"
 
+#include <algorithm>
+#include <cmath>
+
 namespace Bodycam
 {
 class CCC_BodycamPreset : public IConsole_Command
@@ -51,19 +54,49 @@ private:
 	bool* m_target;
 };
 
+// A float setting: rejects non-finite values and clamps like SetFloat.
+class CCC_BodycamFloat : public CCC_Float
+{
+public:
+	CCC_BodycamFloat(const FloatBinding& binding) : CCC_Float(binding.console_name, binding.value, binding.min_value, binding.max_value) {}
+	void Execute(LPCSTR args) override
+	{
+		const float v = float(atof(args));
+		if (!std::isfinite(v) || v < min - EPS || v > max + EPS)
+			InvalidSyntax();
+		else
+			*value = std::clamp(v, min, max);
+	}
+};
+
+// r__reticle_inspect: the GAMMA patch's Reticle Editor draws the HUD this many times closer so the reticle can be
+// seen while it is adjusted. Never saved, so a restart is never zoomed.
+float g_reticle_inspect_zoom = 1.f;
+
+class CCC_ReticleInspect : public CCC_Float
+{
+public:
+	explicit CCC_ReticleInspect(LPCSTR N) : CCC_Float(N, &g_reticle_inspect_zoom, 1.f, 8.f) {}
+	void Save(IWriter*) override {}
+	void Info(TInfo& I) override { xr_sprintf(I, "Reticle Editor inspect zoom, 1 = off (not saved)"); }
+};
+
+float ReticleInspectZoom()
+{
+	return g_reticle_inspect_zoom;
+}
+
 void RegisterConsoleCommands()
 {
 	CMD1(CCC_BodycamPreset, "bodycam_preset");
+	CMD1(CCC_ReticleInspect, "r__reticle_inspect");
 	CMD1(CCC_BodycamDump, "bodycam_dump");
 	CMD1(CCC_BodycamMotionMode, "bodycam_motion_mode");
 
 	u32 count = 0;
 	const FloatBinding* float_bindings = GetFloatBindings(count);
 	for (u32 i = 0; i < count; ++i)
-	{
-		const FloatBinding& binding = float_bindings[i];
-		Console->AddCommand(xr_new<CCC_Float>(binding.console_name, binding.value, binding.min_value, binding.max_value));
-	}
+		Console->AddCommand(xr_new<CCC_BodycamFloat>(float_bindings[i]));
 
 	BoolBinding* bool_bindings = GetBoolBindings(count);
 	for (u32 i = 0; i < count; ++i)

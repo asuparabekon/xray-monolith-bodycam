@@ -124,7 +124,7 @@ PoseCurveBundle EvaluateDirectionalInput(unsigned state, const DirectionEvaluati
 	}
 	return { std::move(pose), MultiWayCurves(samples) };
 }
-PoseCurveBundle EvaluateStatePoseStack(unsigned count, unsigned current, const std::vector<LocomotionTransitionRecord>& records,
+PoseCurveBundle EvaluateStatePoseStack(unsigned, unsigned current, const std::vector<LocomotionTransitionRecord>& records,
 	const std::function<PoseCurveBundle(unsigned)>& source,
 	const std::function<TransitionPoseProfile(const LocomotionTransitionRecord&, unsigned, std::size_t)>& profile)
 {

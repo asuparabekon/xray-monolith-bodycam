@@ -38,7 +38,7 @@ public:
     // no image is current.
     bool view(const Fvector& eye, const Fvector& view_forward, const Fvector& view_up, Fvector4& origin,
         Fvector4& right, Fvector4& up, Fvector4& forward, Fvector4& head) const;
-    // r__scope_vslr_debug 2: the newest image once per session, to the logs folder.
+    // r__scope_vslr_debug 2: the newest image once per process, to the logs folder.
     void dump();
 
 private:

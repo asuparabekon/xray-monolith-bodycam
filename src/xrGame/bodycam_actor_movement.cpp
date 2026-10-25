@@ -65,7 +65,7 @@ Bodycam::SprintLoweringInput ReadSprintLoweringInput(CActor& actor, bool owned, 
 }
 }
 
-void CActor::BodycamUpdateMovement(Fvector& control_accel, float& camera_effector_factor, float dt)
+void CActor::BodycamUpdateMovement(Fvector& control_accel, float dt)
 {
 	m_bodycam_sprint.hud_changed = false;
 	const bool moving = !!(mstate_real & mcAnyMove), sprinting = !!(mstate_real & mcSprint), aiming = IsZoomAimingMode();
@@ -78,8 +78,7 @@ void CActor::BodycamUpdateMovement(Fvector& control_accel, float& camera_effecto
 	const Bodycam::MovementInertiaOutput response =
 		Bodycam::UpdateMovementInertia(Bodycam::GetConfig().movement_inertia, m_bodycam_movement_inertia, response_input);
 	control_accel.set(response.accel);
-	camera_effector_factor = control_accel.magnitude();
-	m_bodycam.SetMovementSpeed(response.target_speed, response.actual_speed, response.speed_fraction);
+	m_bodycam.SetMovementSpeed(response.target_speed, response.filtered_speed, response.speed_fraction);
 
 	Fvector velocity;
 	character_physics_support()->movement()->GetCharacterVelocity(velocity);

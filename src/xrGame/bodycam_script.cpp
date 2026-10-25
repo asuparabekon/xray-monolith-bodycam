@@ -118,6 +118,115 @@ static object bodycam_get_bindings()
 	return bindings;
 }
 
+// --- files on disk, for the reticle editor's file browser --------------------------------------------------------
+// Real paths, read and written directly: the game's file index (FS) only knows what existed at start, and listing a
+// folder through it rescans that folder, which under MO2 drops the mods' files from the index.
+
+// The parent folders of `path`, made as needed
+static void bodycam_make_parent_dirs(const std::string& path)
+{
+	for (size_t i = path.find_first_of("\\/", 3); i != std::string::npos; i = path.find_first_of("\\/", i + 1))
+		CreateDirectoryA(path.substr(0, i).c_str(), nullptr);
+}
+
+// The folders and files in `folder`, folders first, each sorted by name: { { name =, dir = }, ... }; nil if unreadable
+static object bodycam_list_dir(LPCSTR folder)
+{
+	lua_State* L = ai().script_engine().lua();
+	std::string pattern = folder ? folder : "";
+	if (!pattern.empty() && pattern.back() != '\\' && pattern.back() != '/')
+		pattern += '\\';
+	WIN32_FIND_DATAA data;
+	HANDLE find = FindFirstFileA((pattern + "*").c_str(), &data);
+	if (find == INVALID_HANDLE_VALUE)
+		return object();
+	xr_vector<std::pair<bool, std::string>> entries;
+	do
+	{
+		if (strcmp(data.cFileName, ".") && strcmp(data.cFileName, ".."))
+			entries.emplace_back(!(data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY), data.cFileName);
+	} while (FindNextFileA(find, &data));
+	FindClose(find);
+	std::sort(entries.begin(), entries.end(), [](const auto& a, const auto& b)
+		{ return a.first != b.first ? a.first < b.first : _stricmp(a.second.c_str(), b.second.c_str()) < 0; });
+	object list = newtable(L);
+	int index = 1;
+	for (const auto& [file, name] : entries)
+	{
+		object entry = newtable(L);
+		entry["name"] = name.c_str();
+		entry["dir"] = !file;
+		list[index++] = entry;
+	}
+	return list;
+}
+
+// The drive roots ("C:\\", "Z:\\", ...)
+static object bodycam_drives()
+{
+	lua_State* L = ai().script_engine().lua();
+	char buffer[512] = {};
+	const DWORD length = GetLogicalDriveStringsA(sizeof(buffer) - 1, buffer);
+	object list = newtable(L);
+	int index = 1;
+	for (const char* drive = buffer; drive < buffer + length && *drive; drive += strlen(drive) + 1)
+		list[index++] = drive;
+	return list;
+}
+
+static bool bodycam_file_exists(LPCSTR path)
+{
+	const DWORD attributes = path ? GetFileAttributesA(path) : INVALID_FILE_ATTRIBUTES;
+	return attributes != INVALID_FILE_ATTRIBUTES && !(attributes & FILE_ATTRIBUTE_DIRECTORY);
+}
+
+// The whole file as a string (binary safe), nil if unreadable
+static object bodycam_read_file(LPCSTR path)
+{
+	FILE* f = path ? fopen(path, "rb") : nullptr;
+	if (!f)
+		return object();
+	std::string text;
+	char buffer[16384];
+	for (size_t n; (n = fread(buffer, 1, sizeof(buffer), f)) > 0;)
+		text.append(buffer, n);
+	fclose(f);
+	lua_State* L = ai().script_engine().lua();
+	lua_pushlstring(L, text.data(), text.size());
+	luabind::detail::lua_reference ref;
+	ref.set(L); // takes the string off the stack
+	return object(L, ref, true);
+}
+
+// Writes `text` to `path`, making its folders (text only: luabind passes strings to C++ as C strings; copy_file
+// copies any file)
+static bool bodycam_write_file(LPCSTR path, LPCSTR text)
+{
+	if (!path || !*path || !text)
+		return false;
+	bodycam_make_parent_dirs(path);
+	FILE* f = fopen(path, "wb");
+	if (!f)
+		return false;
+	const size_t size = xr_strlen(text);
+	const bool ok = fwrite(text, 1, size, f) == size;
+	return fclose(f) == 0 && ok;
+}
+
+// Copies `from` to `to`, making the folders of `to`
+static bool bodycam_copy_file(LPCSTR from, LPCSTR to)
+{
+	if (!from || !to || !*to)
+		return false;
+	bodycam_make_parent_dirs(to);
+	return CopyFileA(from, to, FALSE) != FALSE;
+}
+
+static bool bodycam_remove_file(LPCSTR path)
+{
+	return path && DeleteFileA(path) != FALSE;
+}
+
 #pragma optimize("s", on)
 void Bodycam::script_register(lua_State* L)
 {
@@ -132,5 +241,7 @@ void Bodycam::script_register(lua_State* L)
 		def("set_float", &Bodycam::SetFloat), def("get_bool", &bodycam_get_bool), def("set_bool", &Bodycam::SetBool),
 		def("apply_preset", &Bodycam::ApplyPreset), def("set_viewmodel_profile", &bodycam_set_viewmodel_profile),
 		def("clear_viewmodel_profile", &bodycam_clear_viewmodel_profile), def("dump", &Bodycam::DumpState),
-		def("get_bindings", &bodycam_get_bindings)];
+		def("get_bindings", &bodycam_get_bindings), def("list_dir", &bodycam_list_dir), def("drives", &bodycam_drives),
+		def("file_exists", &bodycam_file_exists), def("read_file", &bodycam_read_file), def("write_file", &bodycam_write_file),
+		def("copy_file", &bodycam_copy_file), def("remove_file", &bodycam_remove_file)];
 }

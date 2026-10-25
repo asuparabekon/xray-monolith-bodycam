@@ -573,6 +573,9 @@
     <ClInclude Include="r4.h" />
     <ClInclude Include="r4_rendertarget.h" />
     <ClInclude Include="r4_3dss_reticle.h" />
+    <ClInclude Include="r4_reticle_vector.h" />
+    <ClInclude Include="..\xrRender\reticle_vector\reticle_vector.h" />
+    <ClInclude Include="..\xrRender\reticle_vector\reticle_vector_svg.h" />
     <ClInclude Include="scope_vslr_capture.h" />
     <ClInclude Include="scope_vslr_renderer.h" />
     <ClInclude Include="scope_vslr_timing.h" />
@@ -824,6 +827,21 @@
     <ClCompile Include="svp_reticle_emission.cpp" />
     <ClCompile Include="r4_3dss_reticle.cpp" />
     <ClCompile Include="r4_reticle_atlas.cpp" />
+    <ClCompile Include="r4_reticle_vector.cpp" />
+    <ClCompile Include="..\xrRender\reticle_vector\reticle_vector_svg.cpp">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <FloatingPointModel>Strict</FloatingPointModel>
+      <ExceptionHandling>Sync</ExceptionHandling>
+    </ClCompile>
+    <ClCompile Include="..\xrRender\reticle_vector\reticle_vector_build.cpp">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <FloatingPointModel>Strict</FloatingPointModel>
+      <ExceptionHandling>Sync</ExceptionHandling>
+    </ClCompile>
+    <ClCompile Include="..\..\3rd party\pugixml\pugixml.cpp">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <ExceptionHandling>Sync</ExceptionHandling>
+    </ClCompile>
     <ClCompile Include="r4_rendertarget_phase_3dss_reticle.cpp" />
     <ClCompile Include="r4_shader_warmup.cpp" />
     <ClCompile Include="svp_nearblur.cpp" />

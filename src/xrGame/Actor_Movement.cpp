@@ -326,7 +326,7 @@ void CActor::g_cl_CheckControls(u32 mstate_wf, Fvector& vControlAccel, float& Ju
 
 	const bool classic = Local() && Bodycam::ClassicActive();
 	if (classic && g_Alive())
-		BodycamUpdateMovement(vControlAccel, cam_eff_factor, dt);
+		BodycamUpdateMovement(vControlAccel, dt);
 	else
 		BodycamResetMovement();
 

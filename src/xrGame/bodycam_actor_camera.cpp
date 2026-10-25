@@ -73,7 +73,7 @@ Bodycam::AdsState GetBodycamAdsState(const CActor& actor)
 	const float factor = weapon->GetZRotatingFactor();
 	if (Device.dwFrame != last_frame)
 	{
-		if (Device.dwFrame == last_frame + 1 && _abs(factor - last_factor) > .3f)
+		if (Bodycam::DiagnosticsEnabled(2) && Device.dwFrame == last_frame + 1 && _abs(factor - last_factor) > .3f)
 			Msg("[BODYCAM-ADS] aim blend %.2f -> %.2f in one frame, frame time %.1f ms", last_factor, factor, Device.fTimeDelta * 1000.f);
 		last_frame = Device.dwFrame;
 		last_factor = factor;
@@ -162,6 +162,13 @@ bool CActor::cam_BodycamFootstepOffset(Fvector& offset, Fmatrix& roll) const
 	return Bodycam::ClassicActive() && m_bodycam.CameraRig().HudShare(Device.dwFrame, offset, roll);
 }
 
+bool CActor::cam_BodycamFootstepComposed() const
+{
+	Fvector offset;
+	Fmatrix roll;
+	return Bodycam::FootstepCameraEnabled() && cam_BodycamFootstepOffset(offset, roll);
+}
+
 bool CActor::cam_BodycamVisualUpdate(const CCameraBase* camera, float dt, float viewport_near, bool apply_camera)
 {
 	m_bodycam_regrip_frame = u32(-1);
@@ -212,7 +219,7 @@ bool CActor::cam_BodycamVisualUpdate(const CCameraBase* camera, float dt, float 
 	frame.firearm_equipped = HasActiveFirearm(*this);
 	// The Sprint Transition's gun step bob, once the start has decided that the
 	// weapon plays no run-to-sprint clip of its own.
-	if (config.sim.sprint.enable && config.sprint_start.gun_bob > 0.f)
+	if (Bodycam::SprintBobEnabled())
 	{
 		BodycamReference::SprintBobInput& bob = frame.sprint_bob;
 		bob.starting =

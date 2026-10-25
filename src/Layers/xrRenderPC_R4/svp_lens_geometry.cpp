@@ -6,9 +6,14 @@
 #include "../xrRender/svp_objective_offset.h"
 #include "svp_camera.h"
 #include "svp_camera_tracking.h"
+#include "svp_optics.h"
+
+// objective distance in eyepiece radii when no front lens is known, the authored-set front distance
+// (mod_system_3dss_objective_lenses median 12.7 mean 14.0)
+static constexpr float svp_fallback_objective_radii = 14.f;
 
 // pip front/second focal-plane world points (scope_w_ffp/sfp); the scope shader projects the SVP image through them
-void ffp_sfp()
+static void svp_update_focal_planes()
 {
 	auto e = Device.m_SecondViewport.eyepiece;
 	auto o = Device.m_SecondViewport.objective;
@@ -21,9 +26,7 @@ void ffp_sfp()
 	if (o.radius < EPS)
 	{
 		// no objective captured, place one at the authored-set front distance in eyepiece radii
-		// (mod_system_3dss_objective_lenses median 12.7 mean 14.0, same 14r as the geomscan fallback)
-		float distance = e.radius * 14.0f;
-		o.radius = e.radius;
+		float distance = e.radius * svp_fallback_objective_radii;
 		p_o = { 0, 0, distance };
 		e.m_W.transform(p_o);
 	}
@@ -42,10 +45,8 @@ void ffp_sfp()
 	// authored eye relief, symmetric focal model), the old 0.2/0.8 split stays as the cvar fallback
 	float t1 = 0.2f, t2 = 0.8f;
 	{
-		extern int ps_r__svp_focal_derive;
-		extern Fvector4 ps_s3ds_param_1;
 		const float L = p_d.magnitude();
-		const float fe = ps_s3ds_param_1.y * 0.01f;
+		const float fe = svp_eye_relief_mm() * 0.001f;
 		if (ps_r__svp_focal_derive && L > EPS && fe > 0.01f)
 		{
 			t1 = clampr(fe / L, 0.05f, 0.45f);
@@ -88,9 +89,6 @@ void svp_snapshot_hud_geom()
 // and one eps gate feed every consumer, authored_optics folds into the offset, mm from spec then w
 static void svp_optics_resolve(CSecondVPParams* p, float er)
 {
-	extern int ps_r__svp_authored_optics;
-	extern Fvector4 scope_objective_lens_offset;
-	extern float ps_s3ds_objective_mm;
 	const auto& config = p->RenderOpticConfig();
 	Fvector4 off;
 	if (ps_r__svp_authored_optics)
@@ -110,11 +108,8 @@ static void svp_optics_resolve(CSecondVPParams* p, float er)
 	else if (off.w > EPS)
 		mm = 2000.f * off.w * er; // authored w radius in eyepiece radii to mm
 	p->svp_opt_obj_mm = mm;
-	extern int ps_r__svp_stats;
-	extern u32 svp_stats_optic_resolve;
 	if (ps_r__svp_stats)
 		++svp_stats_optic_resolve;
-	extern int ps_r__svp_cop_diag;
 	if (ps_r__svp_cop_diag)
 	{
 		static u32 s_opt_ms = 0;
@@ -163,7 +158,6 @@ void CRender::deriveScopeLens()
 	viewport.svp_lens_visual = nullptr;
 	viewport.svp_lens_owner = nullptr;
 	viewport.svp_lens_frame = Device.dwFrame;
-	extern int ps_r__svp_diag;
 	if (ps_r__svp_diag)
 	{
 		const auto& config = viewport.RenderOpticConfig();
@@ -182,11 +176,9 @@ void CRender::deriveScopeLens()
 	// pip clear the flat-panel publish, re-set below when a flat window lens is the eyepiece
 	viewport.svp_panel_flat = false;
 
-	// multi-lens weapons carry several scope-lens meshes, pick the aimed one, a visible
-	// lens bone nearest the camera ray
+	// multi-lens weapons carry several scope-lens meshes, pick the visible lens nearest the camera
 	const void* best = nullptr;
 	{
-		extern int ps_r__svp_cop_diag;
 		static u32 s_lens_diag_ms = 0;
 		const bool diag = ps_r__svp_cop_diag && (Device.dwTimeGlobal - s_lens_diag_ms > 3000);
 		if (diag)
@@ -241,7 +233,6 @@ void CRender::deriveScopeLens()
 	// pip diag, an aimed frame that derives no lens (hip frames also derive, gate on the raise)
 	if (!best)
 	{
-		extern int ps_r__svp_diag;
 		if (ps_r__svp_diag && g_pGamePersistent && g_pGamePersistent->m_pGShaderConstants->hud_params.x > 0.05f)
 		{
 			static u32 s_nb_ms = 0;
@@ -295,7 +286,6 @@ void CRender::deriveScopeLens()
 		svp_epoch_update(N.pVisual, radius, *p);
 
 		{
-			extern int ps_r__svp_cop_diag;
 			static const void* s_root = nullptr;
 			static const void* s_visual = nullptr;
 			static u32 s_session = 0;
@@ -391,30 +381,12 @@ void CRender::deriveScopeLens()
 		Fvector bsz;
 		V.box.getsize(bsz);
 		float ea[3] = { _abs(bsz.x), _abs(bsz.y), _abs(bsz.z) };
-		if (ea[0] < ea[1])
-		{
-			float t = ea[0];
-			ea[0] = ea[1];
-			ea[1] = t;
-		}
-		if (ea[1] < ea[2])
-		{
-			float t = ea[1];
-			ea[1] = ea[2];
-			ea[2] = t;
-		}
-		if (ea[0] < ea[1])
-		{
-			float t = ea[0];
-			ea[0] = ea[1];
-			ea[1] = t;
-		}
+		std::sort(ea, ea + 3, std::greater<float>());
 		p->svp_panel_aspect = (ea[1] > EPS) ? (ea[0] / ea[1]) : 1.f;
 
 		// pip flat-panel on-screen quad for the binocular brackets, plane half-extent world vectors
 		// (mesh local x = width, y = height, z = normal)
 		{
-			extern int ps_r__svp_flat_window;
 			extern Fvector4 ps_s3ds_param_3;
 			if (ps_r__svp_flat_window && (int)ps_s3ds_param_3.y == 8)
 			{
@@ -438,32 +410,29 @@ void CRender::deriveScopeLens()
 				axis.set(p->eyepiece.m_W.k);
 				axis.normalize();
 				const float rr = p->eyepiece.radius;
-				if (rr > EPS)
+				float fr = -1e9f;
+				for (auto& g : g_pip_hud_geom)
 				{
-					float fr = -1e9f;
-					for (auto& g : g_pip_hud_geom)
-					{
-						Fvector wc;
-						wc.set(g.x, g.y, g.z);
-						Fvector d;
-						d.sub(wc, eye);
-						const float fwd = d.dotproduct(axis);
-						if (fwd <= 0.f)
-							continue;
-						Fvector proj;
-						proj.mad(eye, axis, fwd);
-						const float perp = wc.distance_to(proj);
-						if (perp < rr * 2.0f && (fwd + g.w) > fr)
-							fr = fwd + g.w;
-					}
-					if (fr > 0.f)
-					{
-						geom_front = fr / rr;
-						if (geom_front < 4.f)
-							geom_front = 4.f;
-						else if (geom_front > 30.f)
-							geom_front = 30.f;
-					}
+					Fvector wc;
+					wc.set(g.x, g.y, g.z);
+					Fvector d;
+					d.sub(wc, eye);
+					const float fwd = d.dotproduct(axis);
+					if (fwd <= 0.f)
+						continue;
+					Fvector proj;
+					proj.mad(eye, axis, fwd);
+					const float perp = wc.distance_to(proj);
+					if (perp < rr * 2.0f && (fwd + g.w) > fr)
+						fr = fwd + g.w;
+				}
+				if (fr > 0.f)
+				{
+					geom_front = fr / rr;
+					if (geom_front < 4.f)
+						geom_front = 4.f;
+					else if (geom_front > 30.f)
+						geom_front = 30.f;
 				}
 			}
 
@@ -491,20 +460,19 @@ void CRender::deriveScopeLens()
 				p->objective.radius = (off.w > EPS) ? off.w * er : p->eyepiece.radius * ps_r__svp_obj_size;
 				have_obj = true;
 			}
-			for (auto& N : GMBase.RGraph.mapScopeHUDObjective)
+			// authored objective already placed, else the first captured objective mesh is the next fallback
+			const auto& objectives = GMBase.RGraph.mapScopeHUDObjective;
+			if (!have_obj && !objectives.empty() && objectives.front().pVisual && objectives.front().pMatrix)
 			{
-				if (have_obj)
-					break; // authored objective already placed, mesh detection is the next fallback
-				if (!N.pVisual || !N.pMatrix)
-					break;
-				Fmatrix oX = *GMBase.svp_pose_of(N.pMatrix);
-				if (CSkeletonX* sk = fast_dynamic_cast<CSkeletonX*>(N.pVisual))
+				const auto& O = objectives.front();
+				Fmatrix oX = *GMBase.svp_pose_of(O.pMatrix);
+				if (CSkeletonX* osk = fast_dynamic_cast<CSkeletonX*>(O.pVisual))
 				{
 					Fmatrix boneR;
-					if (GMBase.svp_lens_bone_of(N.pVisual, boneR) || sk->SVP_LensBoneXform(boneR))
+					if (GMBase.svp_lens_bone_of(O.pVisual, boneR) || osk->SVP_LensBoneXform(boneR))
 						oX.mulB_43(boneR);
 				}
-				auto& OV = N.pVisual->getVisData();
+				auto& OV = O.pVisual->getVisData();
 				Fvector oc;
 				OV.box.getcenter(oc);
 				Fvector ow;
@@ -518,7 +486,6 @@ void CRender::deriveScopeLens()
 					p->objective.radius = OV.sphere.R;
 					have_obj = true;
 				}
-				break;
 			}
 			if (!have_obj)
 			{
@@ -528,24 +495,21 @@ void CRender::deriveScopeLens()
 				fwd.set(p->eyepiece.m_W.k);
 				fwd.normalize();
 				p->objective.m_W = p->eyepiece.m_W;
-				// 14r fallback = the authored-set front distance (mod_system_3dss_objective_lenses mean, median 12.7)
-				const float dist_r = (geom_front > 0.f ? geom_front : 14.0f) * ps_r__svp_obj_dist;
+				const float dist_r = (geom_front > 0.f ? geom_front : svp_fallback_objective_radii) * ps_r__svp_obj_dist;
 				p->objective.m_W.c.mad(fwd, p->eyepiece.radius * dist_r);
 				p->objective.radius = p->eyepiece.radius *
 					ps_r__svp_obj_size; // eyepiece-relative objective radius (one global knob): the front-node geomscan swung ~6x conflating glass vs bell housing, eyepiece radius is the only mesh-scale-stable unit
 			}
-			ffp_sfp(); // focal-plane points for the scope shader
+			svp_update_focal_planes(); // focal-plane points for the scope shader
 
 			// pip [SVP-DETECT]/[SVP-EYEDIV] one-shot a/b, measured mesh geometry vs authored ltx vs
 			// the live derivation, off unless r__svp_diag, latched per aimed optic
 			{
-				extern int ps_r__svp_diag;
 				if (ps_r__svp_diag)
 				{
 					static const void* s_detect_last = nullptr;
 					if (N.pVisual != s_detect_last)
 					{
-						extern int ps_r__svp_measured_optics;
 						const float er = p->eyepiece.radius;
 						// authored objective resolved by the optics bus, no second precedence copy
 						const float auth_w = p->svp_opt_offset.w;

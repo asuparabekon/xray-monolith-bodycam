@@ -576,8 +576,8 @@ void CRender::destroy()
 	HWOCC.occq_destroy();
 	svp_stats::release(); // pip drop the stats query pool + font with the device
 	xr_delete(Models);
-	xr_delete(Target);
-	TargetMain = nullptr;
+	xr_delete(TargetMain); // pip delete by owner, Target may still point at the SVP after an aborted pass
+	Target = nullptr;
 	xr_delete(TargetSVP); // pip: only non-null if an SVP pass ran
 	PSLibrary.OnDestroy();
 	Device.seqFrame.Remove(this);
@@ -595,8 +595,8 @@ void CRender::reset_begin()
 	}
 	//-AVO
 
-	xr_delete(Target);
-	TargetMain = nullptr;
+	xr_delete(TargetMain); // pip delete by owner, as in destroy()
+	Target = nullptr;
 	xr_delete(TargetSVP); // pip: drop the SVP target across vid_restart, re-lazy-alloc after reset
 	HWOCC.occq_destroy();
 	svp_stats::release(); // pip release the stats queries before ResizeBuffers, re-lazy-alloc on next enabled frame
@@ -1845,17 +1845,6 @@ void CRender::shader_compile_options(ShaderCompileOptions& options, int m_skinni
 	def_it++;
 	sh_name[len] = '1';
 	++len;
-
-	// Instanced grass shaders get their own cache entries. The marker is a letter, which no other
-	// part of the name uses, so the names with instancing off stay as they were.
-	if (ps_r__detail_instancing)
-	{
-		defines[def_it].Name = "DETAILS_INSTANCING";
-		defines[def_it].Definition = "1";
-		def_it++;
-		sh_name[len] = 'i';
-		++len;
-	}
 
 	//Be carefull!!!!! this should be at the end to correctly generate
 	//compiled shader name;

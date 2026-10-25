@@ -349,10 +349,10 @@ void PublishHud(player_hud& hud)
 	}
 
 	Fvector viewmodel_pos, viewmodel_rot;
-	if (actor->cam_BodycamGetHudOffset(viewmodel_pos, viewmodel_rot, 1.f))
+	if (actor->cam_BodycamGetHudOffset(viewmodel_pos, viewmodel_rot, hud.BodycamLoweringInfluence()))
 	{
 		Fmatrix delta;
-		delta.setHPB(deg2rad(viewmodel_rot.y), deg2rad(viewmodel_rot.x), deg2rad(viewmodel_rot.z));
+		delta.setHPB(deg2rad(viewmodel_rot.x), deg2rad(viewmodel_rot.y), deg2rad(viewmodel_rot.z));
 		delta.c = viewmodel_pos;
 		SetPose(g_providers.viewmodel_delta, delta, g_providers.generation);
 	}

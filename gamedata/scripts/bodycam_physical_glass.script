@@ -27,12 +27,23 @@ local function enabled()
         and not console:get_bool("r__heatvision")
 end
 
+-- The configured bone per section; false when the section hides no lens.
+local configured_bones = {}
+
+local function configured_bone(section)
+    local bone = configured_bones[section]
+    if bone == nil then
+        bone = ini_sys:r_bool_ex(section, hide_key(section, "lens_hide_enabled"), false)
+            and ini_sys:r_string_ex(section, hide_key(section, "lens_hide_bone")) or false
+        configured_bones[section] = bone
+    end
+    return bone
+end
+
 local function glass_bone(obj)
     if not obj or not hider then return nil end
     -- Use the installed weapon configuration, including inherited scope data.
-    local section = obj:section()
-    if not ini_sys:r_bool_ex(section, hide_key(section, "lens_hide_enabled"), false) then return nil end
-    local bone = ini_sys:r_string_ex(section, hide_key(section, "lens_hide_bone"))
+    local bone = configured_bone(obj:section())
     return bone and obj:is_physical_scope_glass_bone(bone) and bone or nil
 end
 
@@ -88,7 +99,7 @@ end
 
 function on_game_start()
     hider = lens_hider()
-    if upstream_set or not hider or not hider.set_bone_visibility then return end
+    if upstream_set or not hider or not hider.set_bone_visibility or not rawget(_G, "bodycam") then return end
     upstream_set = hider.set_bone_visibility
     hider.set_bone_visibility = function(obj, bone, visibility)
         if keep_visible(obj, bone) then

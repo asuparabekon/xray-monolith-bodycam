@@ -116,7 +116,7 @@ public: //	Public class members (must be encapsulated furthur)
 	bool m_is_glowing = false;	//--DSR-- SilencerOverheat
 
 #if RENDER == R_R4
-	// 3DSS MSDF metadata follows this resource's lifetime; -1 means unread, 0 means no atlas.
+	// Reticle atlas metadata follows this resource's lifetime; -1 means unread, 0 means no atlas.
 	float reticle_glow_size = -1.f;
 #endif
 

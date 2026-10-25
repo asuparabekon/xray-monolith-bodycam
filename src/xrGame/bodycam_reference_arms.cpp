@@ -105,6 +105,11 @@ void EngineArmsAdapter::CalibrateWeapon(const char* aimMotion, const char* ancho
 		rightAimCalibration_ = SampleInModel(right_, aimMotion, 0, rightModel_);
 		leftAimCalibration_ = SampleInModel(left_, aimMotion, 0, leftModel_);
 	}
+	else
+	{
+		rightAimCalibration_.reset();
+		leftAimCalibration_.reset();
+	}
 }
 const std::vector<LocalPose>& EngineArmsAdapter::Capture(const SkeletonPose& referenceBase)
 {

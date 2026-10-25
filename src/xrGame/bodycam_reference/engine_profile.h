@@ -53,7 +53,7 @@ public:
 	EngineCharacterAssetPaths Paths(const std::string& section) const
 	{
 		return { Text(section, "upper"), Text(section, "locomotion"), Text(section, "rifle"), Text(section, "recoil"),
-			Text(section, "movement"), Text(section, "equipment"), Text(section, "copied"), Text(section, "regrip") };
+			Text(section, "movement"), Text(section, "equipment"), Text(section, "idle"), Text(section, "regrip") };
 	}
 	EngineCharacterProfile Read(const std::string& section, const std::vector<std::string>& physicalBones) const
 	{
