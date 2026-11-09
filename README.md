@@ -111,6 +111,7 @@ Open `src/engine-vs2022.sln`, pick an x64 DX11 configuration and build.
 - [docs/FIRST_PERSON_LUA_API.md](docs/FIRST_PERSON_LUA_API.md): camera, HUD and weapon transforms for scripts.
 - [docs/BODYCAM_HUD_ANIMATION_POLICY.md](docs/BODYCAM_HUD_ANIMATION_POLICY.md): turning off weapon lowering during HUD animations.
 - [docs/BODYCAM_PORTING.md](docs/BODYCAM_PORTING.md): moving the bodycam module to another X-Ray build.
+- [roblox/README.md](roblox/README.md): Luau port of the Classic bodycam layer for Roblox (Korean guide).
 
 Tested with 3D Shader Scopes for GAMMA, ARC 3DSS, the Modular Attachment System (MAS), MAS for GAMMA,
 Pizza's Ultimate Sight Selection and hybrid reflex/magnifier combinations. MAS and Pizza are optional.

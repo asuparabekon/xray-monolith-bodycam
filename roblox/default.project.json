@@ -1,0 +1,18 @@
+{
+  "name": "Bodycam",
+  "tree": {
+    "$className": "DataModel",
+    "ReplicatedStorage": {
+      "Bodycam": {
+        "$path": "src/Bodycam"
+      }
+    },
+    "StarterPlayer": {
+      "StarterPlayerScripts": {
+        "BodycamClient": {
+          "$path": "src/Client/BodycamClient.client.luau"
+        }
+      }
+    }
+  }
+}
