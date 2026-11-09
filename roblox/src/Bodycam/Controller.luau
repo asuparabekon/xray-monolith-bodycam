@@ -73,7 +73,9 @@ end
 
 -- options:
 --   viewmodel             Model with a PrimaryPart (optional); placed each frame
---   viewmodelOffset       CFrame, camera-local placement of the viewmodel (default identity)
+--   viewmodelOffset       CFrame or fn(info) -> CFrame: camera-local placement of the
+--                         viewmodel before the modifiers (default identity)
+--   viewmodelScale        number: the viewmodel's Model scale (default 1); see setViewmodel
 --   gripPivot             Vector3, camera-local studs: the wrist turn's pivot
 --   walkSpeed, sprintSpeed  studs/s (default 16, 25.6)
 --   isSprinting, isCrouching, isLowered, isLeaning   functions -> bool
@@ -92,6 +94,7 @@ function Controller.new(options)
 	self.walkSpeed = options.walkSpeed or 16
 	self.sprintSpeed = options.sprintSpeed or self.walkSpeed * 1.6
 	self.viewmodelOffset = options.viewmodelOffset or CFrame.identity
+	self.viewmodelScale = options.viewmodelScale or 1
 	self.gripPivot = options.gripPivot or Vector3.new(0.35, -0.35, -1.1)
 	local rng = Random.new()
 	self.core = BodycamCore.new(self.config, {
@@ -237,6 +240,23 @@ end
 -- fn(localCFrame, info) -> CFrame: changes the viewmodel's camera-local placement.
 function Controller:addViewmodelModifier(fn)
 	return addTo(self.viewmodelModifiers, fn)
+end
+
+-- Sets or clears (nil) the viewmodel the controller places each frame.
+--   placement  CFrame or fn(info) -> CFrame, camera-local, before the modifiers
+--              (nil keeps the current one)
+--   scale      the scale the model was given with Model:ScaleTo (nil keeps the current
+--              one). The final camera-local position is multiplied by it, so a model
+--              shrunk toward the camera looks the same on screen but reaches less far
+--              into walls (the scale trick).
+function Controller:setViewmodel(model, placement, scale: number?)
+	self.options.viewmodel = model
+	if placement ~= nil then
+		self.viewmodelOffset = placement
+	end
+	if scale ~= nil then
+		self.viewmodelScale = scale
+	end
 end
 
 -- fn(side "Left" | "Right", info) on each foot contact.
@@ -506,9 +526,17 @@ function Controller:_apply(dt: number)
 		local weaponOffset = CFrame.new(out.weaponX, out.weaponY, out.weaponZ)
 			* rotation(out.weaponPitch, out.weaponYaw, out.weaponRoll)
 		local wrist = CFrame.new(grip) * rotation(out.wristPitch, 0, out.wristRoll) * CFrame.new(-grip)
-		local localCFrame = weaponOffset * wrist * self.viewmodelOffset
+		local placement = self.viewmodelOffset
+		if type(placement) == "function" then
+			placement = placement(info) or CFrame.identity
+		end
+		local localCFrame = weaponOffset * wrist * placement
 		for _, fn in table.clone(self.viewmodelModifiers) do
 			localCFrame = fn(localCFrame, info) or localCFrame
+		end
+		local scale = self.viewmodelScale
+		if scale ~= 1 then
+			localCFrame = CFrame.new(localCFrame.Position * scale) * localCFrame.Rotation
 		end
 		viewmodel:PivotTo(hud * localCFrame)
 	end

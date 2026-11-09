@@ -29,6 +29,8 @@ WeaponController.__index = WeaponController
 --   onEvent     function(name, weapon): Equipped, Unequipped, Reloaded, ReloadStarted,
 --               Empty, FireModeChanged, ScopeChanged
 --   fovSpeed    1/s FOV easing (default 12)
+--   fovModifier function(target, weapon, aiming) -> number: changes the FOV target
+--               (e.g. Headcam:fovFor for the wide helmet lens)
 --   random      function() -> [0, 1) for recoil (default math.random)
 function WeaponController.new(options)
 	assert(options and options.controller, "WeaponController needs a BodycamController")
@@ -300,6 +302,9 @@ function WeaponController:_step(dt: number)
 	local camera = Workspace.CurrentCamera
 	if camera then
 		local target = weapon:fov(self.aiming)
+		if self.options.fovModifier then
+			target = self.options.fovModifier(target, weapon, self.aiming) or target
+		end
 		local rate = self.options.fovSpeed or 12
 		camera.FieldOfView += (target - camera.FieldOfView) * (1 - math.exp(-rate * dt))
 	end

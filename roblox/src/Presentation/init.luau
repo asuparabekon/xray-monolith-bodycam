@@ -7,6 +7,11 @@
 --                    into overlays, plus a bodycam HUD, colour grade and glass lens
 --   WallPullback     weapon pull-back near walls (written for this project)
 --   WeaponPresenter  connects them to the BodycamController
+--   Viewmodel        first-person arms rig: synthranger/Viewmodel (MIT) animation and
+--                    culling, plus aim-down-sights, the scale trick, IK grips
+--   Headcam          bodycam / helmet-camera view modes and head-camera spectating
+--                    (written for this project)
+--   Smoothing        frame-rate independent smoothing from InuFirstPerson (MIT)
 -- Notices: roblox/THIRD-PARTY-NOTICES.md.
 
 local Presentation = {
@@ -17,6 +22,7 @@ local Presentation = {
 	Deadzone = require(script.Deadzone),
 	HandheldShake = require(script.HandheldShake),
 	UnityQuaternion = require(script.UnityQuaternion),
+	Smoothing = require(script.Smoothing),
 }
 
 function Presentation.weaponPresenter()
@@ -25,6 +31,14 @@ end
 
 function Presentation.wallPullback()
 	return require(script.WallPullback)
+end
+
+function Presentation.viewmodel()
+	return require(script.Viewmodel)
+end
+
+function Presentation.headcam()
+	return require(script.Headcam)
 end
 
 function Presentation.screenEffects()

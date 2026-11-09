@@ -58,7 +58,7 @@ roblox/
 │   ├── Bodycam/                  ReplicatedStorage.Bodycam: 재설계한 바디캠 (Controller만 Roblox API 사용)
 │   ├── FPSys/                    ReplicatedStorage.FPSys: 카메라 효과, 기울이기, 발소리
 │   ├── FPSController/            ReplicatedStorage.FPSController: 이동 상태, 무기, 반동
-│   ├── Presentation/             ReplicatedStorage.Presentation: 흔들림, 프리 에임, 화면 효과
+│   ├── Presentation/             ReplicatedStorage.Presentation: 흔들림, 프리 에임, 화면 효과, 뷰모델, 헤드캠
 │   ├── Realism/                  ReplicatedStorage.Realism: 1인칭 몸, 시선 복제 (MPL-2.0)
 │   ├── Client/FPSClient.client.luau       예제 LocalScript (모든 패키지를 연결)
 │   └── Server/FPSServer.server.luau       태그 지정과 룩 앵글 중계
@@ -217,6 +217,10 @@ FPSys는 [Character-Realism](https://github.com/MaximumADHD/Character-Realism)(M
 | 스캔라인, 렌즈 왜곡 수식, 눈 적응(자동 노출) | [pmndrs/postprocessing](https://github.com/pmndrs/postprocessing) `scanlines.frag`, `vignette.frag`, `lens-distortion.frag`, `adaptive-luminance.frag` | Zlib | 같은 파일 | 수식 1:1 |
 | 벽에 닿으면 총 당기기 | 상업용 원본 없음 | — | `Presentation/WallPullback.luau` | 직접 작성 (Spherecast + 임계 감쇠 스프링) |
 | 바디캠 HUD, 색보정, 유리 렌즈(실험), 환경 밝기 측정 | 상업용 원본 없음 | — | `Presentation/ScreenEffects/init.luau` | 직접 작성 |
+| 1인칭 뷰모델: 리그 검사·정리, 키로 애니메이션 로드, 숨기기(cull), 팔 색·셔츠 복사, FakeCamera 카메라 애니메이션 | [synthranger/Viewmodel](https://github.com/synthranger/Viewmodel) `src/init.lua` | MIT | `Presentation/Viewmodel.luau` | 포팅 + 바디캠 구조에 맞게 수정 (아래 참고) |
+| 조준점 정렬, 축소 방식 벽 통과 방지, IKControl 손 고정, Motor6D 총 장착 | 상업용 원본 없음 | — | 같은 파일 | 직접 작성 |
+| 헤드캠(헬멧 카메라) 시점, 관전 | 상업용 원본 없음 | — | `Presentation/Headcam.luau` | 직접 작성 |
+| 프레임레이트에 무관한 감쇠 | [InuFirstPerson](https://github.com/Popcorn2020/inu-first-person) `Math.luau` | MIT | `Presentation/Smoothing.luau` | `approach`, `follow`, `shortestAngle` 1:1 |
 
 `WeaponPresenter`가 이것들을 바디캠에 연결합니다.
 
@@ -246,6 +250,97 @@ Roblox에는 커스텀 후처리 셰이더가 없고, 스크립트가 렌더링�
 - **렌즈 왜곡:** 불가능합니다. 대신 카메라 앞에 Glass 재질 구를 두는 실험 기능이 있습니다(기본 꺼짐). 그래픽 품질 8 이상에서만 보이고, 반투명 물체·파티클·데칼이 그 뒤로 안 보이는 한계가 있어 Studio에서 값을 조정해야 합니다.
 - EditableImage를 만들 수 없는 환경에서는 그 효과만 꺼지고 나머지는 동작합니다.
 - **HUD:** 가상의 기기 이름("BODYCAM BC-0451")을 씁니다. 실제 바디캠 제조사의 이름·로고·레이아웃을 흉내 내지 마세요(상표 문제).
+
+## 뷰모델과 헤드캠
+
+### 뷰모델 (`Presentation.viewmodel()`)
+
+1인칭 팔과 총 모델입니다. 바디캠 컨트롤러가 **HUD 카메라**에 붙여 배치합니다. 그래서 총이 먼저 돌고 화면이 뒤따릅니다.
+
+리그 조건:
+
+- 필수: `HumanoidRootPart`(피벗), `AnimationController` 또는 `Humanoid`.
+- 선택: `FakeCamera` 파트(팔 애니메이션과 함께 움직이면 화면도 돌림), `Left Arm`/`Right Arm` 또는 R15 팔 파트,
+  각 팔 안의 `Shirt` Decal, `Settings` ModuleScript, 조준점 `Sight` Attachment, 손잡이 `LeftGrip`/`RightGrip` Attachment.
+
+```lua
+local Presentation = require(game.ReplicatedStorage.Presentation)
+local Viewmodel = Presentation.viewmodel()
+
+local rig = Viewmodel.new(game.ReplicatedStorage.Viewmodels.Rifle:Clone(), {
+	HipOffset = CFrame.new(0, 0, 0),  -- 조준하지 않을 때 카메라 기준 피벗 위치
+	EyeRelief = 0.5,                  -- 완전히 조준했을 때 카메라에서 Sight까지 거리(스터드)
+	Scale = 0.5,                      -- 축소 방식: 화면에서는 같아 보이고 벽에는 덜 들어감
+})
+rig:mountWeapon(gunModel, CFrame.new(0.3, -0.4, -1))  -- Motor6D로 장착, Grip이 있으면 IK로 손 고정
+rig:LoadAnimation("Reload", reloadAnimation)
+rig:attach(controller)   -- 카메라 아래에 넣고 컨트롤러에 넘김
+rig:Play("Reload")
+rig:Cull(true)           -- 숨기기 (원본처럼 아주 먼 곳으로 옮기고 배치를 멈춤)
+```
+
+원본과 다른 점:
+
+- 원본은 스스로 `Camera.CFrame`에 붙었습니다. 이 포팅은 컨트롤러의 `setViewmodel`로 넘겨서, 바디캠의 무기 움직임과
+  `WeaponPresenter`의 흔들림·프리 에임·벽 당김이 그대로 적용됩니다.
+- 원본의 FakeCamera는 매 프레임 회전 차이를 `Camera.CFrame`에 더했습니다. 바디캠은 시야를 매 프레임 에임에서 다시 만들므로,
+  여기서는 **쉬는 자세 대비 FakeCamera 회전**을 시야 수정자로 곱합니다(`CameraWeight`로 비율 조절).
+- 팔 색 복사는 매 프레임이 아니라 붙일 때와 캐릭터가 바뀔 때 합니다. R15 팔도 지원합니다.
+
+추가한 기능:
+
+- **조준점 정렬:** 조준 정도(0~1)에 따라 `Sight`가 화면 중앙, `EyeRelief` 앞에 오도록 피벗을 옮깁니다. 현재 애니메이션 자세에서 계산합니다.
+- **축소 방식:** 카메라를 중심으로 모델과 위치를 같은 비율로 줄이면 투영이 같아서 화면에서는 똑같이 보입니다.
+  모델은 `Model:ScaleTo`로, 위치는 컨트롤러가 곱합니다(`controller:setViewmodel(model, placement, scale)`).
+- **IK 손 고정:** `setHandTarget("Left", attachment)`이 `IKControl`을 만듭니다. R15는 UpperArm→Hand,
+  R6식 한 덩어리 팔은 팔 전체를 어깨에서 돌립니다.
+
+### 헤드캠 (`Presentation.headcam()`)
+
+바디캠(눈 위치)과 헤드캠(머리에 단 헬멧 카메라) 사이를 전환합니다.
+
+- 카메라는 `Head.CFrame * mount`에 있습니다. 기본은 머리 오른쪽 위, 얼굴 조금 앞입니다.
+- 화각은 기본 세로 100°입니다(16:9에서 가로 약 130°). Roblox 한계는 세로 120°입니다.
+  스코프 배율은 비율로 유지됩니다(2배 스코프면 50°).
+- 시야는 머리의 실제 애니메이션 회전을 `headFollow`(기본 0.8)만큼 따라가고, `headSmoothing`으로 떨림을 줄입니다.
+  바디캠의 래그·흔들림·롤은 `keepLayers`(기본 0.3)만큼만 남깁니다(머리 애니메이션이 대부분의 움직임을 줍니다).
+- **에임은 바뀌지 않습니다.** 총알은 여전히 `controller:getAimCFrame()`(눈 위치)에서 나갑니다.
+- 머리에서 마운트까지 Spherecast로 검사해, 벽에 닿으면 카메라를 머리 쪽으로 당깁니다.
+- 자기 몸을 보이게 하고(`LocalTransparencyModifier` 0), 머리와 머리 장신구는 숨깁니다. 바디캠으로 돌아가면 원래 값을 되돌립니다.
+- **관전:** `headcam:spectate(player)`는 다른 플레이어의 머리 카메라로 봅니다. 복제된 Head만 읽습니다.
+  Realism이 돌고 있으면 머리가 이미 각 플레이어의 복제된 시선을 따르므로, RemoteEvent를 따로 만들지 않았습니다.
+  로컬 캐릭터가 죽었거나 컨트롤러를 멈춘 상태에서 쓰세요(돌고 있는 컨트롤러는 관전 카메라를 에임으로 받아들입니다).
+
+```lua
+local headcam = Presentation.headcam().new({
+	controller = controller,
+	settings = { fov = 100, mount = CFrame.new(0.32, 0.32, -0.5) },
+	onModeChanged = function(mode) rig:Cull(mode == "Headcam") end,
+})
+headcam:start()
+headcam:toggle()  -- "Bodycam" <-> "Headcam"
+-- WeaponController가 FOV를 정할 때 헤드캠 렌즈를 반영
+weapons = FPSController.weapons().new({ ..., fovModifier = function(target, weapon)
+	return headcam:fovFor(target, weapon.config.fov)
+end })
+-- WeaponController 없이 쓰면: Headcam.new({ ..., applyFov = true, baseFov = 70 })
+```
+
+헤드캠에서는 예제가 뷰모델을 숨깁니다. 그때는 캐릭터의 팔이 총을 들어야 하므로, 3인칭 총 모델과 들기 애니메이션은 게임에서 넣어야 합니다.
+
+### 에셋 가져오기 점검표
+
+바디캠 느낌의 맵과 총 에셋을 가져올 때:
+
+1. **라이선스:** CC0(Poly Haven, ambientCG, Kenney 등)나 상업 사용이 허용된 것만 씁니다. CC BY-NC, "개인 사용만" 에셋은 쓰지 마세요.
+   CC BY는 크레딧을 남깁니다.
+2. **메시:** MeshPart 하나당 삼각형 20,000개 이하입니다. 큰 모델은 나눠서 올립니다. 뷰모델 총은 더 가볍게(5,000~10,000개) 만드는 것이 좋습니다.
+3. **텍스처:** 최대 1024×1024입니다. SurfaceAppearance에는 ColorMap, NormalMap, RoughnessMap, MetalnessMap을 넣습니다.
+   **노멀맵은 OpenGL 방식(Y+)**이어야 합니다. DirectX(Y-) 노멀맵은 초록 채널을 뒤집어서 씁니다.
+4. **축척:** 1 스터드는 약 0.28 m입니다(이 프로젝트의 `studsPerMetre` 기본값). 가져오기 창에서 크기를 맞춥니다.
+5. **공개 범위:** Roblox에 올린 에셋은 기본이 "Open Use"일 수 있습니다. 다른 사람이 쓰면 안 되는 에셋은 올리기 전에 **Asset Privacy**를 켜세요.
+6. **뷰모델:** `CastShadow`는 꺼집니다(이 모듈이 정리함). 총에는 `Sight` Attachment와 `LeftGrip`/`RightGrip` Attachment를 넣습니다.
+7. **그래픽:** Lighting의 `Technology = Future`, `Atmosphere`, `ColorCorrection`과 `Presentation.screenEffects()`를 함께 씁니다.
 
 ## Realism (Character-Realism 포팅)
 
@@ -303,6 +398,11 @@ Roblox에는 커스텀 후처리 셰이더가 없고, 스크립트가 렌더링�
 | 1, 2 | 무기 선택 |
 | Q, E | 왼쪽·오른쪽 기울이기 |
 | Left Alt | 숨 참기 (조준 중 흔들림 감소, 놓으면 반동) |
+| H | 바디캠 ↔ 헤드캠 전환 |
+| F | 다음 플레이어 관전 (죽은 뒤 2초 후 자동 시작) |
+
+뷰모델은 `ReplicatedStorage.Viewmodels`에 리그를 넣고 무기 설정의 `viewmodel`에 이름을 적으면 나옵니다(예제: `Rifle`, `Pistol`).
+리그 안 `Animations` 폴더의 Animation은 이름으로 로드됩니다. `Idle`은 반복 재생, `Equip`·`Reload`·`Fire`는 그 이벤트에 재생됩니다.
 
 ### 무기 정의
 
@@ -341,12 +441,17 @@ smg.profile = { pos = { x = 0.01, y = -0.01, z = 0 }, rot = { x = 0, y = 1, z = 
   - 흔들림이 평균 0인지, 피로·스트레스에 따른 심박, 숨 참기와 반동, 관성 지연과 안정.
   - Unity Euler 규칙, 데드존, simplex 노이즈, 손떨림.
 - `tests/screen.spec.luau`: three.js·pmndrs 셰이더 식 대조, 목 클라이언트에서 오버레이 픽셀, 노출, HUD, 정리.
+- `tests/viewmodel.spec.luau`: 리그 검사·정리, 애니메이션 키(중복 거부, 재생, 해제), 팔 색·셔츠 복사,
+  조준점이 화면 중앙·`EyeRelief` 앞에 오는지, 축소 방식이 화면 위치를 유지하는지, 컨트롤러 배치·축소·숨기기,
+  FakeCamera 회전, Motor6D 총 장착과 IK 손 고정.
+- `tests/headcam.spec.luau`: 화각 변환, 바디캠 모드에서 변화 없음, 헤드캠 마운트 위치와 에임 유지,
+  머리 회전 추종과 감쇠, 벽에 닿을 때 당김, 몸 보이기·머리 숨기기·복원, 스코프 배율 유지, 관전과 카메라 반환.
 - `tests/integration.spec.luau`: 모든 패키지를 함께 띄운 목 클라이언트에서 확인합니다.
   - 걷기 발소리, 조준 FOV·감도, 자동 사격 반동이 에임을 올리고 복귀하는지.
   - 질주 중 사격·조준 금지, 기울이기, 앉기 카메라 높이, 무기 교체.
   - 총알이 총구 방향으로 나가는지, 뷰모델이 그 방향을 가리키는지, 벽에 막히면 사격이 막히는지, 정리 후 남는 연결이 없는지.
 
-현재 전체 80개 테스트가 통과합니다. simplex 노이즈는 원본 TypeScript를 직접 실행해 대조하지
+현재 전체 96개 테스트가 통과합니다. simplex 노이즈는 원본 TypeScript를 직접 실행해 대조하지
 못했습니다(외부 코드 실행이 이 세션에서 허용되지 않음). 대신 성질 테스트로 확인했습니다.
 
 ### 테스트 실행
@@ -383,6 +488,9 @@ roblox/tools/golden/build.sh
 - `applyMovementInertia = true`는 ControlModule 뒤에서 `Humanoid:Move`를 덮어씁니다.
   자체 이동 시스템이 있으면 `false`로 두세요.
 - 기본값은 Roblox 표준 아바타(걷기 16 스터드/초) 기준으로 정했습니다. 다른 축척이면 프리셋과 설정으로 조정하세요.
+- 뷰모델의 IKControl, `Model:ScaleTo`, 애니메이션과 헤드캠의 투명도 처리는 가짜 인스턴스로만 시험했습니다.
+  실제 리그에서 손 위치, 축소 후 애니메이션, PlayerModule의 투명도 갱신과 겹치지 않는지 Studio에서 확인하세요.
+- 헤드캠 관전은 상대 머리 회전을 그대로 씁니다. Realism은 시선 위아래의 일부만 머리에 주므로, 관전 화면은 실제 시선보다 덜 위아래로 움직입니다.
 
 ### 라이선스
 

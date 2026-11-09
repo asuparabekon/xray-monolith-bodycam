@@ -34,6 +34,8 @@ function Weapon.defaultConfig()
 		recoil = RecoilPattern.defaultSettings(),
 		-- Bodycam weapon profile: hip offset in studs (camera space: x right, y up, z back) and degrees.
 		profile = nil,
+		-- Name of a viewmodel rig (e.g. under ReplicatedStorage.Viewmodels) for this weapon.
+		viewmodel = nil,
 	}
 end
 

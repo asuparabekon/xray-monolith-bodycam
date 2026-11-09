@@ -16,6 +16,8 @@ repository's own `License.txt` and `THIRD-PARTY-NOTICES.txt`.
 | [postprocessing](https://github.com/pmndrs/postprocessing) vignette, scanlines, lens distortion, adaptive luminance | Zlib | `src/Presentation/ScreenEffects/ShaderMath.luau` |
 | [Character-Realism](https://github.com/MaximumADHD/Character-Realism) by CloneTrooper1019 (MaximumADHD) | MPL-2.0 | `src/Realism/*`; derived: `src/FPSys/Config.luau`, `src/FPSys/Footsteps.luau`, `src/Server/FPSServer.server.luau` |
 | [NevermoreEngine](https://github.com/Quenty/NevermoreEngine) `Spring`, `Maid` (shipped inside the FPSys model) | MIT | `src/FPSys/Spring.luau`, `src/FPSys/Maid.luau` |
+| [synthranger/Viewmodel](https://github.com/synthranger/Viewmodel) (commit c634018) | MIT | `src/Presentation/Viewmodel.luau` |
+| [InuFirstPerson](https://github.com/Popcorn2020/inu-first-person) `Math` (commit 7c28cf9) | MIT | `src/Presentation/Smoothing.luau` |
 
 ## Mozilla Public License 2.0 (Character-Realism)
 
@@ -208,3 +210,54 @@ OTHER DEALINGS IN THE SOFTWARE.
 For more information, please refer to <https://unlicense.org>
 ```
 
+## synthranger/Viewmodel
+
+```
+MIT License
+
+Copyright (c) 2022 Synthranger
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
+## InuFirstPerson
+
+```
+MIT License
+
+Copyright (c) 2026 inu (@inutataaaaa)
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```

@@ -135,4 +135,58 @@ function C.Inverse(cf)
 	return make(-rotate(inv, cf.p), r, u, b)
 end
 
+-- Rotation <-> quaternion (w, x, y, z), for Lerp.
+local function toQuaternion(cf)
+	local m00, m01, m02 = cf.r.X, cf.u.X, cf.b.X
+	local m10, m11, m12 = cf.r.Y, cf.u.Y, cf.b.Y
+	local m20, m21, m22 = cf.r.Z, cf.u.Z, cf.b.Z
+	local trace = m00 + m11 + m22
+	if trace > 0 then
+		local s = math.sqrt(trace + 1) * 2
+		return s / 4, (m21 - m12) / s, (m02 - m20) / s, (m10 - m01) / s
+	elseif m00 > m11 and m00 > m22 then
+		local s = math.sqrt(1 + m00 - m11 - m22) * 2
+		return (m21 - m12) / s, s / 4, (m01 + m10) / s, (m02 + m20) / s
+	elseif m11 > m22 then
+		local s = math.sqrt(1 + m11 - m00 - m22) * 2
+		return (m02 - m20) / s, (m01 + m10) / s, s / 4, (m12 + m21) / s
+	end
+	local s = math.sqrt(1 + m22 - m00 - m11) * 2
+	return (m10 - m01) / s, (m02 + m20) / s, (m12 + m21) / s, s / 4
+end
+
+local function fromQuaternion(p, w, x, y, z)
+	return make(
+		p,
+		Vector3.new(1 - 2 * (y * y + z * z), 2 * (x * y + w * z), 2 * (x * z - w * y)),
+		Vector3.new(2 * (x * y - w * z), 1 - 2 * (x * x + z * z), 2 * (y * z + w * x)),
+		Vector3.new(2 * (x * z + w * y), 2 * (y * z - w * x), 1 - 2 * (x * x + y * y))
+	)
+end
+
+-- Position linear, rotation spherical (shortest path), as Roblox.
+function C.Lerp(a, b, t)
+	local aw, ax, ay, az = toQuaternion(a)
+	local bw, bx, by, bz = toQuaternion(b)
+	local dot = aw * bw + ax * bx + ay * by + az * bz
+	if dot < 0 then
+		bw, bx, by, bz, dot = -bw, -bx, -by, -bz, -dot
+	end
+	local k0, k1
+	if dot > 0.9995 then
+		k0, k1 = 1 - t, t
+	else
+		local theta = math.acos(dot)
+		local sinTheta = math.sin(theta)
+		k0, k1 = math.sin((1 - t) * theta) / sinTheta, math.sin(t * theta) / sinTheta
+	end
+	local w, x, y, z = aw * k0 + bw * k1, ax * k0 + bx * k1, ay * k0 + by * k1, az * k0 + bz * k1
+	local n = math.sqrt(w * w + x * x + y * y + z * z)
+	return fromQuaternion(a.p + (b.p - a.p) * t, w / n, x / n, y / n, z / n)
+end
+
+function C.ToObjectSpace(a, b)
+	return C.Inverse(a) * b
+end
+
 return { Vector3 = Vector3, CFrame = CFrame }

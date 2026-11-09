@@ -179,6 +179,16 @@ function Env.new()
 		return floorChanged
 	end
 	env.humanoid = humanoid
+	-- Extra character children (e.g. FakeInstances parts) a test adds.
+	env.characterParts = {}
+	local function extraChild(name)
+		for _, part in env.characterParts do
+			if part.Name == name then
+				return part
+			end
+		end
+		return nil
+	end
 	local character = {
 		Name = "Player1",
 		IsA = function(_, c)
@@ -188,13 +198,25 @@ function Env.new()
 			return if className == "Humanoid" then humanoid else nil
 		end,
 		FindFirstChild = function(_, name)
-			return if name == "HumanoidRootPart" then env.root else nil
+			return if name == "HumanoidRootPart" then env.root else extraChild(name)
+		end,
+		FindFirstChildWhichIsA = function()
+			return nil
 		end,
 		WaitForChild = function(_, name)
 			return if name == "HumanoidRootPart" then env.root else nil
 		end,
 		GetDescendants = function()
-			return {}
+			local list = {}
+			for _, part in env.characterParts do
+				table.insert(list, part)
+				if part.GetDescendants then
+					for _, d in part:GetDescendants() do
+						table.insert(list, d)
+					end
+				end
+			end
+			return list
 		end,
 		DescendantAdded = signal(),
 		Parent = true,
@@ -280,6 +302,8 @@ function Env.new()
 				return "EnumItem"
 			elseif type(v) == "table" and v.__connection then
 				return "RBXScriptConnection"
+			elseif type(v) == "table" and v.__instance then
+				return "Instance"
 			end
 			return type(v)
 		end
