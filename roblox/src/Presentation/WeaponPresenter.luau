@@ -15,7 +15,7 @@ local SwayConfig = require(script.Parent.Sway.SwayConfig)
 local Deadzone = require(script.Parent.Deadzone)
 local HandheldShake = require(script.Parent.HandheldShake)
 local WallPullback = require(script.Parent.WallPullback)
-local CoordinateSpace = require(script.Parent.Parent.Bodycam.Roblox.CoordinateSpace)
+local Aim = require(script.Parent.Parent.Bodycam.Aim)
 
 local WeaponPresenter = {}
 WeaponPresenter.__index = WeaponPresenter
@@ -143,7 +143,7 @@ function WeaponPresenter:_update(info)
 	state.healthFraction = if humanoid.MaxHealth > 0 then humanoid.Health / humanoid.MaxHealth else 1
 
 	-- Velocity relative to the aim's yaw frame, metres per second.
-	local right, forward = CoordinateSpace.yawFrame(info.yaw)
+	local right, forward = Aim.yawFrame(info.yaw)
 	local v = info.rootPart.AssemblyLinearVelocity / spm
 	local hands, camera = self.director:update(
 		dt,

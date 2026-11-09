@@ -1,5 +1,5 @@
 -- Minimal Vector3 and CFrame stand-ins with Roblox semantics, for testing
--- Roblox/CoordinateSpace.luau outside Roblox. Only what the adapter uses.
+-- the Roblox adapters outside Roblox. Only what they use.
 
 local Vector3 = {}
 local V = {}

@@ -10,7 +10,7 @@ local RunService = game:GetService("RunService")
 local Workspace = game:GetService("Workspace")
 
 local MovementStateMachine = require(script.Parent.MovementStateMachine)
-local CoordinateSpace = require(script.Parent.Parent.Bodycam.Roblox.CoordinateSpace)
+local Aim = require(script.Parent.Parent.Bodycam.Aim)
 
 local MovementController = {}
 MovementController.__index = MovementController
@@ -151,8 +151,8 @@ function MovementController:_step(dt: number)
 	local camera = Workspace.CurrentCamera
 	local controller = self.options.controller
 	local aim = (controller and controller:getAimCFrame()) or (camera and camera.CFrame)
-	local yaw = if aim then CoordinateSpace.aimFromLook(aim.LookVector) else 0
-	local right, forward = CoordinateSpace.yawFrame(yaw)
+	local yaw = if aim then Aim.aimFromLook(aim.LookVector) else 0
+	local right, forward = Aim.yawFrame(yaw)
 	local move = humanoid.MoveDirection
 	local grounded = humanoid.FloorMaterial ~= Enum.Material.Air
 

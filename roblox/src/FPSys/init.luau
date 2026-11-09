@@ -71,7 +71,7 @@ function FPSys:start()
 	if controller then
 		self.cameraEffects = CameraEffects.new({
 			config = config,
-			bodycamConfig = controller.config,
+			bodycam = controller,
 			getLean = self.options.getLean,
 		})
 		self.maid:GiveTask(controller:addBodyModifier(function(info)

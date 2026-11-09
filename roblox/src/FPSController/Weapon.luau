@@ -32,7 +32,7 @@ function Weapon.defaultConfig()
 		weightKg = 3.6, -- loaded weight: heavier weapons sway and trail more (SPT-SWAY)
 		shake = 1, -- FPSys camera shake scale
 		recoil = RecoilPattern.defaultSettings(),
-		-- Bodycam weapon profile: hip offset in metres (right, up, forward) and degrees.
+		-- Bodycam weapon profile: hip offset in studs (camera space: x right, y up, z back) and degrees.
 		profile = nil,
 	}
 end

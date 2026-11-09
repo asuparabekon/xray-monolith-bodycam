@@ -1,66 +1,61 @@
-# Bodycam for Roblox (Luau 포팅)
+# Bodycam for Roblox
 
-X-Ray Monolith Bodycam의 **Classic 바디캠 레이어**를 Roblox용 Luau로 옮긴 것입니다.
-카메라 디커플링(룩 래그), 풋스텝 카메라, 머리 롤과 흔들림, 스프린트 스웨이,
-뷰모델 내림, 사격 임펄스, STALKER 2 스타일 팔 IK, 이동 관성이 들어 있습니다.
+Roblox용 1인칭 **바디캠 연출** 패키지 모음입니다. Unrecord 같은 바디캠 FPS 느낌을 목표로 합니다.
 
-C++ 원본의 동작을 그대로 따르도록 포팅했고, 원본 C++ 코드를 직접 빌드해 만든
-골든 트레이스와 프레임 단위로 비교해 검증했습니다(아래 [검증](#검증) 참고).
+- **바디캠:** 시야가 에임을 늦게 따라가고, 걸음·질주·착지에 머리가 움직이고, 무기가 걷기·사격·마우스에 반응합니다.
+- **연출:** 생리적 흔들림, 프리 에임, 화면 효과, 1인칭 몸 보이기.
+- **조작:** 이동 상태와 무기.
+
+`Bodycam` 패키지는 처음에 X-Ray Monolith Bodycam C++ 소스를 Luau로 옮긴 포팅이었습니다. 그 소스의 라이선스가
+상업적 사용을 금지하므로, 지금은 **동작 명세만 보고 새로 설계·구현한 버전**으로 바뀌었습니다
+([재설계](#bodycam-패키지-재설계) 참고).
 
 함께 들어 있는 패키지는 다섯 개입니다.
 
 | 패키지 | 내용 |
 | --- | --- |
-| `Bodycam` | X-Ray Bodycam Classic 레이어의 Luau 포팅 (이 문서의 대부분) |
+| `Bodycam` | 바디캠 카메라·무기 움직임. 동작 명세로 새로 설계한 버전 ([재설계](#bodycam-패키지-재설계)) |
 | `FPSys` | 업로드된 FPSys 모델을 바디캠과 통합해 다시 짠 것: 카메라 효과, 기울이기, 재질 발소리 ([FPSys](#fpsys-통합)) |
 | `FPSController` | 이동 상태(질주·앉기·엎드리기·슬라이드)와 무기(연사 속도, 발사 모드, 탄창, 장전, 스코프, 반동) ([FPSController](#fpscontroller)) |
 | `Presentation` | 상업 사용 가능한 오픈소스를 포팅한 바디캠 연출: 생리적 무기 흔들림, 프리 에임, 손떨림, 벽 당김, 화면 효과 ([Presentation](#presentation-오픈소스-포팅)) |
 | `Realism` | Character-Realism(MPL-2.0) 포팅: 1인칭 몸 보이기, 복제되는 머리·상체 시선 ([Realism](#realism-character-realism-포팅)) |
 
-## 무엇이 포팅되었나
+## Bodycam 패키지 (재설계)
 
-| 기능 (원본 설정 이름) | C++ 원본 | Luau |
+### 왜 다시 만들었나
+
+처음 버전은 X-Ray Monolith Bodycam C++ 코드를 줄 단위로 옮긴 포팅이었습니다. 그 소스는 저장소의
+[License.txt](../License.txt)상 상업적 사용이 금지되어 있습니다. 그래서 다음 순서로 다시 만들었습니다.
+
+1. 원본 코드·상수·녹화 데이터·이름을 쓰지 않고, **동작만 적은 명세서**
+   [docs/BODYCAM_DESIGN.md](docs/BODYCAM_DESIGN.md)를 작성했습니다. 기본값은 모두 새로 정했습니다.
+2. **원본과 이전 포팅을 보지 않는 별도 에이전트**가 명세서와 연결 대상 패키지 코드만 보고 구현했습니다.
+3. 원본에서 나온 파일(이전 코어, 녹화 머리 움직임 데이터, C++ 대조 도구와 트레이스, 데이터 변환기)은 삭제했습니다.
+
+명세서를 쓴 쪽은 원본을 본 상태이므로, 법적으로 엄격한 클린룸(원본을 본 사람과 구현자가 완전히 분리된 절차)은 아닙니다.
+상업 출시 전에는 법률 검토를 받으세요.
+
+### 기능
+
+| 기능 | 하는 일 | 모듈 |
 | --- | --- | --- |
-| 공통 입력 신호(마우스 속도, 이동 의도) | `bodycam_simulation.cpp` | `Core/Simulation.luau` |
-| Sprint Transition 카메라 스웨이 | `bodycam_simulation.cpp` | `Core/Simulation.luau` |
-| 뷰모델 내림 (`vm_lowering_*`) | `bodycam_simulation.cpp` | `Core/Simulation.luau` |
-| 사격 임펄스 (`fire_impulse_*`) | `bodycam_simulation.cpp` | `Core/Simulation.luau` |
-| STALKER 2 스타일 팔 IK (`stalker2_arm_ik_*`) | `bodycam_simulation.cpp` | `Core/Simulation.luau` |
-| 카메라 디커플링: 데드존 래그 | `bodycam_camera_rig.cpp` | `Core/CameraRig.luau` |
-| 카메라 디커플링: 건-퍼스트 팔로우 래그 | `bodycam_reference/classic_follow.h`, `camera.cpp` | `Reference/ClassicFollow.luau`, `Reference/CameraMotion.luau` |
-| 머리 롤·흔들림 (`camera_reference_*`) | `classic_footstep_camera.h`, `movement_vibration.cpp`, `mouse_shake.cpp`, `camera_effects.cpp` | `Reference/ReferenceHead.luau`, `Reference/CameraShake.luau` |
-| 카메라 회전 델타 | `classic_regrip.h` (`ClassicRegripCameraDelta`) | `Reference/CameraDelta.luau` |
-| 풋스텝 카메라 (`footstep_camera_*`) | `classic_footstep_camera.h`, `footstep_camera_data.h` | `Reference/FootstepCamera.luau`, `Reference/FootstepCameraData.luau`(생성됨) |
-| 마우스 에임 누적 | `bodycam_mouse_input.cpp` | `Core/MouseAim.luau` |
-| 이동 관성 (`movement_*`) | `bodycam_movement_response.cpp` | `Core/MovementInertia.luau` |
-| 무기별 뷰모델 프로필 | `bodycam_viewmodel_profile.cpp` | `Core/ViewmodelProfile.luau` |
-| 게이트 속도 앵커 | `bodycam_reference/speed_curve.h` | `Core/GaitSpeed.luau` |
-| 설정 레지스트리·프리셋 | `bodycam_settings.cpp` | `Core/Settings.luau` |
-| 캐릭터별 호스트 (`CBodycam`) | `bodycam_camera.cpp` | `Core/BodycamCore.luau` |
-| 엔진 어댑터 | `bodycam_actor_camera.cpp`, `bodycam_actor_movement.cpp` | `Roblox/BodycamController.luau`, `Roblox/CoordinateSpace.luau` |
+| 룩 래그 | 시야가 스프링으로 에임을 늦게 따라감(힙 5Hz, 조준 11Hz). 0.35° 데드밴드, 최대 7°(조준 1.5°) 콘, 빠르게 돌면 스프링이 단단해짐, 래그·이동 방향으로 시야 위치 이동. 반동(`kickAim`)은 래그 없이 바로 반영 | `LookLag.luau` |
+| 머리 움직임 | 보폭에 맞춘 걸음 흔들림(접지마다 아래로, 디딘 발 쪽으로), 좌우 이동·회전 롤, 질주 숙임과 시작 돌진, 착지 충격, 벽 앞에서 옆 흔들림 줄임 | `HeadMotion.luau` |
+| 무기 움직임 | 앞으로 걸을 때 무기 내림(사격·조준 중 억제), 안전(홀스터) 자세, 사격 반동 스프링, 빠른 마우스에 손목 롤·피치, 무기별 힙 오프셋 | `WeaponMotion.luau` |
+| 이동 관성 | 가속 0.22초, 감속 0.16초, 정지 0.12초, 방향 전환 지연. 목표 속도를 넘지 않음 | `MovementInertia.luau` |
+| 보폭 시계 | 속도로 발 위상을 계산(걷기 4.6, 질주 6.8 스터드/보폭). 게임의 애니메이션 마커로 대체 가능 | `StrideClock.luau` |
+| 설정·프리셋 | `Off` / `Subtle` / `Default` / `Strong`, 범위 검사 | `Settings.luau` |
+| Roblox 어댑터 | 카메라 피드백 방지, 에임·시야·HUD 카메라, 몸·시야·뷰모델 레이어, 발소리 이벤트 | `Controller.luau` |
 
-### 포팅하지 않은 것
-
-- **Reference 모드** (녹화된 레퍼런스 리그 전체 구동, `bodycam_reference/` 대부분):
-  X-Ray 스켈레톤과 녹화 캐릭터 패킷에 묶여 있어 Roblox 리그로 옮기려면 리타깃 작업이 따로 필요합니다.
-- **HUD 팔 솔버** (`bodycam_hud_arms.cpp`): X-Ray HUD 본 구조 전용입니다. 대신 어댑터가
-  팔 IK 회전을 뷰모델 전체에 그립 피벗 기준으로 적용합니다(근사).
-- **리그립, Reference 리코일, 핸들링** (`classic_regrip`, `classic_recoil`, `handling`): Reference 애셋 뱅크가 필요합니다.
-- **스프린트 시작 연출, 스프린트 건 밥** (`bodycam_sprint_start.h`, `classic_sprint_bob.h`): X-Ray 애니메이션 페이싱 전용입니다.
-- **PiP 스코프, 벡터 레티클, 잔디 렌더러**: 렌더러(DX11/셰이더) 기능이라 Luau로 옮길 대상이 아닙니다.
-- ImGui/MCM 메뉴, 콘솔 명령, 진단 로그.
-
+모든 거리는 **스터드**, 각도는 **라디안**(설정 이름이 `Deg`로 끝나면 도)입니다. Roblox 좌표계를 그대로 씁니다.
 ## 폴더 구조
 
 ```
 roblox/
 ├── default.project.json          Rojo 프로젝트
+├── docs/BODYCAM_DESIGN.md        Bodycam 동작 명세서 (재설계의 근거)
 ├── src/
-│   ├── Bodycam/                  ReplicatedStorage.Bodycam (ModuleScript)
-│   │   ├── init.luau             공개 API
-│   │   ├── Core/                 엔진 독립 로직 (Roblox 타입 없음)
-│   │   ├── Reference/            Reference 라이브러리에서 가져온 카메라 부품 (Roblox 타입 없음)
-│   │   └── Roblox/               Roblox 어댑터 (Camera, Humanoid, Raycast 사용)
+│   ├── Bodycam/                  ReplicatedStorage.Bodycam: 재설계한 바디캠 (Controller만 Roblox API 사용)
 │   ├── FPSys/                    ReplicatedStorage.FPSys: 카메라 효과, 기울이기, 발소리
 │   ├── FPSController/            ReplicatedStorage.FPSController: 이동 상태, 무기, 반동
 │   ├── Presentation/             ReplicatedStorage.Presentation: 흔들림, 프리 에임, 화면 효과
@@ -70,14 +65,13 @@ roblox/
 ├── THIRD-PARTY-NOTICES.md        포팅한 오픈소스의 라이선스 전문
 ├── tests/                        Roblox 밖에서 도는 테스트, 골든 트레이스
 └── tools/
-    ├── golden/                   C++ 원본으로 골든 트레이스를 만드는 하네스
+    ├── golden/sway_noise.c       SPT-SWAY 노이즈 해시 골든 값 생성기
     ├── luau-runner/              테스트용 최소 Luau 실행기 (Rust + mlua)
-    ├── gen_footstep_data.py      풋스텝 데이터 헤더 → Luau 변환기
     └── rbxm_dump.py              .rbxm 모델에서 스크립트 소스를 꺼내는 도구
 ```
 
-`Core/`와 `Reference/`는 Roblox API를 쓰지 않으므로 어떤 Luau VM에서도 돕니다.
-Roblox에 묶이는 코드는 `Roblox/` 두 파일뿐입니다.
+`Bodycam`의 계산 모듈은 Roblox API를 쓰지 않으므로 어떤 Luau VM에서도 돕니다.
+Roblox에 묶이는 파일은 `Controller.luau`(서비스)와 `Aim.luau`(CFrame만)입니다.
 
 ## 설치
 
@@ -99,8 +93,8 @@ rojo serve roblox/default.project.json
 ### 수동 복사
 
 1. `ReplicatedStorage`에 ModuleScript `Bodycam`을 만들고 `src/Bodycam/init.luau` 내용을 붙여 넣습니다.
-2. 그 아래에 Folder `Core`, `Reference`, `Roblox`를 만듭니다.
-3. 각 폴더에 같은 이름의 ModuleScript를 만들고 해당 `.luau` 파일 내용을 붙여 넣습니다(확장자 제외한 이름).
+2. 그 아래에 `src/Bodycam`의 나머지 파일마다 같은 이름의 ModuleScript를 만들어 붙여 넣습니다(확장자 제외한 이름).
+3. 하위 폴더가 있는 패키지는 같은 구조의 Folder를 만듭니다.
 4. `FPSys`, `FPSController`, `Presentation`, `Realism`도 같은 방법으로 만듭니다(`init.luau`가 패키지 ModuleScript, 나머지는 그 자식, 하위 폴더는 Folder).
 5. `ServerScriptService`에 Script를 만들고 `src/Server/FPSServer.server.luau` 내용을 붙여 넣습니다.
 6. `StarterPlayerScripts`에 LocalScript를 만들고 `src/Client/FPSClient.client.luau` 내용을 붙여 넣습니다.
@@ -111,7 +105,7 @@ rojo serve roblox/default.project.json
 local Bodycam = require(game.ReplicatedStorage.Bodycam)
 
 local controller = Bodycam.controller().new({
-	walkSpeed = 16,          -- 평상시 WalkSpeed (게이트 앵커)
+	walkSpeed = 16,          -- 평상시 WalkSpeed (보폭·흔들림 기준)
 	sprintSpeed = 25.6,      -- 전력 질주 속도
 	isSprinting = function() return sprinting end,
 	isCrouching = function() return crouching end,
@@ -123,61 +117,50 @@ controller:start()
 
 controller:setAiming(true)        -- 조준 (ADS 블렌드 자동)
 controller:notifyShot(1)          -- 발사 1회 (1 = 일반 소총)
-controller:setWeaponProfile({ x = 0.02, y = -0.01, z = 0 }, { x = 0, y = 2, z = 0 })  -- 무기별 힙 오프셋
-controller:applyPreset(1)         -- 0 끄기, 1 Balanced, 2 기본값
+controller:kickAim(0, math.rad(0.6))   -- 반동: 에임을 위로 0.6° (래그 없이)
+controller:setWeaponProfile({ x = 0.05, y = -0.03, z = 0 }, { x = 0, y = 2, z = 0 })  -- 무기별 힙 오프셋(스터드, 도)
+controller:applyPreset("Subtle")  -- "Off" | "Subtle" | "Default" | "Strong"
 ```
 
-**사격 방향은 `controller:getAimCFrame()`을 쓰세요.** 화면 카메라(`getViewCFrame()`)는
-룩 래그와 흔들림 때문에 조준선과 다릅니다. 원본에서도 탄도는 에임을 따르고 화면만 지연됩니다.
+**사격 방향은 `controller:getAimCFrame()`을 쓰세요.** 화면(`getViewCFrame()`)은 래그와 흔들림 때문에 조준선과 다릅니다.
+무기는 에임 기준 HUD 카메라(`getHudCFrame()`)에 붙으므로 총이 먼저 가고 화면이 뒤따릅니다.
 
 ### 설정 바꾸기
 
-설정 이름은 원본 콘솔 명령에서 `bodycam_` 접두어를 뺀 것입니다. 그래서
-[docs/CLASSIC.md](../docs/CLASSIC.md)의 설명이 그대로 적용됩니다.
+설정은 `그룹.이름` 경로로 바꿉니다(`lookLag`, `head`, `weapon`, `inertia`, `stride`).
 
 ```lua
 local Settings = Bodycam.Settings
-Settings.set(controller.config, "hip_camera_max_yaw_offset", 9)   -- 범위 밖 값은 잘립니다
-Settings.set(controller.config, "footstep_camera_enable", false)
-for _, s in Settings.list() do print(s.name, s.default, s.min, s.max) end  -- 옵션 UI 만들기용
+Settings.set(controller.config, "lookLag.maxLagDeg", 5)   -- 범위 밖 값은 잘립니다
+Settings.set(controller.config, "head.bobEnabled", false)
+for _, s in Settings.list() do print(s.path, s.default, s.min, s.max) end  -- 옵션 UI 만들기용
+print(controller:featureEnabled("HeadBob"))
 ```
 
-### 엔진 없이 코어만 쓰기
+### 어댑터 없이 코어만 쓰기
 
-자체 카메라 시스템이 있으면 어댑터 없이 `BodycamCore`를 직접 돌릴 수 있습니다.
-입력과 출력은 X-Ray 관례(라디안, 미터, 카메라 로컬 x 오른쪽·y 위·z 앞)를 따르고,
-`Roblox/CoordinateSpace.luau`가 Roblox CFrame으로 바꿉니다.
+자체 카메라 시스템이 있으면 `BodycamCore`를 매 프레임 직접 호출하고 결과 숫자를 적용하면 됩니다.
 
 ```lua
-local core = Bodycam.BodycamCore.new()
-local frame = { camera = Bodycam.CameraRig.newInput(), move_flags = Bodycam.MoveFlags.Forward }
--- 매 프레임: frame.camera.aim_yaw / aim_pitch / dt / velocity / foot_phase ... 를 채운 뒤
-local composition = core:update(frame, { horizontalClearance = function(right, forward, maxDistance) return nil end })
-local view = Bodycam.coordinateSpace().composeView(aimCFrame, yaw, pitch, composition, studsPerMetre)
+local core = Bodycam.BodycamCore.new(Bodycam.Settings.default())
+local out = core:update({
+	dt = dt, yaw = yaw, pitch = pitch, ads = adsBlend, aiming = aiming,
+	grounded = true, sprinting = false, crouching = false,
+	velX = v.X, velY = v.Y, velZ = v.Z, walkSpeed = 16, sprintSpeed = 25.6,
+})
+-- out.viewYaw / viewPitch / lagX..Z (시야), out.headX..Z / headPitch / headRoll (머리),
+-- out.weaponX..Z / weaponPitch / weaponYaw / weaponRoll / wristPitch / wristRoll (무기), out.footstep
 ```
-
-## 좌표계와 단위
-
-| | X-Ray (코어 내부) | Roblox |
-| --- | --- | --- |
-| 손 방향 | 왼손 좌표계 | 오른손 좌표계 |
-| 앞 | +Z | -Z (`LookVector`) |
-| 단위 | 미터 | 스터드 |
-
-- Z축을 뒤집으면 두 좌표계가 일치합니다. X-Ray 헤딩 `h`와 피치 `p`는
-  `CFrame.fromOrientation(p, h, 0)`과 같습니다.
-- 회전 행렬은 `CoordinateSpace.deltaToCFrame`이 Z 반전으로 기저 변환합니다. 부호를 손으로 뒤집지 마세요.
-- 기본 축척은 Roblox 아바타 기준 1 스터드 = 0.28 m입니다. 게임 비율이 다르면 `studsPerMetre`를 넘기세요.
-- Roblox에는 X-Ray의 발소리 스케줄이 없어서, 어댑터가 평면 속도로 보폭 시계(`GaitSpeed.StrideClock`)를 돌립니다.
-  애니메이션 발자국 마커가 있으면 `footPhase` 옵션으로 넘기는 편이 더 정확합니다(왼발 0, 오른발 0.5).
 
 ### 카메라 피드백 방지
 
 Roblox 기본 카메라 스크립트는 다음 프레임을 만들 때 `Camera.CFrame`을 다시 읽습니다.
-바디캠 시야를 그대로 두면 래그가 에임에 누적됩니다. 그래서 컨트롤러는
+그래서 컨트롤러는 다음 순서로 동작합니다.
 
-1. `RenderPriority.Camera - 1`에서 지난 프레임의 **에임** CFrame을 되돌려 놓고,
-2. `RenderPriority.Camera + 1`에서 카메라 스크립트가 만든 에임을 읽어 바디캠 **시야**를 덮어씁니다.
+1. `RenderPriority.Camera - 1`: 지난 프레임의 **에임**으로 카메라를 되돌립니다. 이때 대기 중인 `kickAim`도 적용합니다.
+   카메라가 우리가 쓴 시야 그대로일 때만 되돌리고, 다른 스크립트가 카메라를 옮겼다면 그 값을 새 에임으로 받아들입니다.
+2. `RenderPriority.Camera`: 카메라 스크립트가 에임을 돌립니다.
+3. `RenderPriority.Camera + 1`: 새 에임을 읽어 바디캠 **시야**와 HUD 카메라를 만들고 뷰모델을 놓습니다.
 
 ## FPSys 통합
 
@@ -299,8 +282,8 @@ Roblox에는 커스텀 후처리 셰이더가 없고, 스크립트가 렌더링�
 | `MovementController` | 상태 기계를 Humanoid에 적용(WalkSpeed, 슬라이드 이동, 앉은 상태 점프 금지, 일어설 공간 검사, 카메라 높이) | Roblox |
 | `WeaponController` | 사격 → 바디캠 사격 임펄스 + FPSys 흔들림 + 반동, 반동 → `kickAim`, 조준 FOV·감도, 무기 교체, 기울이기, 질주 중 사격·조준 금지 | Roblox |
 
-반동은 엔진의 스크립트 카메라 델타와 같은 방식으로 들어갑니다. `BodycamController:kickAim`이
-에임을 돌리고 바디캠 래그를 `rebase`하므로, 반동은 마우스 움직임으로 취급되지 않습니다(팔이 휙 돌지 않음).
+반동은 `controller:kickAim`으로 들어갑니다. 에임을 돌리면서 바디캠 래그도 같은 양만큼 옮기므로,
+반동은 래그나 마우스 움직임으로 취급되지 않습니다(시야가 뒤처지거나 손목이 휙 돌지 않음).
 
 ### 키 조작 (예제 `FPSClient`)
 
@@ -341,32 +324,11 @@ smg.profile = { pos = { x = 0.01, y = -0.01, z = 0 }, rot = { x = 0, y = 1, z = 
 
 ## 검증
 
-`tools/golden/golden.cpp`가 원본 C++ 코드(`bodycam_simulation.cpp`, `bodycam_mouse_input.cpp`,
-`bodycam_viewmodel_profile.cpp`, Reference 라이브러리)를 그대로 링크해 정해진 입력 시나리오
-(프레임 시간 흔들림, 144/30 fps 구간, 히치, 플릭, 각도 랩, 걷기·질주·앉기·점프, ADS, 사격)를
-돌리고, 프레임마다 입력과 출력을 `tests/golden/*.luau`에 씁니다.
-`tests/golden.spec.luau`가 같은 입력을 Luau 모듈에 넣고 결과를 비교합니다.
-
-| 트레이스 | 프레임 | 비교 항목 |
-| --- | --- | --- |
-| simulation | 1200 | 마우스 에임, 마우스 속도, 이동 의도, 스웨이, 뷰모델 위치·회전, 내림, 팔 IK |
-| follow | 900 | 팔로우 카메라 각도, 팔 오프셋, 룩 시프트 |
-| footstep | 1200 | 오프셋, 위상, 잠금, 제동 발걸음 |
-| head | 900 | 롤, 흔들림 피치·요·롤 |
-| camera_delta | 7 | 회전 행렬 |
-| viewmodel_profile | 300 | 위치, 회전, 활성 |
-
-원본은 단정밀도(float)를 섞어 쓰고 Luau는 배정밀도라 비트 단위로 같지는 않습니다.
-결과가 눈에 띄게 달라지는 세 곳은 원본의 float 동작을 그대로 따라 했습니다:
-팔 스프링 서브스텝 수(60 fps에서 `dt * 120`이 float로 정확히 2), Reference 프레임 델타의 float 반올림,
-흔들림 오실레이터 위상의 float 누적. 마지막 측정에서 가장 큰 오차는 흔들림 피치 약 6e-5°였습니다.
-
-나머지(데드존 래그, 리그 합성, 이동 관성, 설정, 게이트 속도, 좌표 변환, 어댑터)는
-`tests/unit.spec.luau`와 `tests/controller.spec.luau`의 단위 테스트로 확인합니다.
-어댑터 테스트는 Roblox 서비스(카메라, Humanoid, RunService, Raycast)를 목으로 대신합니다.
-
-FPSys와 FPSController는 다음으로 확인합니다.
-
+- `tests/bodycam.spec.luau`(재설계 바디캠):
+  - 룩 래그: 데드밴드, 콘 제한, 수렴, 조준 시 조여짐, 반동이 즉시 반영되는지.
+  - 머리: 걸음 흔들림 주기(보폭당 두 번 내려감)·속도 비례·정지 시 안정, 롤 부호, 질주 숙임, 착지 충격 복귀.
+  - 무기: 앞으로 걸을 때만 내림, 사격·조준 중 억제, 반동 방향과 안정, 손목 롤 부호, 상한.
+  - 그 밖에: 이동 관성, 설정·프리셋, 목 클라이언트에서의 컨트롤러 프레임 순서·HUD 카메라·발소리 이벤트·`kickAim`.
 - `tests/fpscontroller.spec.luau`: 보행 속도 전환, 질주 조건, 앉기·일어서기 공간, 슬라이드, 엎드리기 잠금,
   점프·착지 이벤트, 600 RPM 자동 사격 발수, 단발·점사, 탄창·장전, 스코프 FOV, 반동 상승과 복귀 비율.
 - `tests/fpsys.spec.luau`:
@@ -376,17 +338,15 @@ FPSys와 FPSController는 다음으로 확인합니다.
   - 재질 발소리, 숨쉬기·착지 충격·겹침 규칙, 기울이기 벽 정지, 사격 흔들림.
 - `tests/presentation.spec.luau`:
   - SwayNoise 해시가 C# 부호 없는 32비트 연산과 일치하는지(C 골든, `tools/golden/sway_noise.c`).
-  - 흔들림이 평균 0인지(에임이 흘러가지 않음), 피로·스트레스에 따른 심박, 숨 참기와 반동, 관성 지연과 안정.
-  - Unity Euler/eulerAngles 규칙, 데드존 누적·최대각·조준 복귀.
-  - simplex 노이즈 범위·연속성·시드 재현, 손떨림 세기.
-- `tests/screen.spec.luau`: three.js `rand`·필름 그레인·Eskil 비네팅, pmndrs 렌즈 왜곡·Pattanaik 적응을 원본 식과 대조합니다. 목 클라이언트에서 오버레이 이미지 픽셀, 어두운 곳 노출 상승, HUD, 정리 후 노출 복원도 확인합니다.
-- `tests/integration.spec.luau`: 세 패키지를 함께 띄운 목 클라이언트에서 걷기 발소리, 조준 FOV·감도,
-  자동 사격 반동이 에임을 실제로 올리고 복귀하는지, 질주 중 사격·조준 금지와 해제 후 조준 재개,
-  기울이기 사격 위치, 앉기 카메라 높이, 무기 교체 시간, 정리 후 남는 연결이 없는지.
-  또 돌고 난 뒤 총알이 화면 중앙이 아니라 총구 방향으로 나가는지, 뷰모델이 그 방향을 가리키는지,
-  정지 상태에서도 호흡·맥박으로 총이 움직이는지, 벽에 막히면 사격이 막히는지 확인합니다.
+  - 흔들림이 평균 0인지, 피로·스트레스에 따른 심박, 숨 참기와 반동, 관성 지연과 안정.
+  - Unity Euler 규칙, 데드존, simplex 노이즈, 손떨림.
+- `tests/screen.spec.luau`: three.js·pmndrs 셰이더 식 대조, 목 클라이언트에서 오버레이 픽셀, 노출, HUD, 정리.
+- `tests/integration.spec.luau`: 모든 패키지를 함께 띄운 목 클라이언트에서 확인합니다.
+  - 걷기 발소리, 조준 FOV·감도, 자동 사격 반동이 에임을 올리고 복귀하는지.
+  - 질주 중 사격·조준 금지, 기울이기, 앉기 카메라 높이, 무기 교체.
+  - 총알이 총구 방향으로 나가는지, 뷰모델이 그 방향을 가리키는지, 벽에 막히면 사격이 막히는지, 정리 후 남는 연결이 없는지.
 
-현재 전체 67개 테스트가 통과합니다. simplex 노이즈는 원본 TypeScript를 직접 실행해 대조하지
+현재 전체 80개 테스트가 통과합니다. simplex 노이즈는 원본 TypeScript를 직접 실행해 대조하지
 못했습니다(외부 코드 실행이 이 세션에서 허용되지 않음). 대신 성질 테스트로 확인했습니다.
 
 ### 테스트 실행
@@ -401,16 +361,10 @@ cargo build --release --manifest-path roblox/tools/luau-runner/Cargo.toml
 cd roblox && tools/luau-runner/target/release/luau-runner tests/run.luau
 ```
 
-골든 트레이스를 다시 만들려면 CMake와 C++17 컴파일러가 필요합니다.
+SwayNoise 골든 값을 다시 만들려면 C 컴파일러가 필요합니다.
 
 ```bash
 roblox/tools/golden/build.sh
-```
-
-풋스텝 데이터 헤더가 바뀌면 Luau 데이터 파일을 다시 생성하세요.
-
-```bash
-python3 roblox/tools/gen_footstep_data.py
 ```
 
 ## 한계와 주의할 점
@@ -422,23 +376,20 @@ python3 roblox/tools/gen_footstep_data.py
 - **Roblox Studio에서 실행해 보지 않았습니다.** 모든 파일이 Luau 컴파일러를 통과하고,
   어댑터는 목 서비스로 테스트했지만, 실제 Studio 카메라 스크립트와의 상호작용과 체감 튜닝은
   Studio에서 확인해야 합니다. `luau-analyze` 타입 검사도 돌리지 않았습니다.
-- 뷰모델은 원본처럼 에임 기준 HUD 카메라(발걸음 오프셋과 머리 롤만 공유)에 붙습니다. 그래서 총이 먼저 가고 화면이 뒤따릅니다.
+- 뷰모델은 에임 기준 HUD 카메라(머리 움직임 위치와 롤만 공유)에 붙어서, 총이 먼저 가고 화면이 뒤따릅니다.
   기울이기와 자세 낮추기는 `addBodyModifier`로 시야와 총에 함께 적용됩니다.
-- 뷰모델 배치는 원본 HUD 솔버의 근사입니다. 팔 IK 회전은 그립 피벗(`gripPivot`, 기본
-  오른쪽 0, 위 -0.12, 앞 0.35 m) 기준으로 뷰모델 전체를 돌립니다. 손·팔 본을 따로 움직이려면
-  `controller.core:getArmPose()`를 읽어 직접 Motor6D에 적용하세요.
+- 손목 롤은 그립 피벗(`gripPivot`, 기본 카메라 기준 (0.35, -0.35, -1.1) 스터드)으로 뷰모델 전체를 돌립니다.
+  손·팔 본을 따로 움직이려면 `controller.core` 출력(`wristPitch`, `wristRoll`)을 직접 Motor6D나 IKControl에 적용하세요.
 - `applyMovementInertia = true`는 ControlModule 뒤에서 `Humanoid:Move`를 덮어씁니다.
-  자체 이동 시스템이 있으면 `false`로 두고 `core:updateMovement()` 결과를 그 시스템에 넣으세요.
-- 원본의 시간 상수와 거리는 X-Ray 캐릭터 비율에 맞춰져 있습니다. 축척이 다른 게임은
-  `studsPerMetre`와 프리셋으로 먼저 맞추고 세부 값을 조정하세요.
+  자체 이동 시스템이 있으면 `false`로 두세요.
+- 기본값은 Roblox 표준 아바타(걷기 16 스터드/초) 기준으로 정했습니다. 다른 축척이면 프리셋과 설정으로 조정하세요.
 
 ### 라이선스
 
-이 저장소의 [License.txt](../License.txt)는 소스 코드가 GSC Game World 소유이며
-**상업적 목적으로 쓸 수 없다**고 정합니다. 이 Luau 코드는 그 소스를 옮긴 파생물이고,
-`FootstepCameraData.luau`는 원본 데이터 헤더에서 생성한 것입니다
-([docs/PROVENANCE.md](../docs/PROVENANCE.md) 참고). Robux 수익이 나는 경험(게임 패스,
-개발자 상품, 프리미엄 페이아웃 등)에 넣기 전에 라이선스 적용 범위를 직접 확인하세요.
+- `Bodycam`: 비상업 라이선스(이 저장소의 [License.txt](../License.txt))가 걸린 X-Ray 소스를 옮긴 이전 포팅을 지우고,
+  동작 명세([docs/BODYCAM_DESIGN.md](docs/BODYCAM_DESIGN.md))만으로 새로 구현했습니다. 원본 코드·상수·녹화 데이터는
+  들어 있지 않습니다. 다만 명세서를 쓴 쪽이 원본을 본 상태라 엄격한 클린룸은 아니므로, 상업 출시 전 법률 검토를 권합니다.
+  이 저장소의 나머지(`src/`, `gamedata/`의 C++ 엔진)는 여전히 License.txt를 따릅니다.
 
 - `FPSys`: 업로드한 모델은 Character-Realism(MPL-2.0)에서 파생되었습니다. 파생 파일은 MPL-2.0이고,
   CloneTrooper1019 크레딧이 필요합니다. 그 안의 `Spring`, `Maid`는 Nevermore Engine(MIT)입니다.

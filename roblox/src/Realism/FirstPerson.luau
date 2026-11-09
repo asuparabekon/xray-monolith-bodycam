@@ -9,7 +9,7 @@
 --
 -- Changes for the bodycam integration (MPL: changes to this file stay MPL):
 --  * IsInFirstPerson() reads the aim camera through FirstPerson.getAimCFrame when set:
---    the bodycam view layers (lean, crouch drop, footstep camera) move the view away
+--    the bodycam view layers (lean, crouch drop, head bob) move the view away
 --    from the focus and would end first person in the source's check.
 --  * The source's late "FirstPersonCamera" render step moves the final camera onto the
 --    head every frame, which undoes the bodycam's view offsets. It runs only when

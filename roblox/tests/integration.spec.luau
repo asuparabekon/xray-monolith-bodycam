@@ -9,7 +9,7 @@ return function(T)
 	local FPSys = require(T.Src.FPSys)
 	local FPSController = require(T.Src.FPSController)
 	local Presentation = require(T.Src.Presentation)
-	local CoordinateSpace = Bodycam.coordinateSpace()
+	local Aim = Bodycam.aim()
 
 	local now = 0
 	local remote = { sent = 0, OnClientEvent = Env.signal() }
@@ -82,13 +82,13 @@ return function(T)
 	-- The camera scripts: start from the restored aim and apply this frame's mouse turn.
 	local mouseYaw = 0
 	local function cameraScripts()
-		local yaw, pitch = CoordinateSpace.aimFromLook(env.camera.CFrame.LookVector)
-		env.camera.CFrame = CFrame.new(0, 5, 0) * CoordinateSpace.aimRotation(yaw + mouseYaw, pitch)
+		local yaw, pitch = Aim.aimFromLook(env.camera.CFrame.LookVector)
+		env.camera.CFrame = CFrame.new(0, 5, 0) * Aim.aimRotation(yaw + mouseYaw, pitch)
 		env.camera.Focus = CFrame.new(0, 5, 0)
 	end
 	local function walk(forward)
-		local yaw = CoordinateSpace.aimFromLook(env.camera.CFrame.LookVector)
-		local _, fwd = CoordinateSpace.yawFrame(yaw)
+		local yaw = Aim.aimFromLook(env.camera.CFrame.LookVector)
+		local _, fwd = Aim.yawFrame(yaw)
 		env.humanoid.MoveDirection = if forward then fwd else Vector3.new(0, 0, 0)
 		env.root.AssemblyLinearVelocity = env.humanoid.MoveDirection * env.humanoid.WalkSpeed
 	end
@@ -99,7 +99,7 @@ return function(T)
 		end
 	end
 	local function aimPitch()
-		local _, pitch = CoordinateSpace.aimFromLook(controller:getAimCFrame().LookVector)
+		local _, pitch = Aim.aimFromLook(controller:getAimCFrame().LookVector)
 		return pitch
 	end
 
@@ -110,7 +110,6 @@ return function(T)
 		mouseYaw = 0
 		frames(10)
 		T.truthy(controller:getViewCFrame() ~= nil, "view")
-		T.truthy(#controller.viewModifiers >= 2, "FPSys and movement layers registered")
 		T.truthy(remote.sent >= 1, "look angles sent")
 	end)
 

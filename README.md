@@ -111,7 +111,7 @@ Open `src/engine-vs2022.sln`, pick an x64 DX11 configuration and build.
 - [docs/FIRST_PERSON_LUA_API.md](docs/FIRST_PERSON_LUA_API.md): camera, HUD and weapon transforms for scripts.
 - [docs/BODYCAM_HUD_ANIMATION_POLICY.md](docs/BODYCAM_HUD_ANIMATION_POLICY.md): turning off weapon lowering during HUD animations.
 - [docs/BODYCAM_PORTING.md](docs/BODYCAM_PORTING.md): moving the bodycam module to another X-Ray build.
-- [roblox/README.md](roblox/README.md): Luau port of the Classic bodycam layer for Roblox, integrated with FPSys
+- [roblox/README.md](roblox/README.md): Roblox bodycam packages (the bodycam rebuilt from a behaviour spec), integrated with FPSys
   camera effects, an FPS movement and weapon controller, and bodycam presentation ported from
   permissively licensed open source (Korean guide).
 

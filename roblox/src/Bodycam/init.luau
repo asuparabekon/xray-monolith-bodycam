@@ -1,44 +1,44 @@
--- Bodycam for Roblox: a Luau port of the X-Ray Monolith Bodycam Classic layer
--- (camera decoupling, footstep camera, head roll and shake, sprint sway,
--- viewmodel lowering, fire impulse, STALKER 2 style arm IK, movement inertia).
+-- Bodycam: a first-person body-worn camera feel for Roblox.
 --
--- Core/ and Reference/ are engine-free and run in any Luau VM.
--- Roblox/ holds the adapter that drives them from a Humanoid and the CurrentCamera.
-
-local Core = script.Core
-local Reference = script.Reference
+--   The weapon points where the player aims; the view trails slightly behind it (look
+--   lag). The head moves with the body (stride bob, strafe/turn roll, sprint lean,
+--   landing dip). The weapon moves with the hands (walk lowering, holster, fire kick,
+--   wrist roll, per-weapon profile). Starting and stopping take a moment (movement
+--   inertia).
+--
+-- Pure modules (no Roblox API, testable anywhere):
+--   Math, Settings, LookLag, HeadMotion, WeaponMotion, MovementInertia, StrideClock,
+--   BodycamCore
+-- Roblox:
+--   Aim         aim angles <-> CFrames (CFrame/Vector3 only)
+--   Controller  the adapter: camera, humanoid, viewmodel, hooks
+--
+-- Usage (LocalScript):
+--   local Bodycam = require(ReplicatedStorage.Bodycam)
+--   local controller = Bodycam.controller().new({ walkSpeed = 16, sprintSpeed = 25.6 })
+--   controller:start()
+--   -- shots: controller:getAimCFrame(), never the view
 
 local Bodycam = {
-	MathUtil = require(Core.MathUtil),
-	Vec3 = require(Core.Vec3),
-	Simulation = require(Core.Simulation),
-	CameraRig = require(Core.CameraRig),
-	MouseAim = require(Core.MouseAim),
-	MovementInertia = require(Core.MovementInertia),
-	ViewmodelProfile = require(Core.ViewmodelProfile),
-	Settings = require(Core.Settings),
-	BodycamCore = require(Core.BodycamCore),
-	GaitSpeed = require(Core.GaitSpeed),
-	Reference = {
-		ScalarMath = require(Reference.ScalarMath),
-		CameraMotion = require(Reference.CameraMotion),
-		ClassicFollow = require(Reference.ClassicFollow),
-		FootstepCamera = require(Reference.FootstepCamera),
-		CameraShake = require(Reference.CameraShake),
-		ReferenceHead = require(Reference.ReferenceHead),
-		CameraDelta = require(Reference.CameraDelta),
-	},
+	Math = require(script.Math),
+	Settings = require(script.Settings),
+	LookLag = require(script.LookLag),
+	HeadMotion = require(script.HeadMotion),
+	WeaponMotion = require(script.WeaponMotion),
+	MovementInertia = require(script.MovementInertia),
+	StrideClock = require(script.StrideClock),
+	BodycamCore = require(script.BodycamCore),
+	Aim = require(script.Aim),
 }
 
-Bodycam.MoveFlags = Bodycam.Simulation.MoveFlags
-
--- The Roblox adapter is loaded on demand so the core stays usable outside Roblox.
+-- The Roblox adapter, loaded on demand (it reads services).
 function Bodycam.controller()
-	return require(script.Roblox.BodycamController)
+	return require(script.Controller)
 end
 
-function Bodycam.coordinateSpace()
-	return require(script.Roblox.CoordinateSpace)
+-- The aim helper module.
+function Bodycam.aim()
+	return Bodycam.Aim
 end
 
 return Bodycam

@@ -42,7 +42,7 @@ end
 
 -- options:
 --   config         FPSys Config table (default: FPSys.Config)
---   bodycamConfig  the bodycam Settings config, for the "Auto" overlap rule
+--   bodycam        the BodycamController, for the "Auto" overlap rule (featureEnabled)
 --   getLean        function(): number  -1 (left) .. 1 (right), default 0
 --   getMouseDelta  function(): Vector2 (default UserInputService:GetMouseDelta)
 --   random         Random object for the shot shake (default Random.new())
@@ -110,12 +110,12 @@ function CameraEffects:enabled(name: string): boolean
 	if not self.config.Enabled[name] then
 		return false
 	end
-	local bodycam = self.options.bodycamConfig
+	local bodycam = self.options.bodycam
 	if self.config.Overlap == "Auto" and bodycam then
-		if name == "WalkBob" and bodycam.footstep.enable then
+		if name == "WalkBob" and bodycam:featureEnabled("HeadBob") then
 			return false
 		end
-		if name == "StrafeTilt" and bodycam.camera.enable then
+		if name == "StrafeTilt" and bodycam:featureEnabled("HeadRoll") then
 			return false
 		end
 	end

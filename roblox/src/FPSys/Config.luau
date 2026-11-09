@@ -93,8 +93,8 @@ Config.Shake = {
 }
 
 -- Which FPSys effects run next to the bodycam. "Auto" turns off the FPSys walk bob
--- when the bodycam footstep camera is on, and the strafe tilt when the bodycam head
--- roll is on, so the same motion is not applied twice.
+-- when the bodycam head bob is on, and the strafe tilt when the bodycam head roll is
+-- on, so the same motion is not applied twice.
 Config.Overlap = "Auto" -- "Auto" | "All" (keep every FPSys effect)
 
 -- Effects that can be switched off one by one.

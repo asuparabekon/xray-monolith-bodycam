@@ -209,9 +209,11 @@ return function(T)
 	end
 
 	T.test("camera effects: breathing at rest, landing kick, overlap rule", function()
-		local bodycamConfig = { footstep = { enable = true }, camera = { enable = true } }
-		local effects = CameraEffects.new({ config = Config, bodycamConfig = bodycamConfig, blurParent = false })
-		T.equal(effects:enabled("WalkBob"), false, "bodycam footstep camera owns the bob")
+		local bodycam = { featureEnabled = function(_, name)
+			return name == "HeadBob" or name == "HeadRoll"
+		end }
+		local effects = CameraEffects.new({ config = Config, bodycam = bodycam, blurParent = false })
+		T.equal(effects:enabled("WalkBob"), false, "bodycam head bob owns the bob")
 		T.equal(effects:enabled("StrafeTilt"), false, "bodycam head roll owns the tilt")
 		local view = CFrame.new(0, 5, 0)
 		local moved = false
