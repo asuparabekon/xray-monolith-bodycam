@@ -8,6 +8,7 @@ return function(T)
 	local Bodycam = require(T.Src.Bodycam)
 	local FPSys = require(T.Src.FPSys)
 	local FPSController = require(T.Src.FPSController)
+	local Presentation = require(T.Src.Presentation)
 	local CoordinateSpace = Bodycam.coordinateSpace()
 
 	local now = 0
@@ -17,7 +18,13 @@ return function(T)
 	end
 
 	local movement, weapons
+	-- A viewmodel that records where it is placed.
+	local viewmodel = { PrimaryPart = {}, placed = nil }
+	function viewmodel:PivotTo(cframe)
+		self.placed = cframe
+	end
 	local controller = Bodycam.controller().new({
+		viewmodel = viewmodel,
 		walkSpeed = 16,
 		sprintSpeed = 25.6,
 		isSprinting = function()
@@ -33,16 +40,27 @@ return function(T)
 	local fpsys = FPSys.new({
 		controller = controller,
 		remote = remote,
+		showBody = false, -- the PlayerModule overloads need the real PlayerModule (see fpsys.spec)
 		getLean = function()
 			return weapons:getLean()
 		end,
 	})
 	movement = FPSController.movement().new({ controller = controller })
+	local presenter = Presentation.weaponPresenter().new({
+		controller = controller,
+		random = function()
+			return 0.3
+		end,
+		getWeightKg = function()
+			return weapons:current().config.weightKg
+		end,
+	})
 	local fired = {}
 	weapons = FPSController.weapons().new({
 		controller = controller,
 		fpsys = fpsys,
 		movement = movement,
+		presenter = presenter,
 		clock = function()
 			return now
 		end,
@@ -58,6 +76,7 @@ return function(T)
 	controller:start()
 	fpsys:start()
 	movement:start()
+	presenter:start()
 	weapons:start()
 
 	-- The camera scripts: start from the restored aim and apply this frame's mouse turn.
@@ -178,7 +197,53 @@ return function(T)
 		T.equal(weapons:current():isBusy(), false, "ready")
 	end)
 
+	T.test("free aim: after a turn the shots follow the weapon, not the screen centre", function()
+		walk(false)
+		mouseYaw = 0.02
+		frames(20)
+		mouseYaw = 0
+		frames(2)
+		local aim = controller:getAimCFrame()
+		local fire = weapons:getFireCFrame()
+		local angle = math.deg(math.acos(math.clamp(aim.LookVector:Dot(fire.LookVector), -1, 1)))
+		T.truthy(angle > 3 and angle < 6, "weapon leads the turn by up to 5 degrees plus sway: " .. angle)
+		T.truthy(fire.LookVector:Dot(aim.RightVector) < 0, "led to the left, the way the view turned")
+		T.truthy(viewmodel.placed ~= nil, "viewmodel placed")
+		local placedLook = viewmodel.placed.LookVector
+		T.truthy(math.abs(placedLook:Dot(fire.LookVector) - 1) < 1e-3, "the viewmodel points where the shots go")
+	end)
+
+	T.test("breathing and pulse keep the weapon moving at rest", function()
+		local looks = {}
+		for _ = 1, 120 do
+			frames(1)
+			table.insert(looks, weapons:getFireCFrame().LookVector)
+		end
+		local spread = 0
+		for _, look in looks do
+			spread = math.max(spread, (look - looks[1]).Magnitude)
+		end
+		T.truthy(spread > 1e-4, "sway moves the barrel: " .. spread)
+	end)
+
+	T.test("a wall in front of the barrel pulls the weapon back and blocks fire", function()
+		table.insert(env.walls, function(origin, direction)
+			return { Position = origin + direction.Unit * 0.2 }
+		end)
+		frames(30)
+		T.truthy(presenter:blocksFire(), "blocked")
+		local count = #fired
+		weapons:pullTrigger()
+		frames(30)
+		weapons:releaseTrigger()
+		T.equal(#fired, count, "no shots into the wall")
+		table.clear(env.walls)
+		frames(30)
+		T.equal(presenter:blocksFire(), false, "clear again")
+	end)
+
 	T.test("everything stops cleanly", function()
+		presenter:stop()
 		weapons:stop()
 		movement:stop()
 		fpsys:stop()

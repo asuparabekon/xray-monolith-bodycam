@@ -1,6 +1,14 @@
+-- This Source Code Form is subject to the terms of the Mozilla Public License, v. 2.0.
+-- If a copy of the MPL was not distributed with this file, You can obtain one at
+-- https://mozilla.org/MPL/2.0/. (A copy is in roblox/src/Realism/LICENSE.)
+--
+-- Derived from Character-Realism by CloneTrooper1019 (MaximumADHD),
+-- https://github.com/MaximumADHD/Character-Realism, by way of the FPSys model.
+--
 -- FPSys configuration. The values come from the FPSys model (Configuration,
--- RealismConfiguration, CameraConfiguration); the Lean, Shake and Overlap sections are
--- new and belong to the bodycam integration.
+-- RealismConfiguration, CameraConfiguration); the sounds and material map are
+-- Character-Realism's. The Lean, Shake and Overlap sections are new and belong to the
+-- bodycam integration. Look-angle settings moved to Realism/Config.luau.
 
 local Config = {}
 
@@ -42,28 +50,6 @@ Config.MaterialMap = {
 	Foil = "Metal",
 	DiamondPlate = "Metal",
 	CorrodedMetal = "Metal",
-}
-
--- How much of the look angle each body part takes, by the name of the Motor6D's Part1.
--- Turn is the horizontal look (FPSys "Pitch"), Tilt the vertical look (FPSys "Yaw").
-Config.RotationFactors = {
-	Head = { Turn = 0.8, Tilt = 0.75 },
-	UpperTorso = { Turn = 0.5, Tilt = 0.5 },
-	LeftUpperArm = { Turn = 0.0, Tilt = -0.5 },
-	RightUpperArm = { Turn = 0.0, Tilt = -0.5 },
-	Torso = { Turn = 0.4, Tilt = 0.2 },
-	["Left Arm"] = { Turn = 0.0, Tilt = -0.5 },
-	["Right Arm"] = { Turn = 0.0, Tilt = -0.5 },
-	["Left Leg"] = { Turn = 0.0, Tilt = -0.2 },
-	["Right Leg"] = { Turn = 0.0, Tilt = -0.2 },
-}
-
--- Look angle replication.
-Config.LookAngles = {
-	SendInterval = 0.5, -- seconds between sends while the angles change
-	SendStep = 0.05, -- angles are rounded to this before sending
-	MaxDistance = 30, -- studs; farther characters are not animated
-	TurnRate = 20 / 3, -- share per second the current angle moves toward the goal
 }
 
 Config.Camera = {

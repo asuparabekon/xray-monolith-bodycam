@@ -11,6 +11,12 @@
       },
       "FPSController": {
         "$path": "src/FPSController"
+      },
+      "Presentation": {
+        "$path": "src/Presentation"
+      },
+      "Realism": {
+        "$path": "src/Realism"
       }
     },
     "ServerScriptService": {

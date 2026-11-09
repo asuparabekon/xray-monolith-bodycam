@@ -33,7 +33,7 @@ function Env.new()
 	local env = {}
 	local enumCache = {}
 	env.Enum = setmetatable({
-		RenderPriority = { Camera = { Value = 200 }, Input = { Value = 100 } },
+		RenderPriority = { Camera = { Value = 200 }, Input = { Value = 100 }, Last = { Value = 2000 } },
 	}, {
 		__index = function(_, category)
 			local items = enumCache[category]
@@ -100,8 +100,10 @@ function Env.new()
 	-- Render steps.
 	env.bound = {}
 	env.heartbeat = signal()
+	env.stepped = signal()
 	env.RunService = {
 		Heartbeat = env.heartbeat,
+		Stepped = env.stepped,
 		BindToRenderStep = function(_, name, priority, fn)
 			table.insert(env.bound, { name = name, priority = priority, fn = fn })
 			table.sort(env.bound, function(a, b)
@@ -133,6 +135,10 @@ function Env.new()
 		Size = Vector3.new(2, 2, 1),
 		children = {},
 	}
+	function env.root:IsA(c)
+		return c == "BasePart" or c == "Part"
+	end
+	env.root.AssemblyRootPart = env.root
 	function env.root:FindFirstChild(name)
 		return self.children[name]
 	end
@@ -164,6 +170,10 @@ function Env.new()
 	function humanoid:IsA(c)
 		return c == "Humanoid"
 	end
+	function humanoid:FindFirstChildOfClass()
+		return nil
+	end
+	humanoid.MaxHealth = 100
 	local floorChanged = signal()
 	function humanoid:GetPropertyChangedSignal()
 		return floorChanged
@@ -171,6 +181,9 @@ function Env.new()
 	env.humanoid = humanoid
 	local character = {
 		Name = "Player1",
+		IsA = function(_, c)
+			return c == "Model"
+		end,
 		FindFirstChildOfClass = function(_, className)
 			return if className == "Humanoid" then humanoid else nil
 		end,
@@ -189,6 +202,9 @@ function Env.new()
 	humanoid.Parent = character
 	env.character = character
 	env.player = { Character = character, CharacterAdded = signal(), Name = "Player1" }
+	function env.player:DistanceFromCharacter(point)
+		return (env.root.Position - point).Magnitude
+	end
 	env.Players = {
 		LocalPlayer = env.player,
 		GetPlayerFromCharacter = function(_, c)
@@ -210,6 +226,16 @@ function Env.new()
 			return nil
 		end,
 	}
+	function env.Workspace:Spherecast(origin, _, direction)
+		env.raycasts += 1
+		for _, wall in env.walls do
+			local hit = wall(origin, direction)
+			if hit then
+				return hit
+			end
+		end
+		return nil
+	end
 	env.UserInputService = { MouseDeltaSensitivity = 1, mouseDelta = { X = 0, Y = 0 } }
 	function env.UserInputService:GetMouseDelta()
 		return self.mouseDelta
@@ -276,6 +302,7 @@ function Env.new()
 		if beforeCamera then
 			beforeCamera(dt)
 		end
+		env.stepped:Fire(0, dt)
 		env.heartbeat:Fire(dt)
 	end
 

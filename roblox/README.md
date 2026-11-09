@@ -7,13 +7,15 @@ X-Ray Monolith Bodycam의 **Classic 바디캠 레이어**를 Roblox용 Luau로 �
 C++ 원본의 동작을 그대로 따르도록 포팅했고, 원본 C++ 코드를 직접 빌드해 만든
 골든 트레이스와 프레임 단위로 비교해 검증했습니다(아래 [검증](#검증) 참고).
 
-함께 들어 있는 패키지는 세 개입니다.
+함께 들어 있는 패키지는 다섯 개입니다.
 
 | 패키지 | 내용 |
 | --- | --- |
 | `Bodycam` | X-Ray Bodycam Classic 레이어의 Luau 포팅 (이 문서의 대부분) |
-| `FPSys` | 업로드된 FPSys 모델을 바디캠과 통합해 다시 짠 것: 카메라 효과, 룩 앵글 복제, 재질 발소리 ([FPSys](#fpsys-통합)) |
+| `FPSys` | 업로드된 FPSys 모델을 바디캠과 통합해 다시 짠 것: 카메라 효과, 기울이기, 재질 발소리 ([FPSys](#fpsys-통합)) |
 | `FPSController` | 이동 상태(질주·앉기·엎드리기·슬라이드)와 무기(연사 속도, 발사 모드, 탄창, 장전, 스코프, 반동) ([FPSController](#fpscontroller)) |
+| `Presentation` | 상업 사용 가능한 오픈소스를 포팅한 바디캠 연출: 생리적 무기 흔들림, 프리 에임, 손떨림, 벽 당김, 화면 효과 ([Presentation](#presentation-오픈소스-포팅)) |
+| `Realism` | Character-Realism(MPL-2.0) 포팅: 1인칭 몸 보이기, 복제되는 머리·상체 시선 ([Realism](#realism-character-realism-포팅)) |
 
 ## 무엇이 포팅되었나
 
@@ -59,10 +61,13 @@ roblox/
 │   │   ├── Core/                 엔진 독립 로직 (Roblox 타입 없음)
 │   │   ├── Reference/            Reference 라이브러리에서 가져온 카메라 부품 (Roblox 타입 없음)
 │   │   └── Roblox/               Roblox 어댑터 (Camera, Humanoid, Raycast 사용)
-│   ├── FPSys/                    ReplicatedStorage.FPSys: 카메라 효과, 룩 앵글, 발소리
+│   ├── FPSys/                    ReplicatedStorage.FPSys: 카메라 효과, 기울이기, 발소리
 │   ├── FPSController/            ReplicatedStorage.FPSController: 이동 상태, 무기, 반동
-│   ├── Client/FPSClient.client.luau       예제 LocalScript (세 패키지를 모두 연결)
+│   ├── Presentation/             ReplicatedStorage.Presentation: 흔들림, 프리 에임, 화면 효과
+│   ├── Realism/                  ReplicatedStorage.Realism: 1인칭 몸, 시선 복제 (MPL-2.0)
+│   ├── Client/FPSClient.client.luau       예제 LocalScript (모든 패키지를 연결)
 │   └── Server/FPSServer.server.luau       태그 지정과 룩 앵글 중계
+├── THIRD-PARTY-NOTICES.md        포팅한 오픈소스의 라이선스 전문
 ├── tests/                        Roblox 밖에서 도는 테스트, 골든 트레이스
 └── tools/
     ├── golden/                   C++ 원본으로 골든 트레이스를 만드는 하네스
@@ -86,7 +91,7 @@ rojo serve roblox/default.project.json
 ```
 
 3. Roblox Studio의 Rojo 플러그인에서 Connect를 누릅니다.
-   `ReplicatedStorage`에 `Bodycam`, `FPSys`, `FPSController`가, `ServerScriptService`에
+   `ReplicatedStorage`에 `Bodycam`, `FPSys`, `FPSController`, `Presentation`, `Realism`이, `ServerScriptService`에
    `FPSServer`가, `StarterPlayerScripts`에 `FPSClient`가 생깁니다.
 4. 업로드한 원본 FPSys 모델은 넣지 마세요. 이 프로젝트의 `FPSys`가 그것을 대신하고,
    둘을 같이 넣으면 카메라와 RemoteEvent가 두 번 처리됩니다.
@@ -96,7 +101,7 @@ rojo serve roblox/default.project.json
 1. `ReplicatedStorage`에 ModuleScript `Bodycam`을 만들고 `src/Bodycam/init.luau` 내용을 붙여 넣습니다.
 2. 그 아래에 Folder `Core`, `Reference`, `Roblox`를 만듭니다.
 3. 각 폴더에 같은 이름의 ModuleScript를 만들고 해당 `.luau` 파일 내용을 붙여 넣습니다(확장자 제외한 이름).
-4. `FPSys`와 `FPSController`도 같은 방법으로 만듭니다(`init.luau`가 패키지 ModuleScript, 나머지는 그 자식).
+4. `FPSys`, `FPSController`, `Presentation`, `Realism`도 같은 방법으로 만듭니다(`init.luau`가 패키지 ModuleScript, 나머지는 그 자식, 하위 폴더는 Folder).
 5. `ServerScriptService`에 Script를 만들고 `src/Server/FPSServer.server.luau` 내용을 붙여 넣습니다.
 6. `StarterPlayerScripts`에 LocalScript를 만들고 `src/Client/FPSClient.client.luau` 내용을 붙여 넣습니다.
 
@@ -182,8 +187,9 @@ Roblox 기본 카메라 스크립트는 다음 프레임을 만들 때 `Camera.C
 
 | 컴포넌트 | 하는 일 | 바디캠과의 연결 |
 | --- | --- | --- |
-| `CameraEffects` | 걷기 흔들림, 숨쉬기, 좌우 이동 기울기, 마우스 룩 스웨이, 착지 충격, 모션 블러, **기울이기(새)**, **사격 카메라 흔들림(새)** | `BodycamController:addViewModifier`로 바디캠 시야 위에 얹힘 |
-| `LookAngles` | 다른 플레이어가 보는 방향으로 머리·상체·팔 Motor6D를 돌림, RemoteEvent로 복제 | 1인칭 판정에 바디캠 에임 사용 |
+| `CameraEffects` | 걷기 흔들림, 숨쉬기, 좌우 이동 기울기, 마우스 룩 스웨이, 착지 충격, 모션 블러, **사격 카메라 흔들림(새)** | `BodycamController:addViewModifier`로 바디캠 시야 위에 얹힘 |
+| `CameraEffects` 기울이기 (새) | 롤 + 벽 앞에서 멈추는 옆 이동 | `addBodyModifier`: 시야와 총이 함께 기울어짐 |
+| 시선 회전 | `Realism` 패키지가 담당 ([Realism](#realism-character-realism-포팅)) | 1인칭 판정에 바디캠 에임 사용 |
 | `Footsteps` | 바닥 재질별 발소리 | 로컬 캐릭터는 바디캠 보폭의 발 접지 시점에 소리를 냄 |
 | `FPSServer` | Humanoid에 `RealismHook` 태그, 룩 앵글 중계 | — |
 
@@ -194,7 +200,8 @@ Roblox 기본 카메라 스크립트는 다음 프레임을 만들 때 `Camera.C
 ### 원본 FPSys에서 고친 문제
 
 - **룩 앵글이 전혀 동작하지 않았습니다.** 매 프레임 Motor6D를 돌리는 부분이
-  `-- Process rotator updates...` 주석만 있는 빈 루프였습니다. 이제 실제로 모터를 돌립니다.
+  `-- Process rotator updates...` 주석만 있는 빈 루프였습니다. 원본 Character-Realism을
+  다시 포팅해 대체했습니다([Realism](#realism-character-realism-포팅)).
 - **복제 인자 순서가 틀렸습니다.** 서버는 `(player, pitch, yaw)`를 보내는데 클라이언트는
   `(pitch, yaw)`로 받아 플레이어 객체를 각도로 썼고, 모든 업데이트를 자기 캐릭터에 적용했습니다.
   이제 보낸 플레이어의 캐릭터에 적용합니다.
@@ -205,9 +212,71 @@ Roblox 기본 카메라 스크립트는 다음 프레임을 만들 때 `Camera.C
 - 리스폰하면 착지 감지(`StateChanged`)가 끊겼습니다.
 - 발소리가 상태가 바뀔 때마다 `while` 루프를 새로 띄워 루프가 쌓였고, 멈춰 있을 때 0으로 나눴습니다.
 - 없는 함수 `GetBaseSubjectPosition`을 부르는 코드가 있었습니다(호출되지 않아 드러나지 않았음). 제거했습니다.
-- 서버가 이벤트를 제한 없이 모두에게 중계했습니다. 플레이어당 0.1초 간격 제한과 무한대 값 거부를 넣었습니다.
+- 서버가 이벤트를 제한 없이 모두에게 중계했습니다. 플레이어당 0.04초 간격 제한과 무한대 값 거부를 넣었습니다.
 
+FPSys는 [Character-Realism](https://github.com/MaximumADHD/Character-Realism)(MPL-2.0)에서 파생된 모델입니다.
+설정값, 서버 스크립트, `RealismHook` 태그가 원본과 같습니다. 그래서 그 파생 파일
+(`FPSys/Config.luau`, `FPSys/Footsteps.luau`, `Server/FPSServer.server.luau`)에 MPL-2.0 헤더를 달았습니다.
 `Spring`과 `Maid`는 Quenty의 Nevermore Engine 모듈(MIT 라이선스)이라 헤더에 출처만 달고 그대로 두었습니다.
+
+## Presentation (오픈소스 포팅)
+
+조사에서 고른, **상업적으로 쓸 수 있는 라이선스**의 오픈소스를 포팅했습니다.
+비상업 라이선스(CC BY-NC 계열, Shadertoy 기본 라이선스 등)와 라이선스가 없는 코드는 제외했습니다.
+라이선스 전문은 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)에 있습니다.
+
+| 기능 | 원본 | 라이선스 | Luau | 포팅 방식 |
+| --- | --- | --- | --- | --- |
+| 생리적 무기 흔들림: 호흡(들숨·날숨·멈춤 파형), 심장박동(수축기 + 중복맥), 8~12Hz 손떨림, 자세 드리프트, 관성 진동, 숨 참기와 반동, 스트레스(피격·근접 탄·폭발) | [savannt/SPT-SWAY](https://github.com/savannt/SPT-SWAY) `SwaySources.cs`, `Stress.cs`, `SwayDirector.cs`, `Util/*` | MIT | `Presentation/Sway/` | 1:1. 기본값은 원본 `SwayConfig.cs` 값. EFT 스프링 연동과 인게임 보정은 Roblox에 해당하는 것이 없어 제외 |
+| 프리 에임 데드존: 총이 시야보다 먼저 돌고 최대 5°에서 멈춤, 조준 시 중앙 복귀 | [lualeet/sptarkov-deadzone](https://github.com/lualeet/sptarkov-deadzone) `DeadzonePatch.cs` | Unlicense | `Presentation/Deadzone.luau` | 1:1 (Unity 쿼터니언 규칙 포함, `UnityQuaternion.luau`) |
+| 손으로 든 카메라 흔들림 | [pmndrs/drei](https://github.com/pmndrs/drei) `CameraShake.tsx` + [three-stdlib](https://github.com/pmndrs/three-stdlib) `SimplexNoise` | MIT | `Presentation/HandheldShake.luau` | 1:1. 바디캠용 작은 값 프리셋 추가 |
+| 필름 그레인, 비네팅 | [three.js](https://github.com/mrdoob/three.js) `rand`, `FilmShader`, `VignetteShader` | MIT | `Presentation/ScreenEffects/ShaderMath.luau` | 수식 1:1, 이미지로 구워 오버레이 |
+| 스캔라인, 렌즈 왜곡 수식, 눈 적응(자동 노출) | [pmndrs/postprocessing](https://github.com/pmndrs/postprocessing) `scanlines.frag`, `vignette.frag`, `lens-distortion.frag`, `adaptive-luminance.frag` | Zlib | 같은 파일 | 수식 1:1 |
+| 벽에 닿으면 총 당기기 | 상업용 원본 없음 | — | `Presentation/WallPullback.luau` | 직접 작성 (Spherecast + 임계 감쇠 스프링) |
+| 바디캠 HUD, 색보정, 유리 렌즈(실험), 환경 밝기 측정 | 상업용 원본 없음 | — | `Presentation/ScreenEffects/init.luau` | 직접 작성 |
+
+`WeaponPresenter`가 이것들을 바디캠에 연결합니다.
+
+- 흔들림의 무기 몫과 데드존은 **뷰모델과 사격 방향** 둘 다를 돌립니다. 총알은 화면 중앙이 아니라 총구 방향으로 나갑니다.
+- 흔들림의 카메라 몫(원본 기본 10%)과 손떨림은 시야만 움직입니다.
+- 총구가 벽에 막히면 총을 뒤로 빼고 들어 올리며, 85% 이상 막히면 사격이 막힙니다.
+- 질주하면 지치고(exertion), 쉬면 회복합니다. 심박·호흡이 따라서 변합니다. 원본은 EFT 스태미나를 읽으므로 이 지침 모델은 직접 작성했습니다.
+
+```lua
+local Presentation = require(game.ReplicatedStorage.Presentation)
+local presenter = Presentation.weaponPresenter().new({ controller = controller })
+presenter:start()
+presenter:onDamaged(0.2)      -- 피격: 심박·호흡·손떨림이 올라감
+presenter:onNearMiss(3)       -- 3 스터드 옆으로 탄이 지나감
+local screen = Presentation.screenEffects().new({ getViewCFrame = function() return controller:getViewCFrame() end })
+screen:start()
+```
+
+### 화면 효과가 원본 셰이더와 다른 점
+
+Roblox에는 커스텀 후처리 셰이더가 없고, 스크립트가 렌더링된 화면을 읽을 수도 없습니다.
+
+- **비네팅:** three.js의 Eskil 비네팅은 `mix(장면, 회색, k)`라서 알파 오버레이와 수학적으로 같습니다. 이미지로 구워 정확히 재현합니다.
+- **그레인:** 원본은 장면 색에 비례해 밝게 만듭니다(`base * noise`). 오버레이는 장면 색을 모르므로, 같은 노이즈 패턴을 옅은 알파 오버레이로 씌웁니다. 타일 6장을 24fps로 돌립니다.
+- **스캔라인:** 원본은 OVERLAY 블렌드입니다. ImageLabel은 블렌드 모드가 없어 어두운 줄무늬 알파로 근사합니다(기본 꺼짐).
+- **자동 노출:** 장면 밝기를 읽을 수 없어, 레이캐스트로 하늘이 보이는 정도와 햇빛 여부를 측정해 밝기로 씁니다. 그 값에 Pattanaik 적응(pmndrs)을 적용해 `ExposureCompensation`을 움직이고, 바디캠 같은 작은 노출 흔들림을 더합니다.
+- **렌즈 왜곡:** 불가능합니다. 대신 카메라 앞에 Glass 재질 구를 두는 실험 기능이 있습니다(기본 꺼짐). 그래픽 품질 8 이상에서만 보이고, 반투명 물체·파티클·데칼이 그 뒤로 안 보이는 한계가 있어 Studio에서 값을 조정해야 합니다.
+- EditableImage를 만들 수 없는 환경에서는 그 효과만 꺼지고 나머지는 동작합니다.
+- **HUD:** 가상의 기기 이름("BODYCAM BC-0451")을 씁니다. 실제 바디캠 제조사의 이름·로고·레이아웃을 흉내 내지 마세요(상표 문제).
+
+## Realism (Character-Realism 포팅)
+
+[MaximumADHD/Character-Realism](https://github.com/MaximumADHD/Character-Realism)(MPL-2.0)을 포팅했습니다.
+
+- **1인칭 몸 보이기:** PlayerModule의 BaseCamera·TransparencyController 함수를 바꿔 끼워, 머리와 모자만 숨기고 몸은 보이게 합니다.
+- **시선 회전:** 머리·상체·팔이 보는 방향으로 돌고 RemoteEvent로 복제됩니다. Animator가 쓴 뒤 `Stepped`에서 `Transform`에 곱하므로, **Avatar Joint Upgrade(AnimationConstraint, `C0` 읽기 전용) 리그에서도 동작합니다.** 이전 FPSys 포팅은 `C0`를 써서 이 리그에서 깨졌습니다.
+- **원본에서 고친 것:**
+  - 도구를 든 팔 규칙이 모든 캐릭터에 로컬 플레이어의 각도를 썼습니다. 이제 각 캐릭터의 각도를 씁니다.
+  - "변경 여부" 검사가 캐릭터의 모든 모터에 값 하나를 공유해서, 애니메이션이 재생 중이면 회전이 튀었습니다.
+- **바디캠 통합:**
+  - 1인칭 판정과 시선 계산은 시야가 아니라 바디캠 에임을 씁니다.
+  - 원본의 "카메라를 머리에 붙이는" 마지막 렌더 단계는 바디캠 시야 오프셋을 지워서 기본으로 꺼 두었습니다(`FirstPerson.snapCameraToHead`).
+- **MPL-2.0 의무:** 이 폴더의 파일(과 FPSys의 파생 파일)은 수정해도 MPL로 남고 소스를 공개해야 합니다. 게임의 나머지 코드에는 적용되지 않습니다. 원작자는 **게임 설명이나 크레딧에 CloneTrooper1019를 표기**해 달라고 요청합니다.
 
 ## FPSController
 
@@ -250,6 +319,7 @@ Roblox 기본 카메라 스크립트는 다음 프레임을 만들 때 `Camera.C
 | T | 다음 스코프 (조준 중) |
 | 1, 2 | 무기 선택 |
 | Q, E | 왼쪽·오른쪽 기울이기 |
+| Left Alt | 숨 참기 (조준 중 흔들림 감소, 놓으면 반동) |
 
 ### 무기 정의
 
@@ -299,13 +369,25 @@ FPSys와 FPSController는 다음으로 확인합니다.
 
 - `tests/fpscontroller.spec.luau`: 보행 속도 전환, 질주 조건, 앉기·일어서기 공간, 슬라이드, 엎드리기 잠금,
   점프·착지 이벤트, 600 RPM 자동 사격 발수, 단발·점사, 탄창·장전, 스코프 FOV, 반동 상승과 복귀 비율.
-- `tests/fpsys.spec.luau`: 룩 앵글 계산과 모터 회전, 보낸 플레이어 캐릭터에 적용되는지, 재질 발소리,
-  숨쉬기·착지 충격·겹침 규칙, 기울이기 벽 정지, 사격 흔들림.
+- `tests/fpsys.spec.luau`:
+  - Realism 시선 계산과 관절 회전.
+  - Motor6D와 AnimationConstraint(읽기 전용 `C0`) 리그 모두에서 `Transform`으로 도는지, 보낸 플레이어의 캐릭터에 적용되는지.
+  - 1인칭 몸 보이기 규칙과 PlayerModule 함수 교체.
+  - 재질 발소리, 숨쉬기·착지 충격·겹침 규칙, 기울이기 벽 정지, 사격 흔들림.
+- `tests/presentation.spec.luau`:
+  - SwayNoise 해시가 C# 부호 없는 32비트 연산과 일치하는지(C 골든, `tools/golden/sway_noise.c`).
+  - 흔들림이 평균 0인지(에임이 흘러가지 않음), 피로·스트레스에 따른 심박, 숨 참기와 반동, 관성 지연과 안정.
+  - Unity Euler/eulerAngles 규칙, 데드존 누적·최대각·조준 복귀.
+  - simplex 노이즈 범위·연속성·시드 재현, 손떨림 세기.
+- `tests/screen.spec.luau`: three.js `rand`·필름 그레인·Eskil 비네팅, pmndrs 렌즈 왜곡·Pattanaik 적응을 원본 식과 대조합니다. 목 클라이언트에서 오버레이 이미지 픽셀, 어두운 곳 노출 상승, HUD, 정리 후 노출 복원도 확인합니다.
 - `tests/integration.spec.luau`: 세 패키지를 함께 띄운 목 클라이언트에서 걷기 발소리, 조준 FOV·감도,
   자동 사격 반동이 에임을 실제로 올리고 복귀하는지, 질주 중 사격·조준 금지와 해제 후 조준 재개,
   기울이기 사격 위치, 앉기 카메라 높이, 무기 교체 시간, 정리 후 남는 연결이 없는지.
+  또 돌고 난 뒤 총알이 화면 중앙이 아니라 총구 방향으로 나가는지, 뷰모델이 그 방향을 가리키는지,
+  정지 상태에서도 호흡·맥박으로 총이 움직이는지, 벽에 막히면 사격이 막히는지 확인합니다.
 
-현재 전체 46개 테스트가 통과합니다.
+현재 전체 67개 테스트가 통과합니다. simplex 노이즈는 원본 TypeScript를 직접 실행해 대조하지
+못했습니다(외부 코드 실행이 이 세션에서 허용되지 않음). 대신 성질 테스트로 확인했습니다.
 
 ### 테스트 실행
 
@@ -340,6 +422,8 @@ python3 roblox/tools/gen_footstep_data.py
 - **Roblox Studio에서 실행해 보지 않았습니다.** 모든 파일이 Luau 컴파일러를 통과하고,
   어댑터는 목 서비스로 테스트했지만, 실제 Studio 카메라 스크립트와의 상호작용과 체감 튜닝은
   Studio에서 확인해야 합니다. `luau-analyze` 타입 검사도 돌리지 않았습니다.
+- 뷰모델은 원본처럼 에임 기준 HUD 카메라(발걸음 오프셋과 머리 롤만 공유)에 붙습니다. 그래서 총이 먼저 가고 화면이 뒤따릅니다.
+  기울이기와 자세 낮추기는 `addBodyModifier`로 시야와 총에 함께 적용됩니다.
 - 뷰모델 배치는 원본 HUD 솔버의 근사입니다. 팔 IK 회전은 그립 피벗(`gripPivot`, 기본
   오른쪽 0, 위 -0.12, 앞 0.35 m) 기준으로 뷰모델 전체를 돌립니다. 손·팔 본을 따로 움직이려면
   `controller.core:getArmPose()`를 읽어 직접 Motor6D에 적용하세요.
@@ -356,8 +440,10 @@ python3 roblox/tools/gen_footstep_data.py
 ([docs/PROVENANCE.md](../docs/PROVENANCE.md) 참고). Robux 수익이 나는 경험(게임 패스,
 개발자 상품, 프리미엄 페이아웃 등)에 넣기 전에 라이선스 적용 범위를 직접 확인하세요.
 
-- `FPSys`: 업로드한 모델을 바탕으로 했습니다. 모델 자체의 사용 권리는 직접 확인하세요.
-  그 안의 `Spring`, `Maid`는 Nevermore Engine(MIT)입니다.
+- `FPSys`: 업로드한 모델은 Character-Realism(MPL-2.0)에서 파생되었습니다. 파생 파일은 MPL-2.0이고,
+  CloneTrooper1019 크레딧이 필요합니다. 그 안의 `Spring`, `Maid`는 Nevermore Engine(MIT)입니다.
+- `Presentation`, `Realism`: MIT, Zlib, Unlicense, MPL-2.0 코드의 포팅입니다. 모두 상업적 사용이 허용되며,
+  배포할 때 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)의 고지를 함께 두어야 합니다.
 - `FPSController`: 이 프로젝트에서 새로 작성했습니다. Kinemation 코드는 쓰지 않았습니다.
   Kinemation의 실제 애니메이션 시스템이 필요하면 유니티 에셋 스토어 라이선스가 필요하고,
   그 C# 코드를 Roblox용으로 옮겨 배포하려면 Kinemation의 허락이 따로 필요합니다.

@@ -3,7 +3,8 @@
 -- Components (each can be switched off in Config.Enabled):
 --   CameraEffects  walk bob, breathing, strafe tilt, look sway, landing kick, motion
 --                  blur, lean, shot shake; a view layer on the BodycamController
---   LookAngles     replicated head/torso/arm look for every tagged character
+--   Realism        replicated head/torso/arm look for every tagged character and the
+--                  body in first person (port of Character-Realism, MPL-2.0)
 --   Footsteps      material footstep sounds; stride-synced for the local character
 --
 -- Usage (LocalScript):
@@ -15,12 +16,11 @@
 local CollectionService = game:GetService("CollectionService")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local RunService = game:GetService("RunService")
 
 local Config = require(script.Config)
 local Maid = require(script.Maid)
 local CameraEffects = require(script.CameraEffects)
-local LookAngles = require(script.LookAngles)
+local Realism = require(script.Parent.Realism)
 local Footsteps = require(script.Footsteps)
 
 local FPSys = {}
@@ -29,7 +29,7 @@ FPSys.Config = Config
 FPSys.Spring = require(script.Spring)
 FPSys.Maid = Maid
 FPSys.CameraEffects = CameraEffects
-FPSys.LookAngles = LookAngles
+FPSys.Realism = Realism
 FPSys.Footsteps = Footsteps
 
 -- options:
@@ -37,6 +37,7 @@ FPSys.Footsteps = Footsteps
 --   config      FPSys Config (default FPSys.Config)
 --   getLean     function(): number  -1..1
 --   remote      RemoteEvent for look angles (default: waits for ReplicatedStorage[Config.RemoteName])
+--   showBody    false to keep Roblox's default first-person transparency (default: body visible)
 function FPSys.new(options)
 	options = options or {}
 	local self = setmetatable({}, FPSys)
@@ -53,9 +54,6 @@ function FPSys:_mount(humanoid: Instance)
 		return
 	end
 	local enabled = self.config.Enabled
-	if enabled.LookAngles and self.lookAngles then
-		self.lookAngles:mount(humanoid)
-	end
 	if enabled.Footsteps and self.footsteps then
 		local isLocal = Players:GetPlayerFromCharacter(humanoid.Parent) == Players.LocalPlayer
 		task.spawn(function()
@@ -76,6 +74,9 @@ function FPSys:start()
 			bodycamConfig = controller.config,
 			getLean = self.options.getLean,
 		})
+		self.maid:GiveTask(controller:addBodyModifier(function(info)
+			return self.cameraEffects:bodyOffset(info)
+		end))
 		self.maid:GiveTask(controller:addViewModifier(function(view, info)
 			return self.cameraEffects:apply(view, info)
 		end))
@@ -85,24 +86,16 @@ function FPSys:start()
 	end
 
 	if config.Enabled.LookAngles then
-		local remote = self.options.remote or ReplicatedStorage:WaitForChild(config.RemoteName, 10)
-		self.lookAngles = LookAngles.new({
-			config = config,
-			remote = remote,
+		self.realism = Realism.new({
+			remote = self.options.remote or ReplicatedStorage:WaitForChild(config.RemoteName, 10),
 			getAimCFrame = if controller then function()
 				return controller:getAimCFrame()
 			end else nil,
+			firstPerson = self.options.showBody ~= false,
 		})
-		if remote then
-			self.maid:GiveTask(remote.OnClientEvent:Connect(function(player, turn, tilt)
-				self.lookAngles:receive(player, turn, tilt)
-			end))
-		end
-		self.maid:GiveTask(RunService.Heartbeat:Connect(function(dt)
-			self.lookAngles:update(dt)
-		end))
+		self.realism:Start()
 		self.maid:GiveTask(function()
-			self.lookAngles:destroy()
+			self.realism:Stop()
 		end)
 	end
 
@@ -127,7 +120,7 @@ function FPSys:stop()
 	end
 	self.started = false
 	self.maid:DoCleaning()
-	self.cameraEffects, self.lookAngles, self.footsteps = nil, nil, nil
+	self.cameraEffects, self.realism, self.footsteps = nil, nil, nil
 end
 
 -- Per-shot camera shake (scale 1 = the Config.Shake ranges).

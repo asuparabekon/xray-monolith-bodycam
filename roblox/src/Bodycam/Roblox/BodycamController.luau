@@ -56,7 +56,11 @@ local nextId = 0
 --
 -- Integration hooks (used by FPSys and FPSController):
 --   controller:kickAim(yaw, pitch)      turn the aim without the mouse (recoil, scripts)
+--   controller:addBodyModifier(fn)      fn(info) -> CFrame?, a camera-local offset applied to
+--                                       the view and the weapon alike (crouch drop, lean)
 --   controller:addViewModifier(fn)      fn(view: CFrame, info) -> CFrame, after the bodycam view
+--   controller:addViewmodelModifier(fn) fn(local: CFrame, info) -> CFrame, the viewmodel
+--                                       relative to the view, after the bodycam HUD offset
 --   controller:onFootstep(fn)           fn(side: "Left" | "Right", info) on each foot contact
 --   controller.frameInfo                what the last frame read (speeds, flags, ads, ...)
 function BodycamController.new(options)
@@ -79,6 +83,8 @@ function BodycamController.new(options)
 	self.started = false
 	self.pendingKick = { yaw = 0, pitch = 0 }
 	self.viewModifiers = {}
+	self.bodyModifiers = {}
+	self.viewmodelModifiers = {}
 	self.footstepListeners = {}
 	self.lastFootPhase = nil
 	self.frameInfo = nil
@@ -148,6 +154,36 @@ function BodycamController:addViewModifier(fn)
 		local index = table.find(self.viewModifiers, fn)
 		if index then
 			table.remove(self.viewModifiers, index)
+		end
+	end
+end
+
+-- Adds a body layer: fn(info) -> CFrame? (camera-local offset) applied to the view and
+-- the HUD camera alike, so the weapon moves with the body. Returns a remover.
+function BodycamController:addBodyModifier(fn)
+	table.insert(self.bodyModifiers, fn)
+	return function()
+		local index = table.find(self.bodyModifiers, fn)
+		if index then
+			table.remove(self.bodyModifiers, index)
+		end
+	end
+end
+
+-- The HUD camera of the last frame: the aim with the footstep offset, head roll and
+-- body layers. The viewmodel hangs from it.
+function BodycamController:getHudCFrame(): CFrame?
+	return self.hudCFrame
+end
+
+-- Adds a viewmodel layer: fn(localCFrame, info) -> CFrame, where localCFrame places the
+-- viewmodel relative to the view. Returns a function that removes the layer.
+function BodycamController:addViewmodelModifier(fn)
+	table.insert(self.viewmodelModifiers, fn)
+	return function()
+		local index = table.find(self.viewmodelModifiers, fn)
+		if index then
+			table.remove(self.viewmodelModifiers, index)
 		end
 	end
 end
@@ -450,6 +486,25 @@ function BodycamController:_step(dt: number)
 	if composition.composes then
 		view = CoordinateSpace.composeView(aim, yaw, pitch, composition, spm)
 	end
+	-- The HUD camera (ClassicCameraRig::HudShare): built from the aim, not the lagged
+	-- view, sharing only the footstep offset and the head roll. The weapon therefore
+	-- stays on the aim while the view trails it.
+	local hudCamera = aim
+	local footstep, roll = self.core.rig:hudShare(self.frameCount)
+	if composition.composes and footstep then
+		local right, forward = CoordinateSpace.yawFrame(yaw)
+		local offset = (right * footstep.x + Vector3.yAxis * footstep.y + forward * footstep.z) * spm
+		hudCamera = (aim + offset) * CoordinateSpace.deltaToCFrame(roll)
+	end
+	-- Body layers (crouch drop, lean) move the view and the weapon together.
+	for _, modifier in self.bodyModifiers do
+		local offset = modifier(info)
+		if offset then
+			view = view * offset
+			hudCamera = hudCamera * offset
+		end
+	end
+	-- View layers (camera effects, shake) move the view only.
 	for _, modifier in self.viewModifiers do
 		view = modifier(view, info) or view
 	end
@@ -457,12 +512,13 @@ function BodycamController:_step(dt: number)
 		camera.CFrame = view
 	end
 	self.viewCFrame = view
-	self:_placeViewmodel(view)
+	self.hudCFrame = hudCamera
+	self:_placeViewmodel(hudCamera)
 end
 
--- The viewmodel follows the HUD camera: the composed view, plus the bodycam HUD
--- offset (fire impulse, lowering, weapon profile) and the STALKER 2 arm pose turned
--- about the grip. This approximates the engine's HUD arm solver, which is not ported.
+-- The viewmodel follows the HUD camera, plus the bodycam HUD offset (fire impulse,
+-- lowering, weapon profile) and the STALKER 2 arm pose turned about the grip. The arm
+-- pose approximates the engine's HUD arm solver, which is not ported.
 function BodycamController:_placeViewmodel(view: CFrame)
 	local model = self.options.viewmodel
 	if not model or not model.PrimaryPart then
@@ -484,7 +540,11 @@ function BodycamController:_placeViewmodel(view: CFrame)
 		local turn = CoordinateSpace.hpb(w.x + a.x, w.y + a.y, w.z + a.z)
 		hud = hud * CFrame.new(pivot) * turn * CFrame.new(-pivot)
 	end
-	model:PivotTo(view * hud * offset)
+	local placement = hud * offset
+	for _, modifier in self.viewmodelModifiers do
+		placement = modifier(placement, self.frameInfo) or placement
+	end
+	model:PivotTo(view * placement)
 end
 
 return BodycamController

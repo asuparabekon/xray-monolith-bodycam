@@ -1,3 +1,10 @@
+-- This Source Code Form is subject to the terms of the Mozilla Public License, v. 2.0.
+-- If a copy of the MPL was not distributed with this file, You can obtain one at
+-- https://mozilla.org/MPL/2.0/. (A copy is in roblox/src/Realism/LICENSE.)
+--
+-- Derived from Character-Realism by CloneTrooper1019 (MaximumADHD),
+-- https://github.com/MaximumADHD/Character-Realism, by way of the FPSys model.
+--
 -- FPSys material footsteps.
 --
 -- Other characters: the default "Running" sound gets the floor material's sound, and

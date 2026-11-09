@@ -2,7 +2,8 @@
 --
 -- From the FPSys model: walk bob, idle breathing, strafe tilt, mouse look sway,
 -- landing kick and mouse-drift motion blur, with the model's spring settings.
--- New: lean (roll plus a wall-checked sideways shift) and a per-shot camera shake.
+-- New: lean (roll plus a wall-checked sideways shift, a body layer so the weapon leans
+-- too) and a per-shot camera shake.
 --
 -- Changes from the model:
 --  * The effects are a BodycamController view modifier instead of writing
@@ -158,10 +159,43 @@ function CameraEffects:_clearance(origin: Vector3, direction: Vector3, maxDistan
 	return if hit then (hit.Position - origin).Magnitude else maxDistance
 end
 
--- The view modifier: BodycamController calls this with the bodycam view each frame.
+-- Advances the spring clock once per frame, whichever layer runs first.
+function CameraEffects:_advance(info)
+	if self.lastInfo ~= info then
+		self.lastInfo = info
+		self.time += info.dt
+	end
+end
+
+-- The body layer: the lean (roll plus a sideways shift stopped short of walls), applied
+-- to the view and the weapon alike.
+function CameraEffects:bodyOffset(info): CFrame?
+	self:_advance(info)
+	local s = self.springs
+	local leanCfg = self.config.Lean
+	local leanInput = if self:enabled("Lean") and self.options.getLean then self.options.getLean() else 0
+	s.Lean.t = math.clamp(leanInput, -1, 1)
+	local lean = s.Lean.p
+	local shift = lean * leanCfg.Offset
+	if math.abs(shift) > 1e-3 then
+		local aim = info.aim
+		local side = aim.RightVector * (if shift > 0 then 1 else -1)
+		local free = self:_clearance(aim.Position, side, math.abs(shift) + leanCfg.WallClearance, info)
+		local allowed = math.max(free - leanCfg.WallClearance, 0)
+		shift = math.clamp(shift, -allowed, allowed)
+	end
+	self.leanOffset = shift
+	self.leanRoll = -math.rad(lean * leanCfg.Angle)
+	if math.abs(shift) < 1e-4 and math.abs(self.leanRoll) < 1e-5 then
+		return nil
+	end
+	return CFrame.new(shift, 0, 0) * CFrame.Angles(0, 0, self.leanRoll)
+end
+
+-- The view layer: BodycamController calls this with the bodycam view each frame.
 function CameraEffects:apply(view: CFrame, info): CFrame
 	local dt = info.dt
-	self.time += dt
+	self:_advance(info)
 	local cam = self.config.Camera
 	local s = self.springs
 	local humanoid, root = info.humanoid, info.rootPart
@@ -225,28 +259,13 @@ function CameraEffects:apply(view: CFrame, info): CFrame
 	end
 	offset *= adsScale
 
-	-- Lean: roll and a sideways shift that stops before walls.
-	local leanCfg = self.config.Lean
-	local leanInput = if self:enabled("Lean") and self.options.getLean then self.options.getLean() else 0
-	s.Lean.t = math.clamp(leanInput, -1, 1)
-	local lean = s.Lean.p
-	local shift = lean * leanCfg.Offset
-	if math.abs(shift) > 1e-3 then
-		local side = view.RightVector * (if shift > 0 then 1 else -1)
-		local free = self:_clearance(view.Position, side, math.abs(shift) + leanCfg.WallClearance, info)
-		local allowed = math.max(free - leanCfg.WallClearance, 0)
-		shift = math.clamp(shift, -allowed, allowed)
-	end
-	self.leanOffset = shift
-	self.leanRoll = -math.rad(lean * leanCfg.Angle)
-
 	local look = s.LookSway.p
 	local shakeP = if self:enabled("Shake") then s.Shake.p else Vector3.new(0, 0, 0)
 	local pitch = (math.rad(s.LandEffect.p) + math.rad(look.Y)) * adsScale + math.rad(shakeP.X)
 	local roll = (math.rad(s.Tilt.p * cam.TiltAngle) + math.rad(look.X)) * adsScale + math.rad(shakeP.Z)
 	local yaw = math.rad(shakeP.Y)
 
-	return view * CFrame.new(shift + offset.X, offset.Y, 0) * CFrame.Angles(pitch, yaw, roll + self.leanRoll)
+	return view * CFrame.new(offset.X, offset.Y, 0) * CFrame.Angles(pitch, yaw, roll)
 end
 
 return CameraEffects

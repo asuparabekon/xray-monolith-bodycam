@@ -98,6 +98,8 @@ end
 function CFrame.fromOrientation(rx, ry, rz)
 	return rotY(ry) * rotX(rx) * rotZ(rz)
 end
+CFrame.fromEulerAnglesYXZ = CFrame.fromOrientation
+
 function CFrame.Angles(rx, ry, rz)
 	return rotX(rx) * rotY(ry) * rotZ(rz)
 end

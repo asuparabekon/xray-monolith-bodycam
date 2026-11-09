@@ -16,4 +16,6 @@ c++ -std=c++17 -O2 -DBODYCAM_STANDALONE \
 	"$repo/src/xrGame/bodycam_viewmodel_profile.cpp" \
 	"$lib" -o "$build/golden"
 "$build/golden" "$repo/roblox/tests/golden"
+cc -O2 "$here/sway_noise.c" -lm -o "$build/sway_noise"
+"$build/sway_noise" "$repo/roblox/tests/golden/sway_noise.luau"
 echo "golden traces written to roblox/tests/golden"

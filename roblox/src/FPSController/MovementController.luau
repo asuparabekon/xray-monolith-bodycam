@@ -117,9 +117,10 @@ end
 function MovementController:start()
 	local controller = self.options.controller
 	if controller then
-		self.removeView = controller:addViewModifier(function(view)
+		-- The body lowers: the view and the weapon drop together.
+		self.removeView = controller:addBodyModifier(function()
 			local drop = self.machine.drop
-			return if drop > 1e-3 then view * CFrame.new(0, -drop, 0) else view
+			return if drop > 1e-3 then CFrame.new(0, -drop, 0) else nil
 		end)
 	end
 	-- After the ControlModule (Input) so the slide's Move wins; before the camera.

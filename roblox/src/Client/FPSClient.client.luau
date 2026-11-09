@@ -2,7 +2,8 @@
 --
 -- Keys: WASD move, Left Shift sprint, C crouch, Z prone, Left Ctrl slide (while
 -- sprinting), Space jump (stands up from crouch/prone), right mouse aim, left mouse
--- fire, R reload, V fire mode, T next scope (while aiming), 1/2 weapons, Q/E lean.
+-- fire, R reload, V fire mode, T next scope (while aiming), 1/2 weapons, Q/E lean,
+-- Left Alt hold breath (steadies the sway while aiming).
 -- Replace onFire with your game's hit detection (validate hits on the server).
 
 local Players = game:GetService("Players")
@@ -13,6 +14,7 @@ local Workspace = game:GetService("Workspace")
 local Bodycam = require(ReplicatedStorage:WaitForChild("Bodycam"))
 local FPSys = require(ReplicatedStorage:WaitForChild("FPSys"))
 local FPSController = require(ReplicatedStorage:WaitForChild("FPSController"))
+local Presentation = require(ReplicatedStorage:WaitForChild("Presentation"))
 
 local player = Players.LocalPlayer
 player.CameraMode = Enum.CameraMode.LockFirstPerson
@@ -42,6 +44,25 @@ local fpsys = FPSys.new({
 
 movement = FPSController.movement().new({ controller = controller })
 
+-- Breathing, pulse, tremor, drift and inertia on the weapon; free aim; wall pull-back.
+local holdingBreath = false
+local presenter = Presentation.weaponPresenter().new({
+	controller = controller,
+	getWeightKg = function()
+		return weapons:current().config.weightKg
+	end,
+	isHoldingBreath = function()
+		return holdingBreath
+	end,
+})
+
+-- Grain, vignette, eye adaptation, colour grade and the bodycam HUD.
+local screen = Presentation.screenEffects().new({
+	getViewCFrame = function()
+		return controller:getViewCFrame()
+	end,
+})
+
 local rifle = FPSController.Weapon.defaultConfig()
 rifle.scopes = {
 	{ name = "Red dot", zoom = 0.85, sensitivity = 0.85 },
@@ -58,6 +79,7 @@ pistol.power = 0.6
 pistol.shake = 0.6
 pistol.recoil.pitch = { 0.9, 1.3 }
 pistol.profile = { pos = { x = 0.02, y = -0.01, z = 0.03 }, rot = { x = 0, y = 1.5, z = 0 } }
+pistol.weightKg = 1.0
 
 local rayParams = RaycastParams.new()
 rayParams.FilterType = Enum.RaycastFilterType.Exclude
@@ -66,6 +88,7 @@ weapons = FPSController.weapons().new({
 	controller = controller,
 	fpsys = fpsys,
 	movement = movement,
+	presenter = presenter,
 	weapons = { rifle, pistol },
 	onFire = function(fireCFrame)
 		rayParams.FilterDescendantsInstances = { player.Character }
@@ -79,7 +102,25 @@ weapons = FPSController.weapons().new({
 controller:start()
 fpsys:start()
 movement:start()
+presenter:start()
 weapons:start()
+screen:start()
+
+-- Getting hurt frightens you: pulse, breathing and tremor rise (SPT-SWAY stress model).
+local function watchHealth(character)
+	local humanoid = character:WaitForChild("Humanoid")
+	local last = humanoid.Health
+	humanoid.HealthChanged:Connect(function(health)
+		if health < last and humanoid.MaxHealth > 0 then
+			presenter:onDamaged((last - health) / humanoid.MaxHealth)
+		end
+		last = health
+	end)
+end
+if player.Character then
+	task.spawn(watchHealth, player.Character)
+end
+player.CharacterAdded:Connect(watchHealth)
 
 local leanLeft, leanRight = false, false
 local function updateLean()
@@ -121,6 +162,8 @@ UserInputService.InputBegan:Connect(function(input, processed)
 	elseif key == Enum.KeyCode.E then
 		leanRight = true
 		updateLean()
+	elseif key == Enum.KeyCode.LeftAlt then
+		holdingBreath = true
 	end
 end)
 
@@ -138,5 +181,7 @@ UserInputService.InputEnded:Connect(function(input)
 	elseif key == Enum.KeyCode.E then
 		leanRight = false
 		updateLean()
+	elseif key == Enum.KeyCode.LeftAlt then
+		holdingBreath = false
 	end
 end)

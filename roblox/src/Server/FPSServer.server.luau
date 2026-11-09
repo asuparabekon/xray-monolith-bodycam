@@ -1,8 +1,15 @@
+-- This Source Code Form is subject to the terms of the Mozilla Public License, v. 2.0.
+-- If a copy of the MPL was not distributed with this file, You can obtain one at
+-- https://mozilla.org/MPL/2.0/. (A copy is in roblox/src/Realism/LICENSE.)
+--
+-- Derived from Character-Realism by CloneTrooper1019 (MaximumADHD),
+-- https://github.com/MaximumADHD/Character-Realism, by way of the FPSys model.
+--
 -- FPSys server: tags humanoids for the client components and relays look angles.
 --
--- From the FPSys model, with two changes: each player may send at most
--- MIN_SEND_INTERVAL apart (the model relayed every event to every client), and
--- non-finite numbers (inf as well as NaN) are rejected.
+-- From the FPSys model (Character-Realism's Realism.server.lua), with two changes: each
+-- player may send at most MIN_SEND_INTERVAL apart (the source relayed every event to
+-- every client), and non-finite numbers (inf as well as NaN) are rejected.
 
 local CollectionService = game:GetService("CollectionService")
 local Players = game:GetService("Players")
@@ -11,7 +18,8 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 -- Only the config: the rest of FPSys is client code.
 local Config = require(ReplicatedStorage:WaitForChild("FPSys"):WaitForChild("Config"))
 
-local MIN_SEND_INTERVAL = 0.1
+-- The Realism client sends at most every 0.05 s; anything faster is dropped.
+local MIN_SEND_INTERVAL = 0.04
 
 local remote = ReplicatedStorage:FindFirstChild(Config.RemoteName)
 if not remote then
