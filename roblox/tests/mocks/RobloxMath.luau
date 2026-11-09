@@ -35,6 +35,9 @@ V.__mul = function(a, b)
 	if type(a) == "number" then
 		a, b = b, a
 	end
+	if type(b) == "table" then
+		return Vector3.new(a.X * b.X, a.Y * b.Y, a.Z * b.Z)
+	end
 	return Vector3.new(a.X * b, a.Y * b, a.Z * b)
 end
 V.__div = function(a, b)
@@ -115,6 +118,10 @@ end
 
 function C.VectorToWorldSpace(cf, v)
 	return rotate(cf, v)
+end
+
+function C.VectorToObjectSpace(cf, v)
+	return Vector3.new(cf.r:Dot(v), cf.u:Dot(v), cf.b:Dot(v))
 end
 
 function C.Inverse(cf)

@@ -5,12 +5,23 @@
     "ReplicatedStorage": {
       "Bodycam": {
         "$path": "src/Bodycam"
+      },
+      "FPSys": {
+        "$path": "src/FPSys"
+      },
+      "FPSController": {
+        "$path": "src/FPSController"
+      }
+    },
+    "ServerScriptService": {
+      "FPSServer": {
+        "$path": "src/Server/FPSServer.server.luau"
       }
     },
     "StarterPlayer": {
       "StarterPlayerScripts": {
-        "BodycamClient": {
-          "$path": "src/Client/BodycamClient.client.luau"
+        "FPSClient": {
+          "$path": "src/Client/FPSClient.client.luau"
         }
       }
     }

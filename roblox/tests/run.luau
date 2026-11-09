@@ -83,23 +83,28 @@ Node.__tostring = function(node)
 	return nodeData[node].path
 end
 
-local cache = {}
-
-local function requireNode(node)
-	local d = nodeData[node]
-	if d == nil then
-		error("require expects a ModuleScript node", 2)
-	end
-	if cache[node] ~= nil then
+-- A require with its own module cache: specs that install different Roblox mocks
+-- load fresh copies of the modules that read services at load time.
+local function makeRequire()
+	local cache = {}
+	local function requireNode(node)
+		local d = nodeData[node]
+		if d == nil then
+			error("require expects a ModuleScript node", 2)
+		end
+		if cache[node] ~= nil then
+			return cache[node]
+		end
+		local file = if d.isDir then d.path .. "/init.luau" else d.path
+		local fn = __load(__fs_read(file), file)
+		local env = setmetatable({ script = node, require = requireNode }, { __index = _G })
+		setfenv(fn, env)
+		cache[node] = fn()
 		return cache[node]
 	end
-	local file = if d.isDir then d.path .. "/init.luau" else d.path
-	local fn = __load(__fs_read(file), file)
-	local env = setmetatable({ script = node, require = requireNode }, { __index = _G })
-	setfenv(fn, env)
-	cache[node] = fn()
-	return cache[node]
+	return requireNode
 end
+local requireNode = makeRequire()
 
 local function folder(path, name)
 	return makeNode(name, path, nil, false, true)
@@ -155,10 +160,12 @@ function T.truthy(value, message)
 end
 
 -- The source tree as instances, and the golden data folder.
-T.Bodycam = folder(rootDir .. "/src/Bodycam", "Bodycam")
+T.Src = folder(rootDir .. "/src", "src")
+T.Bodycam = T.Src.Bodycam
 T.Golden = folder(testsDir .. "/golden", "golden")
 T.Tests = folder(testsDir, "tests")
 T.require = requireNode
+T.isolatedRequire = makeRequire
 
 ---------------------------------------------------------------------------
 -- Run.

@@ -52,6 +52,13 @@ local nextId = 0
 --   footPhase         function(): number?  the game's own step phase (left 0, right .5);
 --                     default: a stride clock from the planar speed
 --   rayParams         RaycastParams for the footstep wall check (default: exclude character)
+--   isLeaning         function(): boolean   lean key held; feeds the head roll (default: never)
+--
+-- Integration hooks (used by FPSys and FPSController):
+--   controller:kickAim(yaw, pitch)      turn the aim without the mouse (recoil, scripts)
+--   controller:addViewModifier(fn)      fn(view: CFrame, info) -> CFrame, after the bodycam view
+--   controller:onFootstep(fn)           fn(side: "Left" | "Right", info) on each foot contact
+--   controller.frameInfo                what the last frame read (speeds, flags, ads, ...)
 function BodycamController.new(options)
 	options = options or {}
 	local self = setmetatable({}, BodycamController)
@@ -70,6 +77,11 @@ function BodycamController.new(options)
 	self.viewCFrame = nil
 	self.connections = {}
 	self.started = false
+	self.pendingKick = { yaw = 0, pitch = 0 }
+	self.viewModifiers = {}
+	self.footstepListeners = {}
+	self.lastFootPhase = nil
+	self.frameInfo = nil
 	return self
 end
 
@@ -117,6 +129,38 @@ end
 
 function BodycamController:getAimCFrame(): CFrame?
 	return self.aimCFrame
+end
+
+-- Turns the aim by these angles (radians; yaw positive turns left, pitch positive looks
+-- up) before the camera scripts run next frame. Like the engine's script camera deltas,
+-- the turn rebases the bodycam lag instead of counting as mouse movement, so recoil
+-- moves the view at once and does not throw the arms.
+function BodycamController:kickAim(yaw: number, pitch: number)
+	self.pendingKick.yaw += yaw
+	self.pendingKick.pitch += pitch
+end
+
+-- Adds a view layer applied after the bodycam composition every frame. Layers run in
+-- the order added. Returns a function that removes the layer.
+function BodycamController:addViewModifier(fn)
+	table.insert(self.viewModifiers, fn)
+	return function()
+		local index = table.find(self.viewModifiers, fn)
+		if index then
+			table.remove(self.viewModifiers, index)
+		end
+	end
+end
+
+-- Calls fn(side, info) when the stride reaches a foot contact. Returns a disconnect function.
+function BodycamController:onFootstep(fn)
+	table.insert(self.footstepListeners, fn)
+	return function()
+		local index = table.find(self.footstepListeners, fn)
+		if index then
+			table.remove(self.footstepListeners, index)
+		end
+	end
 end
 
 ---------------------------------------------------------------------------
@@ -168,10 +212,45 @@ end
 -- Frame.
 ---------------------------------------------------------------------------
 
+local PITCH_LIMIT = math.rad(89)
+
 function BodycamController:_restoreAim()
 	local camera = Workspace.CurrentCamera
-	if camera and self.aimCFrame then
-		camera.CFrame = self.aimCFrame
+	if not (camera and self.aimCFrame) then
+		self.pendingKick.yaw, self.pendingKick.pitch = 0, 0
+		return
+	end
+	local kick = self.pendingKick
+	if kick.yaw ~= 0 or kick.pitch ~= 0 then
+		local yaw, pitch = CoordinateSpace.aimFromLook(self.aimCFrame.LookVector)
+		local newPitch = math.clamp(pitch + kick.pitch, -PITCH_LIMIT, PITCH_LIMIT)
+		local turned = CFrame.new(self.aimCFrame.Position) * CoordinateSpace.aimRotation(yaw + kick.yaw, newPitch)
+		self.core:rebaseLookDelta(kick.yaw, newPitch - pitch)
+		self.aimCFrame = turned
+		-- The kick is not mouse movement: the next frame's mouse delta starts from here.
+		self.prevAim = turned
+		kick.yaw, kick.pitch = 0, 0
+	end
+	camera.CFrame = self.aimCFrame
+end
+
+function BodycamController:_emitFootsteps(phase: number?, info)
+	local previous = self.lastFootPhase
+	self.lastFootPhase = phase
+	if phase == nil or previous == nil or #self.footstepListeners == 0 then
+		return
+	end
+	local function crossed(contact: number): boolean
+		local delta = (phase - previous) % 1
+		local distance = (contact - previous) % 1
+		return delta > 0 and delta <= 0.5 and distance > 0 and distance <= delta
+	end
+	for _, side in { "Left", "Right" } do
+		if crossed(if side == "Left" then 0 else 0.5) then
+			for _, listener in self.footstepListeners do
+				task.spawn(listener, side, info)
+			end
+		end
 	end
 end
 
@@ -329,7 +408,7 @@ function BodycamController:_step(dt: number)
 	cam.ads.blend = ads.blend
 	cam.strafe = (if bit32.band(moveFlags, MoveFlags.Right) ~= 0 then 1 else 0)
 		- (if bit32.band(moveFlags, MoveFlags.Left) ~= 0 then 1 else 0)
-	cam.leaning = false
+	cam.leaning = call(options.isLeaning, false)
 	cam.sprinting = bit32.band(moveFlags, MoveFlags.Sprint) ~= 0
 	cam.velocity = CoordinateSpace.toEngineVector(velocity, spm)
 	cam.grounded = grounded
@@ -344,9 +423,37 @@ function BodycamController:_step(dt: number)
 	local host = { horizontalClearance = self:_horizontalClearance(aim.Position, yaw, character) }
 	local composition = self.core:update(frame, host)
 
+	local info = {
+		dt = dt,
+		aim = aim,
+		yaw = yaw,
+		pitch = pitch,
+		humanoid = humanoid,
+		rootPart = root,
+		character = character,
+		moveFlags = moveFlags,
+		grounded = grounded,
+		sprinting = cam.sprinting,
+		crouching = crouching,
+		planarSpeed = planar,
+		referenceSpeed = referenceSpeed,
+		footPhase = footPhase,
+		ads = ads.blend,
+		aiming = ads.active,
+		studsPerMetre = spm,
+		state = state,
+	}
+	self.frameInfo = info
+	self:_emitFootsteps(footPhase, info)
+
 	local view = aim
 	if composition.composes then
 		view = CoordinateSpace.composeView(aim, yaw, pitch, composition, spm)
+	end
+	for _, modifier in self.viewModifiers do
+		view = modifier(view, info) or view
+	end
+	if view ~= aim then
 		camera.CFrame = view
 	end
 	self.viewCFrame = view

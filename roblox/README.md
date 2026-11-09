@@ -7,6 +7,14 @@ X-Ray Monolith Bodycam의 **Classic 바디캠 레이어**를 Roblox용 Luau로 �
 C++ 원본의 동작을 그대로 따르도록 포팅했고, 원본 C++ 코드를 직접 빌드해 만든
 골든 트레이스와 프레임 단위로 비교해 검증했습니다(아래 [검증](#검증) 참고).
 
+함께 들어 있는 패키지는 세 개입니다.
+
+| 패키지 | 내용 |
+| --- | --- |
+| `Bodycam` | X-Ray Bodycam Classic 레이어의 Luau 포팅 (이 문서의 대부분) |
+| `FPSys` | 업로드된 FPSys 모델을 바디캠과 통합해 다시 짠 것: 카메라 효과, 룩 앵글 복제, 재질 발소리 ([FPSys](#fpsys-통합)) |
+| `FPSController` | 이동 상태(질주·앉기·엎드리기·슬라이드)와 무기(연사 속도, 발사 모드, 탄창, 장전, 스코프, 반동) ([FPSController](#fpscontroller)) |
+
 ## 무엇이 포팅되었나
 
 | 기능 (원본 설정 이름) | C++ 원본 | Luau |
@@ -51,12 +59,16 @@ roblox/
 │   │   ├── Core/                 엔진 독립 로직 (Roblox 타입 없음)
 │   │   ├── Reference/            Reference 라이브러리에서 가져온 카메라 부품 (Roblox 타입 없음)
 │   │   └── Roblox/               Roblox 어댑터 (Camera, Humanoid, Raycast 사용)
-│   └── Client/BodycamClient.client.luau   예제 LocalScript
+│   ├── FPSys/                    ReplicatedStorage.FPSys: 카메라 효과, 룩 앵글, 발소리
+│   ├── FPSController/            ReplicatedStorage.FPSController: 이동 상태, 무기, 반동
+│   ├── Client/FPSClient.client.luau       예제 LocalScript (세 패키지를 모두 연결)
+│   └── Server/FPSServer.server.luau       태그 지정과 룩 앵글 중계
 ├── tests/                        Roblox 밖에서 도는 테스트, 골든 트레이스
 └── tools/
     ├── golden/                   C++ 원본으로 골든 트레이스를 만드는 하네스
     ├── luau-runner/              테스트용 최소 Luau 실행기 (Rust + mlua)
-    └── gen_footstep_data.py      풋스텝 데이터 헤더 → Luau 변환기
+    ├── gen_footstep_data.py      풋스텝 데이터 헤더 → Luau 변환기
+    └── rbxm_dump.py              .rbxm 모델에서 스크립트 소스를 꺼내는 도구
 ```
 
 `Core/`와 `Reference/`는 Roblox API를 쓰지 않으므로 어떤 Luau VM에서도 돕니다.
@@ -74,14 +86,19 @@ rojo serve roblox/default.project.json
 ```
 
 3. Roblox Studio의 Rojo 플러그인에서 Connect를 누릅니다.
-   `ReplicatedStorage.Bodycam`과 `StarterPlayerScripts.BodycamClient`가 생깁니다.
+   `ReplicatedStorage`에 `Bodycam`, `FPSys`, `FPSController`가, `ServerScriptService`에
+   `FPSServer`가, `StarterPlayerScripts`에 `FPSClient`가 생깁니다.
+4. 업로드한 원본 FPSys 모델은 넣지 마세요. 이 프로젝트의 `FPSys`가 그것을 대신하고,
+   둘을 같이 넣으면 카메라와 RemoteEvent가 두 번 처리됩니다.
 
 ### 수동 복사
 
 1. `ReplicatedStorage`에 ModuleScript `Bodycam`을 만들고 `src/Bodycam/init.luau` 내용을 붙여 넣습니다.
 2. 그 아래에 Folder `Core`, `Reference`, `Roblox`를 만듭니다.
 3. 각 폴더에 같은 이름의 ModuleScript를 만들고 해당 `.luau` 파일 내용을 붙여 넣습니다(확장자 제외한 이름).
-4. `StarterPlayerScripts`에 LocalScript를 만들고 `src/Client/BodycamClient.client.luau` 내용을 붙여 넣습니다.
+4. `FPSys`와 `FPSController`도 같은 방법으로 만듭니다(`init.luau`가 패키지 ModuleScript, 나머지는 그 자식).
+5. `ServerScriptService`에 Script를 만들고 `src/Server/FPSServer.server.luau` 내용을 붙여 넣습니다.
+6. `StarterPlayerScripts`에 LocalScript를 만들고 `src/Client/FPSClient.client.luau` 내용을 붙여 넣습니다.
 
 ## 사용법
 
@@ -157,6 +174,101 @@ Roblox 기본 카메라 스크립트는 다음 프레임을 만들 때 `Camera.C
 1. `RenderPriority.Camera - 1`에서 지난 프레임의 **에임** CFrame을 되돌려 놓고,
 2. `RenderPriority.Camera + 1`에서 카메라 스크립트가 만든 에임을 읽어 바디캠 **시야**를 덮어씁니다.
 
+## FPSys 통합
+
+업로드한 `FPSys.rbxm`에는 클라이언트 모듈(카메라·룩 앵글·발소리 컴포넌트), `Spring`, `Maid`,
+서버 스크립트가 들어 있었습니다(`tools/rbxm_dump.py`로 꺼냈습니다). 기능과 설정값은 그대로 두고
+바디캠 위에서 함께 돌도록 다시 짰습니다. 설정은 `FPSys/Config.luau` 한 곳에 있습니다.
+
+| 컴포넌트 | 하는 일 | 바디캠과의 연결 |
+| --- | --- | --- |
+| `CameraEffects` | 걷기 흔들림, 숨쉬기, 좌우 이동 기울기, 마우스 룩 스웨이, 착지 충격, 모션 블러, **기울이기(새)**, **사격 카메라 흔들림(새)** | `BodycamController:addViewModifier`로 바디캠 시야 위에 얹힘 |
+| `LookAngles` | 다른 플레이어가 보는 방향으로 머리·상체·팔 Motor6D를 돌림, RemoteEvent로 복제 | 1인칭 판정에 바디캠 에임 사용 |
+| `Footsteps` | 바닥 재질별 발소리 | 로컬 캐릭터는 바디캠 보폭의 발 접지 시점에 소리를 냄 |
+| `FPSServer` | Humanoid에 `RealismHook` 태그, 룩 앵글 중계 | — |
+
+`Config.Overlap = "Auto"`(기본값)이면 바디캠이 이미 하는 움직임은 FPSys에서 끕니다.
+풋스텝 카메라가 켜져 있으면 FPSys 걷기 흔들림을, 바디캠 머리 롤이 켜져 있으면 좌우 기울기를 끕니다.
+둘 다 쓰려면 `"All"`로 바꾸세요.
+
+### 원본 FPSys에서 고친 문제
+
+- **룩 앵글이 전혀 동작하지 않았습니다.** 매 프레임 Motor6D를 돌리는 부분이
+  `-- Process rotator updates...` 주석만 있는 빈 루프였습니다. 이제 실제로 모터를 돌립니다.
+- **복제 인자 순서가 틀렸습니다.** 서버는 `(player, pitch, yaw)`를 보내는데 클라이언트는
+  `(pitch, yaw)`로 받아 플레이어 객체를 각도로 썼고, 모든 업데이트를 자기 캐릭터에 적용했습니다.
+  이제 보낸 플레이어의 캐릭터에 적용합니다.
+- **카메라 효과가 에임에 누적되었습니다.** RenderStepped에서 `Camera.CFrame`을 직접 곱해서
+  다음 프레임 카메라 스크립트가 그 값을 다시 읽었습니다. 이제 시야에만 적용됩니다.
+- 걷기 흔들림이 `Humanoid.CameraOffset`이라 사격 위치까지 흔들렸습니다. 이제 시야 오프셋입니다.
+- 착지 충격이 프레임 시간(`dt * 60`)에 비례해 프레임레이트마다 세기가 달랐습니다.
+- 리스폰하면 착지 감지(`StateChanged`)가 끊겼습니다.
+- 발소리가 상태가 바뀔 때마다 `while` 루프를 새로 띄워 루프가 쌓였고, 멈춰 있을 때 0으로 나눴습니다.
+- 없는 함수 `GetBaseSubjectPosition`을 부르는 코드가 있었습니다(호출되지 않아 드러나지 않았음). 제거했습니다.
+- 서버가 이벤트를 제한 없이 모두에게 중계했습니다. 플레이어당 0.1초 간격 제한과 무한대 값 거부를 넣었습니다.
+
+`Spring`과 `Maid`는 Quenty의 Nevermore Engine 모듈(MIT 라이선스)이라 헤더에 출처만 달고 그대로 두었습니다.
+
+## FPSController
+
+요청하신 두 Kinemation 저장소(`fps-animation-framework`, `scriptable-animation-system`)를 확인한 결과:
+
+- 두 저장소에는 **Unity 데모 스크립트만** 있습니다(C# 8개, 14개). 실제 프레임워크
+  (`KINEMATION.FPSAnimationFramework` 등: 반동 애니메이션, 반동 패턴, IK 모션 레이어, 룩 레이어,
+  카메라 흔들림)는 유니티 에셋 스토어 유료 패키지라 저장소에 없습니다. README도 패키지를 따로
+  가져오라고 안내합니다.
+- 두 저장소 모두 **라이선스 파일이 없습니다.** 라이선스가 없는 코드는 기본적으로 저작권자 외에 쓸 권리가 없습니다.
+
+그래서 C# 코드를 줄 단위로 옮기지 않았습니다. 데모가 보여 주는 **기능**을 기준으로 Luau 모듈을 새로 작성했습니다.
+게임 메커니즘 자체는 저작권 대상이 아니지만, 코드 표현은 대상입니다.
+
+| 모듈 | 기능 | 종류 |
+| --- | --- | --- |
+| `MovementStateMachine` | 대기·걷기·질주·공중·슬라이드, 서기·앉기·엎드리기, 보행 속도 간 부드러운 전환, 슬라이드 감속, 엎드리기 전환 중 입력 잠금, 앉은 채 점프 → 일어서기, 자세별 카메라 높이 | 순수 로직 |
+| `Weapon` | RPM 연사 속도, 자동·단발·점사, 탄창, 장전·꺼내기·넣기 시간, 스코프별 FOV 배율과 감도 | 순수 로직 |
+| `RecoilPattern` | 발당 위·옆 반동, 연사 누적, 첫 발 배율, 조준 배율, 사격 후 일부 복귀 | 순수 로직 |
+| `MovementController` | 상태 기계를 Humanoid에 적용(WalkSpeed, 슬라이드 이동, 앉은 상태 점프 금지, 일어설 공간 검사, 카메라 높이) | Roblox |
+| `WeaponController` | 사격 → 바디캠 사격 임펄스 + FPSys 흔들림 + 반동, 반동 → `kickAim`, 조준 FOV·감도, 무기 교체, 기울이기, 질주 중 사격·조준 금지 | Roblox |
+
+반동은 엔진의 스크립트 카메라 델타와 같은 방식으로 들어갑니다. `BodycamController:kickAim`이
+에임을 돌리고 바디캠 래그를 `rebase`하므로, 반동은 마우스 움직임으로 취급되지 않습니다(팔이 휙 돌지 않음).
+
+### 키 조작 (예제 `FPSClient`)
+
+| 키 | 동작 |
+| --- | --- |
+| WASD | 이동 |
+| Left Shift | 질주 |
+| C | 앉기 토글 |
+| Z | 엎드리기 토글 |
+| Left Ctrl | 슬라이드 (질주 중) |
+| Space | 점프 (앉음·엎드림에서는 일어서기) |
+| 마우스 오른쪽 | 조준 |
+| 마우스 왼쪽 | 사격 |
+| R | 장전 |
+| V | 발사 모드 변경 |
+| T | 다음 스코프 (조준 중) |
+| 1, 2 | 무기 선택 |
+| Q, E | 왼쪽·오른쪽 기울이기 |
+
+### 무기 정의
+
+```lua
+local Weapon = require(game.ReplicatedStorage.FPSController).Weapon
+local smg = Weapon.defaultConfig()
+smg.name = "SMG"
+smg.rpm = 850
+smg.modes = { "Auto", "Semi" }
+smg.magazine = 32
+smg.scopes = { { name = "Holo", zoom = 0.9, sensitivity = 0.9 } }
+smg.recoil.pitch = { 0.35, 0.55 }   -- 발당 위쪽 반동(도)
+smg.recoil.recovery = 0.6           -- 사격 후 되돌아오는 비율
+smg.profile = { pos = { x = 0.01, y = -0.01, z = 0 }, rot = { x = 0, y = 1, z = 0 } }  -- 바디캠 힙 오프셋
+```
+
+`onFire(fireCFrame, weapon)`이 발마다 불립니다. 명중 판정은 게임이 하고, **서버에서 검증해야 합니다.**
+`fireCFrame`은 에임(기울이기 포함)이라 화면 흔들림과 무관합니다.
+
 ## 검증
 
 `tools/golden/golden.cpp`가 원본 C++ 코드(`bodycam_simulation.cpp`, `bodycam_mouse_input.cpp`,
@@ -182,6 +294,18 @@ Roblox 기본 카메라 스크립트는 다음 프레임을 만들 때 `Camera.C
 나머지(데드존 래그, 리그 합성, 이동 관성, 설정, 게이트 속도, 좌표 변환, 어댑터)는
 `tests/unit.spec.luau`와 `tests/controller.spec.luau`의 단위 테스트로 확인합니다.
 어댑터 테스트는 Roblox 서비스(카메라, Humanoid, RunService, Raycast)를 목으로 대신합니다.
+
+FPSys와 FPSController는 다음으로 확인합니다.
+
+- `tests/fpscontroller.spec.luau`: 보행 속도 전환, 질주 조건, 앉기·일어서기 공간, 슬라이드, 엎드리기 잠금,
+  점프·착지 이벤트, 600 RPM 자동 사격 발수, 단발·점사, 탄창·장전, 스코프 FOV, 반동 상승과 복귀 비율.
+- `tests/fpsys.spec.luau`: 룩 앵글 계산과 모터 회전, 보낸 플레이어 캐릭터에 적용되는지, 재질 발소리,
+  숨쉬기·착지 충격·겹침 규칙, 기울이기 벽 정지, 사격 흔들림.
+- `tests/integration.spec.luau`: 세 패키지를 함께 띄운 목 클라이언트에서 걷기 발소리, 조준 FOV·감도,
+  자동 사격 반동이 에임을 실제로 올리고 복귀하는지, 질주 중 사격·조준 금지와 해제 후 조준 재개,
+  기울이기 사격 위치, 앉기 카메라 높이, 무기 교체 시간, 정리 후 남는 연결이 없는지.
+
+현재 전체 46개 테스트가 통과합니다.
 
 ### 테스트 실행
 
@@ -209,6 +333,10 @@ python3 roblox/tools/gen_footstep_data.py
 
 ## 한계와 주의할 점
 
+- 앉기와 엎드리기는 속도, 점프, 카메라 높이만 바꿉니다. 캐릭터 애니메이션은
+  `MovementController:onEvent`(`Crouched`, `ProneStarted`, `SlideStarted` 등)에 연결해 재생하세요.
+  Kinemation 프레임워크의 IK 모션 레이어와 애니메이션 블렌딩은 유료 패키지에 있어 포함하지 않았습니다.
+- `MovementController`와 바디캠 `applyMovementInertia`는 둘 다 이동을 바꾸므로 하나만 켜세요(예제는 전자).
 - **Roblox Studio에서 실행해 보지 않았습니다.** 모든 파일이 Luau 컴파일러를 통과하고,
   어댑터는 목 서비스로 테스트했지만, 실제 Studio 카메라 스크립트와의 상호작용과 체감 튜닝은
   Studio에서 확인해야 합니다. `luau-analyze` 타입 검사도 돌리지 않았습니다.
@@ -227,4 +355,9 @@ python3 roblox/tools/gen_footstep_data.py
 `FootstepCameraData.luau`는 원본 데이터 헤더에서 생성한 것입니다
 ([docs/PROVENANCE.md](../docs/PROVENANCE.md) 참고). Robux 수익이 나는 경험(게임 패스,
 개발자 상품, 프리미엄 페이아웃 등)에 넣기 전에 라이선스 적용 범위를 직접 확인하세요.
-```
+
+- `FPSys`: 업로드한 모델을 바탕으로 했습니다. 모델 자체의 사용 권리는 직접 확인하세요.
+  그 안의 `Spring`, `Maid`는 Nevermore Engine(MIT)입니다.
+- `FPSController`: 이 프로젝트에서 새로 작성했습니다. Kinemation 코드는 쓰지 않았습니다.
+  Kinemation의 실제 애니메이션 시스템이 필요하면 유니티 에셋 스토어 라이선스가 필요하고,
+  그 C# 코드를 Roblox용으로 옮겨 배포하려면 Kinemation의 허락이 따로 필요합니다.
