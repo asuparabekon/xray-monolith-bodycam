@@ -170,6 +170,11 @@ bool CRenderTarget::phase_scope_reference_sky()
     if (capture)
     {
         scope_reference_sky_draw(true);
+        // The sun source (the moon at night) is drawn after this hook, so the raw sky takes its own copy
+        u_setrt(rt_scope_reference_raw, nullptr, nullptr, baseZB);
+        set_viewport_size(HW.pContext, float(Width), float(Height));
+        svp_environment_render(g_pGamePersistent->Environment()).RenderSun(g_pGamePersistent->Environment());
+        svp_reference_unbind();
         if (!t_scope_reference_main_meter)
             t_scope_reference_main_meter.create("$user$svp_reference_main_meter");
         t_scope_reference_main_meter->surface_set(main->rt_LUM_pool[1]->pSurface);
